@@ -1,0 +1,62 @@
+# This workflow automates releases:
+#
+# a) Creates a new prerelease when you push a tag with a "v" prefix (version).
+# b) Creates/updates the "latest" prerelease when you push to the default branch.
+#
+# NOTE: SteemVM depends on cosmos/evm, whose secp256k1 bindings require cgo.
+# Builds therefore need CGO_ENABLED=1 and a C compiler, and cross-compilation
+# is not possible from a linux runner. Release targets are linux/amd64 only
+# (the platform validators and node operators run). Darwin builds, if ever
+# needed, require a separate native macos-latest job.
+
+on: push
+
+jobs:
+  might_release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Prepare Release Variables
+        id: vars
+        uses: ignite/cli/actions/release/vars@main
+
+      - name: Issue Release Assets
+        uses: ignite/cli/actions/cli@main
+        if: ${{ steps.vars.outputs.should_release == 'true' }}
+        with:
+          args: chain build --release --release.prefix ${{ steps.vars.outputs.tarball_prefix }} -t linux:amd64 -y
+        env:
+          DO_NOT_TRACK: 1
+          GOFLAGS: "-buildvcs=false"
+          CGO_ENABLED: "1"
+
+      - name: Delete the "latest" Release
+        if: ${{ steps.vars.outputs.is_release_type_latest == 'true' }}
+        run: |
+          gh release delete latest --yes || true
+          git push origin :refs/tags/latest || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the Release
+        uses: softprops/action-gh-release@v1
+        if: ${{ steps.vars.outputs.should_release == 'true' }}
+        with:
+          tag_name: ${{ steps.vars.outputs.tag_name }}
+          files: release/*
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

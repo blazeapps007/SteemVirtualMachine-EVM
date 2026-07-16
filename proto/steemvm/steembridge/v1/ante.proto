@@ -1,0 +1,14 @@
+syntax = "proto3";
+package steemvm.steembridge.v1;
+
+option go_package = "steemvm/x/steembridge/types";
+
+// FreeDepositCounter tracks, per validator, how many fee-exempt
+// MsgSubmitSteemDeposit transactions have been processed in the current
+// block, as a defense-in-depth cap independent of the stateful acceptance
+// checks. Height is used to lazily reset the counter on a new block without
+// an O(validators) BeginBlocker sweep.
+message FreeDepositCounter {
+  int64 height = 1;
+  uint64 count = 2;
+}

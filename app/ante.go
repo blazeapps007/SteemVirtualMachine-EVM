@@ -1,0 +1,36 @@
+package app
+
+import (
+	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/evm/ante"
+	evmante "github.com/cosmos/evm/ante"
+	antetypes "github.com/cosmos/evm/ante/types"
+	"github.com/ethereum/go-ethereum/common"
+)
+
+// setAnteHandler sets the ante handler for the application.
+func (app *App) setAnteHandler(txConfig client.TxConfig, maxGasWanted uint64) {
+	options := ante.HandlerOptions{
+		Cdc:                    app.appCodec,
+		AccountKeeper:          app.AuthKeeper,
+		BankKeeper:             app.BankKeeper,
+		ExtensionOptionChecker: antetypes.HasDynamicFeeExtensionOption,
+		EvmKeeper:              app.EVMKeeper,
+		FeegrantKeeper:         app.FeeGrantKeeper,
+		IBCKeeper:              app.IBCKeeper,
+		FeeMarketKeeper:        app.FeeMarketKeeper,
+		SignModeHandler:        txConfig.SignModeHandler(),
+		SigGasConsumer:         evmante.SigVerificationGasConsumer,
+		MaxTxGasWanted:         maxGasWanted,
+		PendingTxListener: func(hash common.Hash) {
+			for _, listener := range app.pendingTxListeners {
+				listener(hash)
+			}
+		},
+	}
+	if err := options.Validate(); err != nil {
+		panic(err)
+	}
+
+	app.SetAnteHandler(newSteembridgeAnteHandler(options, app.SteembridgeKeeper, app.StakingKeeper))
+}

@@ -1,0 +1,50 @@
+syntax = "proto3";
+package steemvm.steembridge.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/steembridge/types";
+
+// DestinationType is the derived destination account type for a deposit.
+enum DestinationType {
+  DESTINATION_TYPE_NONE = 0;
+  DESTINATION_TYPE_COSMOS = 1;
+  DESTINATION_TYPE_EVM = 2;
+}
+
+// DepositStatus is the lifecycle status of a deposit.
+enum DepositStatus {
+  DEPOSIT_STATUS_PENDING = 0;
+  DEPOSIT_STATUS_MINTED = 1;
+  DEPOSIT_STATUS_UNCLAIMABLE = 2;
+  DEPOSIT_STATUS_EXPIRED = 3;
+}
+
+// Confirmation is a single bonded validator's confirmation of a deposit.
+message Confirmation {
+  // validator_address is the bech32 operator (valoper) address of the confirming validator.
+  string validator_address = 1;
+  // timestamp is the SteemVM block time (unix seconds) the confirmation was recorded.
+  int64 timestamp = 2;
+}
+
+// Deposit defines the Deposit message.
+message Deposit {
+  uint64 id = 1;
+  string txid = 2;
+  uint32 op_index = 3;
+  uint64 steem_block = 4;
+  string steem_timestamp = 5;
+  string steem_sender = 6;
+  string gateway_account = 7;
+  uint64 amount_millisteem = 8;
+  string memo = 9;
+  string derived_destination = 10;
+  DestinationType destination_type = 11;
+  DepositStatus status = 12;
+  bool minted = 13;
+  uint64 minted_at = 14;
+  string mint_tx_hash = 15;
+  uint64 created_at = 16;
+  repeated Confirmation validator_confirmations = 17;
+}

@@ -1,0 +1,59 @@
+syntax = "proto3";
+package steemvm.steembridge.v1;
+
+import "steemvm/steembridge/v1/deposit.proto";
+
+option go_package = "steemvm/x/steembridge/types";
+
+// NameRegistrationStatus is the lifecycle status of a name registration.
+enum NameRegistrationStatus {
+  NAME_REGISTRATION_STATUS_PENDING = 0;
+  NAME_REGISTRATION_STATUS_AWAITING_CONFIRMATION = 1;
+  NAME_REGISTRATION_STATUS_ACTIVE = 2;
+  NAME_REGISTRATION_STATUS_UNCLAIMABLE = 3;
+  NAME_REGISTRATION_STATUS_EXPIRED = 4;
+  NAME_REGISTRATION_STATUS_SUPERSEDED = 5;
+}
+
+// NameRegistration is a validator-attested request to link a Steem account
+// name to a SteemVM address. It follows the same attestation pipeline as
+// bridge deposits (dedup by (txid, op_index), exact-fact matching, live
+// bonded-power threshold), but resolving does not mint: it moves the
+// registration to AWAITING_CONFIRMATION, and only a MsgConfirmName signed by
+// the memo-derived destination activates the link.
+message NameRegistration {
+  uint64 id = 1;
+  string txid = 2;
+  uint32 op_index = 3;
+  uint64 steem_block = 4;
+  string steem_timestamp = 5;
+  // steem_account is the Steem-side sender of the transfer — the name being linked.
+  string steem_account = 6;
+  string gateway_account = 7;
+  uint64 amount_millisteem = 8;
+  string memo = 9;
+  // derived_destination is set at threshold from the memo, in consensus.
+  string derived_destination = 10;
+  DestinationType destination_type = 11;
+  NameRegistrationStatus status = 12;
+  // created_at is the height of the first validator attestation.
+  uint64 created_at = 13;
+  // awaiting_since is the height the confirmation threshold was reached; the
+  // user-confirmation expiry window is measured from here, not created_at.
+  uint64 awaiting_since = 14;
+  // confirmed_at is the height MsgConfirmName activated the link.
+  uint64 confirmed_at = 15;
+  string confirm_tx_hash = 16;
+  repeated Confirmation validator_confirmations = 17;
+}
+
+// NameRecord is an active steem_account -> address link.
+message NameRecord {
+  string steem_account = 1;
+  // address is the bech32 form of the linked account (the same 20 bytes are
+  // addressable as a 0x EVM address).
+  string address = 2;
+  // registration_id is the NameRegistration whose confirmation created this link.
+  uint64 registration_id = 3;
+  uint64 linked_at = 4;
+}

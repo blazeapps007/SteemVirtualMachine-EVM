@@ -1,0 +1,13 @@
+syntax = "proto3";
+package steemvm.steemvm.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/steemvm/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "steemvm/x/steemvm/Params";
+  option (gogoproto.equal) = true;
+}

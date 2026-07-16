@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package steemvm.steembridge.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "steemvm/steembridge/v1/deposit.proto";
+import "steemvm/steembridge/v1/name_registration.proto";
+import "steemvm/steembridge/v1/params.proto";
+import "steemvm/steembridge/v1/withdrawal.proto";
+
+option go_package = "steemvm/x/steembridge/types";
+
+// GenesisState defines the steembridge module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  repeated Deposit deposit_list = 2 [(gogoproto.nullable) = false];
+  uint64 deposit_count = 3;
+  repeated Withdrawal withdrawal_list = 4 [(gogoproto.nullable) = false];
+  uint64 withdrawal_count = 5;
+  // total_minted_asteem is the cumulative amount of asteem minted by bridge-in deposits.
+  string total_minted_asteem = 6 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+  // total_burned_asteem is the cumulative amount of asteem burned by bridge-out withdrawals.
+  string total_burned_asteem = 7 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+  repeated NameRegistration name_registration_list = 8 [(gogoproto.nullable) = false];
+  uint64 name_registration_count = 9;
+  repeated NameRecord active_name_list = 10 [(gogoproto.nullable) = false];
+}

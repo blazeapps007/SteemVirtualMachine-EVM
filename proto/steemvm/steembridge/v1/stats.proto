@@ -1,0 +1,19 @@
+syntax = "proto3";
+package steemvm.steembridge.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/steembridge/types";
+
+// BridgeTotals holds the module's cumulative mint/burn statistics in
+// consensus state. net_outstanding is computed on read, not stored.
+message BridgeTotals {
+  string total_minted_asteem = 1 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+  string total_burned_asteem = 2 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+}

@@ -1,0 +1,153 @@
+validation: sovereign
+version: 1
+build:
+    # Ignite walks the whole tree for `package main` (it ignores Go's
+    # underscore-dir convention), so _BridgeInfra/main.go would otherwise
+    # make the build ambiguous.
+    main: cmd/steemvmd
+    proto:
+        path: proto
+accounts:
+    - name: blaze.apps
+      # Fixed mnemonic so the chain-creator account keeps the same address on
+      # every `ignite chain serve` init — genesis (steembridge name link
+      # below) references it. DEV ONLY: this mnemonic is public in the repo;
+      # never fund it on a real network.
+      mnemonic: "senior message find allow light seek cheap mention person word chalk equal thing labor mosquito crystal oven cart twist camera seek unfair tragic claim"
+      coins:
+        - 1000000000000000000000asteem      # 1,000 STEEM total supply
+client:
+    openapi:
+        path: docs/static/openapi.json
+        exclude_list: []
+default_denom: asteem
+validators:
+    - name: blaze.apps
+      bonded: 800000000000000000000asteem   # bonds 800, keeps 200 liquid for gas/gov deposits
+      config:
+        moniker: "blaze.apps"                # node's local display name (config.toml)
+        consensus:
+          timeout_commit: "6s"                 # ~6s blocks (= 2 Steem blocks)
+      gentx:
+        moniker: "blaze.apps"                # on-chain validator moniker (shown in query staking validators)
+        # Steem validator identity, mandatory for every validator: the ante gate
+        # (steembridgeValidatorGateDecorator) rejects create/edit-validator unless
+        # the moniker (above) is an ACTIVE name link owned by this operator's
+        # account AND Description.details embeds owner/active/posting=STM... keys.
+        # The moniker IS the Steem username (blaze.apps), so details holds only the
+        # three keys — blaze.apps's real Steem owner/active/posting public keys.
+        details: "owner=STM59ytBUdJ1DaSeFoz4GP5nBFiVBF2dpEDN4cHcR4wYFxWvE2ctR;active=STM5fvPvqwkwDTKXW1wsr7wPdeVXjetjvg1Wer8Zs7P24KFHht2Be;posting=STM5nr8yJLekbns9BNtx8FUxZTvphtfuNKVkTqCXswAjM6GTrQtdX"
+genesis:
+    app_state:
+
+        distribution:
+          params:
+            community_tax: "0.500000000000000000"
+
+        bank:
+            denom_metadata:
+                - description: "Bridged STEEM, the native gas token of SteemVM"
+                  denom_units:
+                      - denom: "asteem"
+                        exponent: 0
+                        aliases: ["attosteem"]
+                      - denom: "steem"
+                        exponent: 18
+                  base: "asteem"
+                  display: "steem"
+                  name: "Steem"
+                  symbol: "STEEM"
+        staking:
+            params:
+                bond_denom: "asteem"
+                unbonding_time: "2419200s"      # 28 days
+        mint:
+            params:
+                mint_denom: "asteem"
+                inflation_rate_change: "0.000000000000000000"
+                inflation_max: "0.000000000000000000"
+                inflation_min: "0.000000000000000000"
+                blocks_per_year: "5259600"      # 365.25d at 6s blocks
+        feemarket:
+            params:
+                no_base_fee: false
+                base_fee: "1000000000.000000000000000000"
+                min_gas_price: "1000000000.000000000000000000"
+                base_fee_change_denominator: 8
+                elasticity_multiplier: 2
+                enable_height: "0"
+                min_gas_multiplier: "0.500000000000000000"
+        evm:
+            params:
+                evm_denom: "asteem"
+                extended_denom_options:
+                    extended_denom: "asteem"
+                access_control:
+                    call:
+                        access_type: "ACCESS_TYPE_PERMISSIONLESS"
+                        access_control_list: []
+                    create:
+                        access_type: "ACCESS_TYPE_PERMISSIONLESS"
+                        access_control_list: []
+                evm_channels: []
+                extra_eips: []
+                history_serve_window: "8192"
+                active_static_precompiles:      # ⚠ conventional addresses — see note
+                    - "0x0000000000000000000000000000000000000400"   # bech32
+                    - "0x0000000000000000000000000000000000000800"   # staking
+                    - "0x0000000000000000000000000000000000000801"   # distribution
+                    - "0x0000000000000000000000000000000000000900"   # steembridge (confirmName/bridgeOut/name lookups)
+        gov:
+            params:
+                min_deposit:
+                    - denom: "asteem"
+                      amount: "10000000000000000000"    # 10 STEEM
+                expedited_min_deposit:
+                    - denom: "asteem"
+                      amount: "50000000000000000000"    # 50 STEEM
+        steembridge:
+            params:
+                bridge_enabled: true
+                bridge_out_enabled: true
+                gateway_account: "blaze.apps"
+                bridge_confirmation_threshold: "0.666666666666666667"   # >2/3 bonded power, BFT-style
+                minimum_bridge_amount: "0"        # millisteem; 0 = no minimum
+                maximum_bridge_amount: "0"         # millisteem; 0 = no maximum
+                deposit_timeout_blocks: "100800"    # ~7 days at 6s blocks
+                name_service_enabled: true
+                name_registration_min_millisteem: "1"    # 0.001 STEEM
+                name_pending_timeout_blocks: "100800"     # ~7 days at 6s blocks, per phase
+                relayer_start_block: "107796345"           # Steem LIB at launch — shared relayer scan anchor
+            # Genesis-verified name link: Steem account "blaze.apps" (the
+            # chain creator / gateway operator) is pre-linked to the
+            # blaze.apps wallet defined in `accounts:` above (fixed mnemonic,
+            # eth_secp256k1 @ m/44'/60'/0'/0/0 -> stable address
+            # steem1l6p4lh7plepjqv2muhuk6m8k2envnvv9utknlu, and the SAME
+            # account in MetaMask: 0xfE835FdfC1fe4320315be5f96D6Cf65666c9B185).
+            # The ACTIVE registration record below is the audit trail the
+            # active name points at; txid all-zeros marks it as
+            # genesis-seeded, not a real Steem transfer.
+            name_registration_count: "1"
+            name_registration_list:
+                - id: "0"
+                  txid: "0000000000000000000000000000000000000000"
+                  op_index: 0
+                  steem_block: "0"
+                  steem_timestamp: "genesis"
+                  steem_account: "blaze.apps"
+                  gateway_account: "blaze.apps"
+                  amount_millisteem: "1"
+                  memo: "steem1l6p4lh7plepjqv2muhuk6m8k2envnvv9utknlu"
+                  derived_destination: "steem1l6p4lh7plepjqv2muhuk6m8k2envnvv9utknlu"
+                  destination_type: "DESTINATION_TYPE_COSMOS"
+                  status: "NAME_REGISTRATION_STATUS_ACTIVE"
+                  created_at: "0"
+                  awaiting_since: "0"
+                  confirmed_at: "0"
+                  confirm_tx_hash: ""
+                  validator_confirmations: []
+            active_name_list:
+                - steem_account: "blaze.apps"
+                  address: "steem1l6p4lh7plepjqv2muhuk6m8k2envnvv9utknlu"
+                  registration_id: "0"
+                  linked_at: "0"

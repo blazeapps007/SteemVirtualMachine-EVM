@@ -1,0 +1,42 @@
+syntax = "proto3";
+package steemvm.steembridge.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/steembridge/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "steemvm/x/steembridge/Params";
+  option (gogoproto.equal) = true;
+
+  bool bridge_enabled = 1;
+  bool bridge_out_enabled = 2;
+  string gateway_account = 3;
+  string bridge_confirmation_threshold = 4 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  uint64 minimum_bridge_amount = 5;
+  uint64 maximum_bridge_amount = 6;
+  uint64 deposit_timeout_blocks = 7;
+  // name_service_enabled gates the Steem name-service flow (MsgSubmitNameRegistration /
+  // MsgConfirmName). Independent of bridge_enabled; both features share gateway_account.
+  bool name_service_enabled = 8;
+  // name_registration_min_millisteem is the minimum Steem-side payment for a
+  // name registration, in millisteem (1 = 0.001 STEEM).
+  uint64 name_registration_min_millisteem = 9;
+  // name_pending_timeout_blocks bounds both attestation (PENDING) and user
+  // confirmation (AWAITING_CONFIRMATION) phases; the window restarts when the
+  // registration reaches threshold.
+  uint64 name_pending_timeout_blocks = 10;
+  // relayer_start_block is the Steem block from which validator relayers
+  // begin scanning on first run, giving every validator the same anchor
+  // regardless of when its node first starts (typically the Steem last
+  // irreversible block recorded at chain launch). 0 means each relayer
+  // starts at Steem's LIB when it first boots. Advisory for relayers only —
+  // consensus logic never reads it. Governance may move it forward to spare
+  // newly joining validators a long backfill.
+  uint64 relayer_start_block = 11;
+}

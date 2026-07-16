@@ -1,0 +1,43 @@
+services:
+  steemvm:
+    image: golang:1.26.5-trixie
+    container_name: steemvm-node
+    working_dir: /workspace
+    environment:
+      GOPATH: /root/go
+      CGO_ENABLED: "1"
+    volumes:
+      - .:/workspace
+      - steemvm-home:/root/.steemvm
+      - gopath:/root/go
+      - go-build-cache:/root/.cache/go-build
+    ports:
+      - "8545:8545"   # EVM JSON-RPC (http)
+      - "8546:8546"   # EVM JSON-RPC (websocket)
+      - "26656:26656" # CometBFT p2p
+      - "26657:26657" # CometBFT RPC
+      - "1317:1317"   # Cosmos REST API
+      - "9090:9090"   # gRPC
+    command:
+      - sh
+      - -ec
+      - |
+        git config --global --add safe.directory /workspace
+        make install
+        if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
+          /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm
+        fi
+        rm -f /root/.steemvm/config/app.toml /root/.steemvm/config/config.toml /root/.steemvm/config/client.toml /root/.steemvm/config/genesis.json
+        cp /workspace/Instructions/app.toml /workspace/Instructions/config.toml /workspace/Instructions/client.toml /root/.steemvm/config/
+        cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
+        exec /root/go/bin/steemvmd start \
+          --home /root/.steemvm \
+          --json-rpc.enable \
+          --json-rpc.address "0.0.0.0:8545" \
+          --json-rpc.api "eth,net,web3,txpool,debug" \
+          --json-rpc.enable-indexer
+
+volumes:
+  steemvm-home:
+  gopath:
+  go-build-cache:

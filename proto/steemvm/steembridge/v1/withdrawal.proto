@@ -1,0 +1,30 @@
+syntax = "proto3";
+package steemvm.steembridge.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/steembridge/types";
+
+// WithdrawalStatus is the lifecycle status of a withdrawal.
+enum WithdrawalStatus {
+  WITHDRAWAL_STATUS_PENDING = 0;
+  WITHDRAWAL_STATUS_RELAYED = 1;
+  WITHDRAWAL_STATUS_COMPLETED = 2;
+  WITHDRAWAL_STATUS_FAILED = 3;
+}
+
+// Withdrawal defines the Withdrawal message.
+message Withdrawal {
+  uint64 id = 1;
+  string sender = 2;
+  string destination_steem_account = 3;
+  string amount_asteem = 4 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+  uint64 amount_millisteem = 5;
+  string memo = 6;
+  string burn_tx_hash = 7;
+  WithdrawalStatus status = 8;
+  uint64 created_at = 9;
+}

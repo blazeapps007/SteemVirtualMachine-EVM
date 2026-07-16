@@ -1,0 +1,114 @@
+app-db-backend = ""
+halt-height = 0
+halt-time = 0
+iavl-cache-size = 781250
+iavl-disable-fastnode = false
+index-events = []
+inter-block-cache = true
+min-retain-blocks = 0
+minimum-gas-prices = "0asteem"
+pruning = "default"
+pruning-interval = "0"
+pruning-keep-recent = "0"
+query-gas-limit = "0"
+
+[api]
+  address = "tcp://0.0.0.0:1317"
+  enable = true
+  enabled-unsafe-cors = true
+  max-open-connections = 1000
+  rpc-max-body-bytes = 1000000
+  rpc-read-timeout = 10
+  rpc-write-timeout = 0
+  swagger = false
+
+[evm]
+  cache-preimage = false
+  evm-chain-id = 8163
+  geth-metrics-address = "127.0.0.1:8100"
+  max-tx-gas-wanted = 0
+  min-tip = 0
+  tracer = ""
+
+  [evm.mempool]
+    account-queue = 64
+    account-slots = 16
+    global-queue = 1024
+    global-slots = 5120
+    lifetime = "3h0m0s"
+    price-bump = 10
+    price-limit = 1
+
+[grpc]
+  address = "localhost:9090"
+  enable = true
+  historical-grpc-address-block-range = "{}"
+  max-recv-msg-size = "10485760"
+  max-send-msg-size = "2147483647"
+
+[grpc-web]
+  enable = true
+
+[json-rpc]
+  address = "127.0.0.1:8545"
+  allow-insecure-unlock = true
+  allow-unprotected-txs = false
+  api = "eth,net,web3"
+  batch-request-limit = 1000
+  batch-response-max-size = 25000000
+  block-range-cap = 10000
+  enable = false
+  enable-indexer = false
+  enable-profiling = false
+  evm-timeout = "5s"
+  feehistory-cap = 100
+  filter-cap = 200
+  gas-cap = 25000000
+  http-idle-timeout = "2m0s"
+  http-timeout = "30s"
+  logs-cap = 10000
+  max-open-connections = 0
+  metrics-address = "127.0.0.1:6065"
+  txfee-cap = 1
+  ws-address = "127.0.0.1:8546"
+  ws-origins = ["127.0.0.1", "localhost"]
+
+[mempool]
+  max-txs = -1
+
+[rpc]
+  cors_allowed_origins = ["*"]
+
+[state-sync]
+  snapshot-interval = 0
+  snapshot-keep-recent = 2
+
+[steem-relayer]
+  key-name = "your_wallet_name"
+  max-blocks-per-poll = 25
+  poll-interval = "3s"
+  start-block = 0
+  steem-rpc-url = "https://api.moecki.online"
+
+[streaming]
+
+  [streaming.abci]
+    keys = []
+    plugin = ""
+    stop-node-on-err = true
+
+[telemetry]
+  datadog-hostname = ""
+  enable-hostname = false
+  enable-hostname-label = false
+  enable-service-label = false
+  enabled = false
+  global-labels = []
+  metrics-sink = ""
+  prometheus-retention-time = 0
+  service-name = ""
+  statsd-addr = ""
+
+[tls]
+  certificate-path = ""
+  key-path = ""

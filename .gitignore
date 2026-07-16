@@ -1,0 +1,23 @@
+vue/node_modules
+vue/dist
+release/
+.idea/
+.vscode/
+.DS_Store
+*.dot
+*.log
+*.ign
+config.yml
+config.yml_backup
+
+# AI assistant / tooling artifacts
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.cursor/
+.cursorrules
+.aider*
+.windsurfrules
+.specstory/
+.github/copilot-instructions.md

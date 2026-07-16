@@ -1,0 +1,333 @@
+syntax = "proto3";
+
+package steemvm.steembridge.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "steemvm/steembridge/v1/deposit.proto";
+import "steemvm/steembridge/v1/name_registration.proto";
+import "steemvm/steembridge/v1/params.proto";
+import "steemvm/steembridge/v1/withdrawal.proto";
+
+option go_package = "steemvm/x/steembridge/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/params";
+  }
+
+  // ListDeposit Queries a list of Deposit items.
+  rpc GetDeposit(QueryGetDepositRequest) returns (QueryGetDepositResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/deposit/{id}";
+  }
+
+  // ListDeposit defines the ListDeposit RPC.
+  rpc ListDeposit(QueryAllDepositRequest) returns (QueryAllDepositResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/deposit";
+  }
+
+  // ListWithdrawal Queries a list of Withdrawal items.
+  rpc GetWithdrawal(QueryGetWithdrawalRequest) returns (QueryGetWithdrawalResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/withdrawal/{id}";
+  }
+
+  // ListWithdrawal defines the ListWithdrawal RPC.
+  rpc ListWithdrawal(QueryAllWithdrawalRequest) returns (QueryAllWithdrawalResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/withdrawal";
+  }
+
+  // PendingDeposits Queries a list of PendingDeposits items.
+  rpc PendingDeposits(QueryPendingDepositsRequest) returns (QueryPendingDepositsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/pending_deposits";
+  }
+
+  // MintedDeposits Queries a list of MintedDeposits items.
+  rpc MintedDeposits(QueryMintedDepositsRequest) returns (QueryMintedDepositsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/minted_deposits";
+  }
+
+  // PendingWithdrawals Queries a list of PendingWithdrawals items.
+  rpc PendingWithdrawals(QueryPendingWithdrawalsRequest) returns (QueryPendingWithdrawalsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/pending_withdrawals";
+  }
+
+  // DepositByTxid Queries a list of DepositByTxid items.
+  rpc DepositByTxid(QueryDepositByTxidRequest) returns (QueryDepositByTxidResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/deposit_by_txid/{txid}/{op_index}";
+  }
+
+  // BridgeStatistics Queries a list of BridgeStatistics items.
+  rpc BridgeStatistics(QueryBridgeStatisticsRequest) returns (QueryBridgeStatisticsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/bridge_statistics";
+  }
+
+  // ResolveName resolves an active Steem account name link to its address.
+  rpc ResolveName(QueryResolveNameRequest) returns (QueryResolveNameResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/name/{steem_account}";
+  }
+
+  // NamesByAddress lists active name links owned by an address.
+  rpc NamesByAddress(QueryNamesByAddressRequest) returns (QueryNamesByAddressResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/names_by_address/{address}";
+  }
+
+  // NameRegistration queries a name registration by id.
+  rpc NameRegistration(QueryNameRegistrationRequest) returns (QueryNameRegistrationResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/name_registration/{id}";
+  }
+
+  // NameRegistrationByTxid queries a name registration by its Steem (txid, op_index) key.
+  rpc NameRegistrationByTxid(QueryNameRegistrationByTxidRequest) returns (QueryNameRegistrationByTxidResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/name_registration_by_txid/{txid}/{op_index}";
+  }
+
+  // NameRegistrationsByAccount lists all registrations ever submitted for a Steem account.
+  rpc NameRegistrationsByAccount(QueryNameRegistrationsByAccountRequest) returns (QueryNameRegistrationsByAccountResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/name_registrations_by_account/{steem_account}";
+  }
+
+  // PendingNameRegistrations lists registrations still accumulating validator attestations.
+  rpc PendingNameRegistrations(QueryPendingNameRegistrationsRequest) returns (QueryPendingNameRegistrationsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/pending_name_registrations";
+  }
+
+  // AwaitingNameRegistrations lists registrations awaiting the destination's confirmation.
+  rpc AwaitingNameRegistrations(QueryAwaitingNameRegistrationsRequest) returns (QueryAwaitingNameRegistrationsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/awaiting_name_registrations";
+  }
+
+  // AwaitingNameRegistrationsByDestination lists registrations a given address can confirm.
+  rpc AwaitingNameRegistrationsByDestination(QueryAwaitingNameRegistrationsByDestinationRequest) returns (QueryAwaitingNameRegistrationsByDestinationResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/awaiting_name_registrations_by_destination/{address}";
+  }
+
+  // ValidatorIdentity returns the Steem identity embedded in a validator's staking Description.
+  rpc ValidatorIdentity(QueryValidatorIdentityRequest) returns (QueryValidatorIdentityResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/validator_identity/{validator_address}";
+  }
+}
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// QueryGetDepositRequest defines the QueryGetDepositRequest message.
+message QueryGetDepositRequest {
+  uint64 id = 1;
+}
+
+// QueryGetDepositResponse defines the QueryGetDepositResponse message.
+message QueryGetDepositResponse {
+  Deposit deposit = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllDepositRequest defines the QueryAllDepositRequest message.
+message QueryAllDepositRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllDepositResponse defines the QueryAllDepositResponse message.
+message QueryAllDepositResponse {
+  repeated Deposit deposit = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetWithdrawalRequest defines the QueryGetWithdrawalRequest message.
+message QueryGetWithdrawalRequest {
+  uint64 id = 1;
+}
+
+// QueryGetWithdrawalResponse defines the QueryGetWithdrawalResponse message.
+message QueryGetWithdrawalResponse {
+  Withdrawal withdrawal = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllWithdrawalRequest defines the QueryAllWithdrawalRequest message.
+message QueryAllWithdrawalRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllWithdrawalResponse defines the QueryAllWithdrawalResponse message.
+message QueryAllWithdrawalResponse {
+  repeated Withdrawal withdrawal = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryPendingDepositsRequest defines the QueryPendingDepositsRequest message.
+message QueryPendingDepositsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryPendingDepositsResponse defines the QueryPendingDepositsResponse message.
+message QueryPendingDepositsResponse {
+  repeated Deposit deposits = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryMintedDepositsRequest defines the QueryMintedDepositsRequest message.
+message QueryMintedDepositsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryMintedDepositsResponse defines the QueryMintedDepositsResponse message.
+message QueryMintedDepositsResponse {
+  repeated Deposit deposits = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryPendingWithdrawalsRequest defines the QueryPendingWithdrawalsRequest message.
+message QueryPendingWithdrawalsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryPendingWithdrawalsResponse defines the QueryPendingWithdrawalsResponse message.
+message QueryPendingWithdrawalsResponse {
+  repeated Withdrawal withdrawals = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryDepositByTxidRequest defines the QueryDepositByTxidRequest message.
+message QueryDepositByTxidRequest {
+  string txid = 1;
+  uint32 op_index = 2;
+}
+
+// QueryDepositByTxidResponse defines the QueryDepositByTxidResponse message.
+message QueryDepositByTxidResponse {
+  Deposit deposit = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryResolveNameRequest defines the QueryResolveNameRequest message.
+message QueryResolveNameRequest {
+  string steem_account = 1;
+}
+
+// QueryResolveNameResponse defines the QueryResolveNameResponse message.
+message QueryResolveNameResponse {
+  NameRecord name = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryValidatorIdentityRequest is request type for the Query/ValidatorIdentity RPC method.
+message QueryValidatorIdentityRequest {
+  // validator_address accepts the operator (steemvaloper...), account
+  // (steem1...), or 0x EVM form — all map to the same validator.
+  string validator_address = 1;
+}
+
+// QueryValidatorIdentityResponse holds the Steem identity parsed from the
+// validator's Description.details.
+message QueryValidatorIdentityResponse {
+  string steem_username = 1;
+  string owner_pubkey = 2;
+  string active_pubkey = 3;
+  string posting_pubkey = 4;
+}
+
+// QueryNamesByAddressRequest defines the QueryNamesByAddressRequest message.
+message QueryNamesByAddressRequest {
+  string address = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+// QueryNamesByAddressResponse defines the QueryNamesByAddressResponse message.
+message QueryNamesByAddressResponse {
+  repeated NameRecord names = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryNameRegistrationRequest defines the QueryNameRegistrationRequest message.
+message QueryNameRegistrationRequest {
+  uint64 id = 1;
+}
+
+// QueryNameRegistrationResponse defines the QueryNameRegistrationResponse message.
+message QueryNameRegistrationResponse {
+  NameRegistration registration = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryNameRegistrationByTxidRequest defines the QueryNameRegistrationByTxidRequest message.
+message QueryNameRegistrationByTxidRequest {
+  string txid = 1;
+  uint32 op_index = 2;
+}
+
+// QueryNameRegistrationByTxidResponse defines the QueryNameRegistrationByTxidResponse message.
+message QueryNameRegistrationByTxidResponse {
+  NameRegistration registration = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryNameRegistrationsByAccountRequest defines the QueryNameRegistrationsByAccountRequest message.
+message QueryNameRegistrationsByAccountRequest {
+  string steem_account = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+// QueryNameRegistrationsByAccountResponse defines the QueryNameRegistrationsByAccountResponse message.
+message QueryNameRegistrationsByAccountResponse {
+  repeated NameRegistration registrations = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryPendingNameRegistrationsRequest defines the QueryPendingNameRegistrationsRequest message.
+message QueryPendingNameRegistrationsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryPendingNameRegistrationsResponse defines the QueryPendingNameRegistrationsResponse message.
+message QueryPendingNameRegistrationsResponse {
+  repeated NameRegistration registrations = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryAwaitingNameRegistrationsRequest defines the QueryAwaitingNameRegistrationsRequest message.
+message QueryAwaitingNameRegistrationsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAwaitingNameRegistrationsResponse defines the QueryAwaitingNameRegistrationsResponse message.
+message QueryAwaitingNameRegistrationsResponse {
+  repeated NameRegistration registrations = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryAwaitingNameRegistrationsByDestinationRequest defines the QueryAwaitingNameRegistrationsByDestinationRequest message.
+message QueryAwaitingNameRegistrationsByDestinationRequest {
+  string address = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+// QueryAwaitingNameRegistrationsByDestinationResponse defines the QueryAwaitingNameRegistrationsByDestinationResponse message.
+message QueryAwaitingNameRegistrationsByDestinationResponse {
+  repeated NameRegistration registrations = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryBridgeStatisticsRequest defines the QueryBridgeStatisticsRequest message.
+message QueryBridgeStatisticsRequest {}
+
+// QueryBridgeStatisticsResponse defines the QueryBridgeStatisticsResponse message.
+message QueryBridgeStatisticsResponse {
+  string total_minted_asteem = 1 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+  string total_burned_asteem = 2 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+  string net_outstanding = 3 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false
+  ];
+}
