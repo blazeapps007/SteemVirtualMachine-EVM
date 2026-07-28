@@ -222,7 +222,14 @@ func (d steembridgeFeeExemptionDecorator) qualifiesAsValidatorAttestation(ctx sd
 		return false
 	}
 
-	if err := validateAcceptance(); err != nil {
+	// A benign-redundant outcome (the deposit/registration was already
+	// resolved, or this validator already confirmed it — see
+	// steembridgetypes.IsBenignAttestationError) still qualifies for the fee
+	// exemption: the message will be a harmless no-op success at delivery, so
+	// the zero-fee attestation tx must not be rejected here for lack of a fee.
+	// Real rejections (bridge disabled, wrong gateway, fact mismatch) are not
+	// benign and fall through to the normal fee path.
+	if err := validateAcceptance(); err != nil && !steembridgetypes.IsBenignAttestationError(err) {
 		return false
 	}
 

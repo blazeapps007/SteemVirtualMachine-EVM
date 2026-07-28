@@ -128,7 +128,7 @@ func TestBridgeOut_HappyPath(t *testing.T) {
 	// Withdrawal 0 recorded PENDING.
 	withdrawal, err := f.keeper.Withdrawal.Get(f.ctx, 0)
 	require.NoError(t, err)
-	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_PENDING, withdrawal.Status)
+	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED, withdrawal.Status)
 	require.Equal(t, "bob", withdrawal.DestinationSteemAccount)
 	require.Equal(t, uint64(1000), withdrawal.AmountMillisteem)
 

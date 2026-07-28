@@ -9,6 +9,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	erc20 "github.com/cosmos/evm/x/erc20"
+	erc20v2 "github.com/cosmos/evm/x/erc20/v2"
 	icamodule "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts"
 	icacontroller "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller"
 	icacontrollerkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/keeper"
@@ -99,10 +101,17 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 		govModuleAddr,
 	)
 
-	// create IBC module from bottom to top of stack
+	// create IBC module from bottom to top of stack.
+	//
+	// The transfer stacks are wrapped by the erc20 middleware so that incoming
+	// IBC vouchers are auto-registered as ERC20 (dynamic precompile) and
+	// converted on receipt. &app.Erc20Keeper is deliberate: this runs before
+	// registerEVMModules creates the erc20 keeper, and the pointer-to-field
+	// sees that later assignment; the middleware is only invoked at packet
+	// time, long after both are wired. (v2's constructor takes args reversed.)
 	var (
-		transferStack      porttypes.IBCModule = ibctransfer.NewIBCModule(app.TransferKeeper)
-		transferStackV2    ibcapi.IBCModule    = ibctransferv2.NewIBCModule(app.TransferKeeper)
+		transferStack      porttypes.IBCModule = erc20.NewIBCMiddleware(&app.Erc20Keeper, ibctransfer.NewIBCModule(app.TransferKeeper))
+		transferStackV2    ibcapi.IBCModule    = erc20v2.NewIBCMiddleware(ibctransferv2.NewIBCModule(app.TransferKeeper), &app.Erc20Keeper)
 		icaControllerStack porttypes.IBCModule = icacontroller.NewIBCMiddleware(app.ICAControllerKeeper)
 		icaHostStack       porttypes.IBCModule = icahost.NewIBCModule(app.ICAHostKeeper)
 	)

@@ -151,11 +151,12 @@ func (c *SteemClient) FetchBlocks(from, to uint64) ([]NumberedBlock, error) {
 
 // ExtractGatewayTransfers scans a block for STEEM transfer operations whose
 // recipient is the gateway account. Non-transfer operations, transfers to
-// other accounts, and non-STEEM amounts (SBD) are skipped. OpIndex is the
-// operation's index within its transaction, matching the module's
+// other accounts, and amounts not denominated in the bridgeable symbol
+// (mainnet "STEEM", testnet "TESTS"; SBD/TBD are skipped) are ignored. OpIndex
+// is the operation's index within its transaction, matching the module's
 // (txid, op_index) dedup key. The block's timestamp string is used verbatim
 // so all validators submit byte-identical facts.
-func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway string) []Transfer {
+func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, symbol string) []Transfer {
 	if block == nil {
 		return nil
 	}
@@ -187,7 +188,7 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway string)
 			if op.To != gateway {
 				continue
 			}
-			amount, ok := ParseSteemAmount(op.Amount)
+			amount, ok := ParseSteemAmount(op.Amount, symbol)
 			if !ok {
 				continue
 			}
@@ -206,12 +207,14 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway string)
 }
 
 // ParseSteemAmount converts a Steem asset string like "70.561 STEEM" into
-// millisteem (70561). Only the STEEM symbol qualifies; SBD/VESTS and
-// malformed amounts return ok=false. Parsing is integer-only — floats would
-// risk validator-to-validator divergence.
-func ParseSteemAmount(amount string) (millisteem uint64, ok bool) {
+// millisteem (70561). Only the given bridgeable symbol qualifies (mainnet
+// "STEEM", testnet "TESTS"); other symbols (SBD/TBD/VESTS) and malformed
+// amounts return ok=false. Parsing is integer-only — floats would risk
+// validator-to-validator divergence. The asset has 3 decimal places on both
+// mainnet and testnet, so the scale is unchanged.
+func ParseSteemAmount(amount, symbol string) (millisteem uint64, ok bool) {
 	parts := strings.Split(strings.TrimSpace(amount), " ")
-	if len(parts) != 2 || parts[1] != "STEEM" {
+	if len(parts) != 2 || parts[1] != symbol {
 		return 0, false
 	}
 

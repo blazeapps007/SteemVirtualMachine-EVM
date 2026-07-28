@@ -14,29 +14,36 @@ import (
 func TestParseSteemAmount(t *testing.T) {
 	tests := []struct {
 		in     string
+		symbol string
 		want   uint64
 		wantOK bool
 	}{
-		{"70.561 STEEM", 70561, true},
-		{"0.001 STEEM", 1, true},
-		{"1 STEEM", 1000, true},
-		{"1.5 STEEM", 1500, true},
-		{"5538.235 STEEM", 5538235, true},
-		{"  1.000 STEEM  ", 1000, true},
-		{"0.000 STEEM", 0, true}, // zero parses; the chain rejects it
-		{"1.000 SBD", 0, false},
-		{"1.000000 VESTS", 0, false},
-		{"1.2345 STEEM", 0, false}, // more than 3 decimals
-		{"STEEM", 0, false},
-		{"", 0, false},
-		{". STEEM", 0, false},
-		{"-1.000 STEEM", 0, false},
-		{"1,000.000 STEEM", 0, false},
-		{"1.0e3 STEEM", 0, false},
+		{"70.561 STEEM", "STEEM", 70561, true},
+		{"0.001 STEEM", "STEEM", 1, true},
+		{"1 STEEM", "STEEM", 1000, true},
+		{"1.5 STEEM", "STEEM", 1500, true},
+		{"5538.235 STEEM", "STEEM", 5538235, true},
+		{"  1.000 STEEM  ", "STEEM", 1000, true},
+		{"0.000 STEEM", "STEEM", 0, true}, // zero parses; the chain rejects it
+		{"1.000 SBD", "STEEM", 0, false},
+		{"1.000000 VESTS", "STEEM", 0, false},
+		{"1.2345 STEEM", "STEEM", 0, false}, // more than 3 decimals
+		{"STEEM", "STEEM", 0, false},
+		{"", "STEEM", 0, false},
+		{". STEEM", "STEEM", 0, false},
+		{"-1.000 STEEM", "STEEM", 0, false},
+		{"1,000.000 STEEM", "STEEM", 0, false},
+		{"1.0e3 STEEM", "STEEM", 0, false},
+		// Steem testnet: bridgeable symbol is TESTS; TBD (testnet SBD) is
+		// ignored, and mainnet "STEEM" no longer qualifies when watching testnet.
+		{"12.345 TESTS", "TESTS", 12345, true},
+		{"1 TESTS", "TESTS", 1000, true},
+		{"1.000 TBD", "TESTS", 0, false},
+		{"1.000 STEEM", "TESTS", 0, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {
-			got, ok := ParseSteemAmount(tc.in)
+			got, ok := ParseSteemAmount(tc.in, tc.symbol)
 			require.Equal(t, tc.wantOK, ok)
 			if ok {
 				require.Equal(t, tc.want, got)
@@ -129,7 +136,7 @@ func TestExtractGatewayTransfers(t *testing.T) {
 	var block *steemBlock
 	require.NoError(t, json.Unmarshal([]byte(blockFixture), &block))
 
-	transfers := ExtractGatewayTransfers(107795182, block, "blaze.apps")
+	transfers := ExtractGatewayTransfers(107795182, block, "blaze.apps", "STEEM")
 	require.Len(t, transfers, 2)
 
 	first := transfers[0]
@@ -149,7 +156,7 @@ func TestExtractGatewayTransfers(t *testing.T) {
 }
 
 func TestExtractGatewayTransfers_TxidFallbackAndNilBlock(t *testing.T) {
-	require.Nil(t, ExtractGatewayTransfers(1, nil, "blaze.apps"))
+	require.Nil(t, ExtractGatewayTransfers(1, nil, "blaze.apps", "STEEM"))
 
 	// No per-tx transaction_id: fall back to the block-level list.
 	raw := `{
@@ -161,7 +168,7 @@ func TestExtractGatewayTransfers_TxidFallbackAndNilBlock(t *testing.T) {
 	}`
 	var block *steemBlock
 	require.NoError(t, json.Unmarshal([]byte(raw), &block))
-	transfers := ExtractGatewayTransfers(2, block, "gw")
+	transfers := ExtractGatewayTransfers(2, block, "gw", "STEEM")
 	require.Len(t, transfers, 1)
 	require.Equal(t, "aabbccddeeff00112233445566778899aabbccdd", transfers[0].Txid)
 }

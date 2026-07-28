@@ -117,7 +117,7 @@ func (k Keeper) setDepositStatus(ctx context.Context, deposit *types.Deposit, ne
 func (k Keeper) resolveDeposit(ctx context.Context, deposit *types.Deposit, params types.Params) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	destAddr, destType, ok := DeriveDestination(deposit.Memo)
+	destAddr, destType, ok := types.DeriveDestination(deposit.Memo)
 
 	withinRange := true
 	if params.MinimumBridgeAmount != 0 && deposit.AmountMillisteem < params.MinimumBridgeAmount {

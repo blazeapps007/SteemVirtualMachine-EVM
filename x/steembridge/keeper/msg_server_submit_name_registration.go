@@ -39,10 +39,17 @@ func (k msgServer) SubmitNameRegistration(ctx context.Context, msg *types.MsgSub
 	}
 
 	// All read-only acceptance rules (enabled, gateway, minimum amount,
-	// duplicate attestation, resolved key) live in the shared validator; the
-	// mismatch case is re-detected below because it must be a benign
-	// non-error outcome rather than a rejection.
+	// duplicate attestation, resolved key) live in the shared validator. Two
+	// classes of non-nil result are NOT hard rejections:
+	//   - ErrRegistrationMismatch is re-detected below as a benign no-op event.
+	//   - already-resolved / duplicate-confirmation (IsBenignAttestationError)
+	//     are the natural outcome of validators racing to attest the same
+	//     transfer; succeed silently so the redundant zero-fee attestation
+	//     does not fail.
 	if err := k.ValidateNameRegistrationAcceptance(ctx, msg); err != nil && !errors.Is(err, types.ErrRegistrationMismatch) {
+		if types.IsBenignAttestationError(err) {
+			return &types.MsgSubmitNameRegistrationResponse{}, nil
+		}
 		return nil, err
 	}
 

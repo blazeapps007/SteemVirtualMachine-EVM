@@ -7,7 +7,6 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
-	"steemvm/x/steembridge/keeper"
 	"steemvm/x/steembridge/types"
 )
 
@@ -131,7 +130,7 @@ func TestDeriveDestination(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			addr, destType, ok := keeper.DeriveDestination(tc.memo)
+			addr, destType, ok := types.DeriveDestination(tc.memo)
 			require.Equal(t, tc.wantOK, ok)
 			require.Equal(t, tc.wantDestType, destType)
 			if ok {
@@ -145,7 +144,7 @@ func TestDeriveDestination_EVMAndCosmosAgreeOnRawBytes(t *testing.T) {
 	// A "0x..." memo must derive the account whose 20 address bytes equal
 	// the EVM address bytes directly - no separate erc20 hop.
 	fortyHex := strings.Repeat("cd", 20)
-	addr, destType, ok := keeper.DeriveDestination("0x" + fortyHex)
+	addr, destType, ok := types.DeriveDestination("0x" + fortyHex)
 	require.True(t, ok)
 	require.Equal(t, types.DestinationType_DESTINATION_TYPE_EVM, destType)
 	require.Equal(t, strings.Repeat("\xcd", 20), string(addr.Bytes()))

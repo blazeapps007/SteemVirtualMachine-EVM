@@ -11,7 +11,7 @@ import (
 	"steemvm/x/steembridge/types"
 )
 
-func (q queryServer) PendingWithdrawals(ctx context.Context, req *types.QueryPendingWithdrawalsRequest) (*types.QueryPendingWithdrawalsResponse, error) {
+func (q queryServer) RequestedWithdrawals(ctx context.Context, req *types.QueryRequestedWithdrawalsRequest) (*types.QueryRequestedWithdrawalsResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid request")
 	}
@@ -23,11 +23,11 @@ func (q queryServer) PendingWithdrawals(ctx context.Context, req *types.QueryPen
 		func(key collections.Pair[int32, uint64], _ collections.NoValue) (types.Withdrawal, error) {
 			return q.k.Withdrawal.Get(ctx, key.K2())
 		},
-		query.WithCollectionPaginationPairPrefix[int32, uint64](int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_PENDING)),
+		query.WithCollectionPaginationPairPrefix[int32, uint64](int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED)),
 	)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryPendingWithdrawalsResponse{Withdrawals: withdrawals, Pagination: pageRes}, nil
+	return &types.QueryRequestedWithdrawalsResponse{Withdrawals: withdrawals, Pagination: pageRes}, nil
 }

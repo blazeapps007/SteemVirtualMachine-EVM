@@ -3,6 +3,8 @@ package types
 // DONTCOVER
 
 import (
+	goerrors "errors"
+
 	"cosmossdk.io/errors"
 )
 
@@ -29,3 +31,24 @@ var (
 	ErrRegistrationBelowMinimum    = errors.Register(ModuleName, 1117, "registration amount below the name registration minimum")
 	ErrTooManyFreeConfirmations    = errors.Register(ModuleName, 1118, "too many free name confirmations from this address this block")
 )
+
+// IsBenignAttestationError reports whether an acceptance error represents a
+// harmless, redundant attestation from a bonded validator rather than a real
+// rejection — namely a deposit/registration that another validator's
+// attestation already resolved (typically in this same block), or a duplicate
+// confirmation of a key this validator already confirmed. These are the
+// natural outcome of independent validators racing to attest the same Steem
+// transfer, so they are treated as benign no-op successes (not failed txs) and
+// still qualify for the validator fee exemption.
+//
+// A fact MISMATCH is deliberately NOT benign: an honest relayer never produces
+// one, and keeping mismatches fee-paying preserves the cost of poisoning a
+// pending deposit with wrong facts.
+func IsBenignAttestationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return goerrors.Is(err, ErrDepositAlreadyMinted) ||
+		goerrors.Is(err, ErrRegistrationAlreadyResolved) ||
+		goerrors.Is(err, ErrDuplicateConfirmation)
+}

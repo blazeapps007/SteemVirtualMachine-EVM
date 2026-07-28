@@ -74,14 +74,14 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 		AmountMillisteem:        msg.AmountAsteem.Quo(types.MillisteemToAsteemFactor).Uint64(),
 		Memo:                    msg.Memo,
 		BurnTxHash:              txHashHex(sdkCtx),
-		Status:                  types.WithdrawalStatus_WITHDRAWAL_STATUS_PENDING,
+		Status:                  types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED,
 		CreatedAt:               uint64(sdkCtx.BlockHeight()),
 	}
 
 	if err := k.Withdrawal.Set(ctx, withdrawalID, withdrawal); err != nil {
 		return nil, err
 	}
-	if err := k.WithdrawalByStatus.Set(ctx, collections.Join(int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_PENDING), withdrawalID)); err != nil {
+	if err := k.WithdrawalByStatus.Set(ctx, collections.Join(int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED), withdrawalID)); err != nil {
 		return nil, err
 	}
 

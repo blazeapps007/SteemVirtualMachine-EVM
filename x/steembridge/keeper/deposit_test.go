@@ -58,7 +58,7 @@ func TestSubmitSteemDeposit_DedupCreatesOneDepositAcrossConfirmers(t *testing.T)
 	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 2)
 }
 
-func TestSubmitSteemDeposit_DuplicateConfirmationRejected(t *testing.T) {
+func TestSubmitSteemDeposit_DuplicateConfirmationIsBenignNoOp(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -70,8 +70,16 @@ func TestSubmitSteemDeposit_DuplicateConfirmationRejected(t *testing.T) {
 	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
 	require.NoError(t, err)
 
-	_, err = ms.SubmitSteemDeposit(f.ctx, msg)
-	require.ErrorIs(t, err, types.ErrDuplicateConfirmation)
+	// The same validator re-submitting the same key (a same-block resubmission
+	// race) is a benign no-op success, not a failure.
+	resp, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	genesis, err := f.keeper.ExportGenesis(f.ctx)
+	require.NoError(t, err)
+	require.Len(t, genesis.DepositList, 1)
+	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 1, "duplicate confirmation must not be recorded twice")
 }
 
 func TestSubmitSteemDeposit_MismatchLeavesDepositUntouched(t *testing.T) {
@@ -266,7 +274,7 @@ func TestSubmitSteemDeposit_OutOfRangeAmountBecomesUnclaimable(t *testing.T) {
 	require.Equal(t, types.DepositStatus_DEPOSIT_STATUS_UNCLAIMABLE, genesis.DepositList[0].Status)
 }
 
-func TestSubmitSteemDeposit_AlreadyMintedRejectsResubmission(t *testing.T) {
+func TestSubmitSteemDeposit_AlreadyMintedResubmissionIsBenignNoOp(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -282,12 +290,24 @@ func TestSubmitSteemDeposit_AlreadyMintedRejectsResubmission(t *testing.T) {
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
 	require.NoError(t, err)
 	require.True(t, genesis.DepositList[0].Minted, "sole bonded validator confirming alone must reach 100% >= 2/3")
+	mintedBefore := genesis.TotalMintedAsteem
 
+	// A late validator attests the already-minted deposit — the common
+	// same-block race once 2/3 is crossed. It must be a benign no-op success,
+	// NOT a failed tx, and must NOT mint again or record another confirmation.
 	v2 := newTestValidator(t, 2)
 	f.stakingKeeper.setValidator(v2.ValAddr, 100, true)
 	msg2 := baseDepositMsg(v2, txid, 0)
-	_, err = ms.SubmitSteemDeposit(f.ctx, msg2)
-	require.ErrorIs(t, err, types.ErrDepositAlreadyMinted)
+	resp, err := ms.SubmitSteemDeposit(f.ctx, msg2)
+	require.NoError(t, err, "attesting an already-resolved deposit must not fail")
+	require.NotNil(t, resp)
+
+	genesis, err = f.keeper.ExportGenesis(f.ctx)
+	require.NoError(t, err)
+	require.Len(t, genesis.DepositList, 1)
+	require.Equal(t, types.DepositStatus_DEPOSIT_STATUS_MINTED, genesis.DepositList[0].Status)
+	require.True(t, mintedBefore.Equal(genesis.TotalMintedAsteem), "the redundant attestation must not mint again")
+	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 1, "the redundant attestation must not be recorded")
 }
 
 func TestSubmitSteemDeposit_GatewayMismatchRejected(t *testing.T) {

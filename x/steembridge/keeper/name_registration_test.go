@@ -196,18 +196,52 @@ func TestSubmitNameRegistration_Rejections(t *testing.T) {
 	params.NameRegistrationMinMillisteem = 1
 	require.NoError(t, f.keeper.Params.Set(f.ctx, params))
 
-	// duplicate attestation by the same validator
+	// duplicate attestation by the same validator is a benign no-op, not a failure
 	ok := baseNameRegistrationMsg(bonded, txid, 0)
 	_, err = ms.SubmitNameRegistration(f.ctx, ok)
 	require.NoError(t, err)
 	_, err = ms.SubmitNameRegistration(f.ctx, ok)
-	require.ErrorIs(t, err, types.ErrDuplicateConfirmation)
+	require.NoError(t, err, "a duplicate attestation is a benign no-op")
 
 	// disabled name service
 	params.NameServiceEnabled = false
 	require.NoError(t, f.keeper.Params.Set(f.ctx, params))
 	_, err = ms.SubmitNameRegistration(f.ctx, baseNameRegistrationMsg(bonded, "aaaa000000000000000000000000000000000005", 0))
 	require.ErrorIs(t, err, types.ErrNameServiceDisabled)
+}
+
+func TestSubmitNameRegistration_AlreadyResolvedResubmissionIsBenignNoOp(t *testing.T) {
+	f := initFixtureWithFakes(t)
+	enableNameService(t, f)
+	ms := keeper.NewMsgServerImpl(f.keeper)
+
+	v1 := newTestValidator(t, 1)
+	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
+
+	txid := "aaaa000000000000000000000000000000000009"
+	// v1 alone (100%) clears 2/3 and parks the registration AWAITING_CONFIRMATION.
+	_, err := ms.SubmitNameRegistration(f.ctx, baseNameRegistrationMsg(v1, txid, 0))
+	require.NoError(t, err)
+
+	genesis, err := f.keeper.ExportGenesis(f.ctx)
+	require.NoError(t, err)
+	require.Equal(t, types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_AWAITING_CONFIRMATION, genesis.NameRegistrationList[0].Status)
+	mintedBefore := genesis.TotalMintedAsteem
+
+	// A late validator attests the already-resolved registration — benign no-op,
+	// no re-processing, no second fee credit, no extra confirmation.
+	v2 := newTestValidator(t, 2)
+	f.stakingKeeper.setValidator(v2.ValAddr, 100, true)
+	resp, err := ms.SubmitNameRegistration(f.ctx, baseNameRegistrationMsg(v2, txid, 0))
+	require.NoError(t, err, "attesting an already-resolved registration must not fail")
+	require.NotNil(t, resp)
+
+	genesis, err = f.keeper.ExportGenesis(f.ctx)
+	require.NoError(t, err)
+	require.Len(t, genesis.NameRegistrationList, 1)
+	require.Equal(t, types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_AWAITING_CONFIRMATION, genesis.NameRegistrationList[0].Status)
+	require.True(t, mintedBefore.Equal(genesis.TotalMintedAsteem), "the redundant attestation must not credit the fee again")
+	require.Len(t, genesis.NameRegistrationList[0].ValidatorConfirmations, 1, "the redundant attestation must not be recorded")
 }
 
 func TestSubmitNameRegistration_MismatchLeavesPendingUntouched(t *testing.T) {

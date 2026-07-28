@@ -4,11 +4,10 @@ APPNAME := steemvm
 
 # do not override user values
 ifeq (,$(VERSION))
-  VERSION := $(shell git describe --exact-match 2>/dev/null)
-  # if VERSION is empty, then populate it with branch name and raw commit hash
-  ifeq (,$(VERSION))
-    VERSION := $(BRANCH)-$(COMMIT)
-  endif
+  # Fixed release version so every node stamps the SAME steemvmd version,
+  # independent of git branch/commit. Bump this per release. Override at build
+  # time with `make install VERSION=x.y.z` if ever needed.
+  VERSION := 0.0.2-Beta1
 endif
 
 # Update the ldflags with the app, client & server names

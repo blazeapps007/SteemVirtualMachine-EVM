@@ -13,6 +13,13 @@ type Config struct {
 	// SteemRPCURL is the Steem-blockchain RPC endpoint to scan (e.g.
 	// https://api.steemit.com). Empty disables the relayer.
 	SteemRPCURL string `mapstructure:"steem-rpc-url"`
+	// SteemSymbol is the asset symbol that counts as bridgeable STEEM in
+	// transfer amounts. Mainnet Steem uses "STEEM"; the Steem *testnet* denotes
+	// the same asset as "TESTS" (and testnet SBD as "TBD", which the bridge
+	// ignores). Amounts in any other symbol are skipped. The symbol is
+	// relayer-side only — consensus sees just the integer millisteem — so every
+	// validator's relayer must set the SAME symbol for the network they watch.
+	SteemSymbol string `mapstructure:"steem-symbol"`
 	// KeyName is the keyring key that signs attestation transactions — the
 	// validator's operator account key. Empty disables the relayer.
 	KeyName string `mapstructure:"key-name"`
@@ -33,6 +40,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		SteemRPCURL:      "",
+		SteemSymbol:      "STEEM",
 		KeyName:          "",
 		PollInterval:     3 * time.Second,
 		MaxBlocksPerPoll: 100,
@@ -50,6 +58,9 @@ func (c Config) Enabled() bool {
 func ReadFromAppOpts(appOpts servertypes.AppOptions) Config {
 	cfg := DefaultConfig()
 	cfg.SteemRPCURL = cast.ToString(appOpts.Get("steem-relayer.steem-rpc-url"))
+	if v := cast.ToString(appOpts.Get("steem-relayer.steem-symbol")); v != "" {
+		cfg.SteemSymbol = v
+	}
 	cfg.KeyName = cast.ToString(appOpts.Get("steem-relayer.key-name"))
 	if v := cast.ToDuration(appOpts.Get("steem-relayer.poll-interval")); v > 0 {
 		cfg.PollInterval = v
@@ -78,6 +89,12 @@ const DefaultConfigTemplate = `
 
 # Steem RPC endpoint to scan, e.g. "https://api.steemit.com". Empty disables the relayer.
 steem-rpc-url = "{{ .Relayer.SteemRPCURL }}"
+
+# Asset symbol that counts as bridgeable STEEM in transfer amounts. Use "STEEM"
+# for Steem mainnet; use "TESTS" when watching the Steem testnet (its STEEM is
+# denoted "TESTS", and testnet SBD "TBD" is ignored). Must match across all
+# validators watching the same network.
+steem-symbol = "{{ .Relayer.SteemSymbol }}"
 
 # Keyring key name that signs attestations (the validator operator account).
 key-name = "{{ .Relayer.KeyName }}"

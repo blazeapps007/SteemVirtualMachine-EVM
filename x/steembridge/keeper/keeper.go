@@ -36,7 +36,7 @@ type Keeper struct {
 	// Deposit record itself, so a duplicate-confirmation check is O(1).
 	DepositConfirmedBy collections.KeySet[collections.Triple[string, uint32, []byte]]
 	// DepositByStatus / WithdrawalByStatus index (status, id) so status-filtered
-	// queries (PendingDeposits, MintedDeposits, PendingWithdrawals) and the
+	// queries (PendingDeposits, MintedDeposits, RequestedWithdrawals) and the
 	// expiry sweep are ordered prefix scans instead of full-table filters.
 	DepositByStatus    collections.KeySet[collections.Pair[int32, uint64]]
 	WithdrawalByStatus collections.KeySet[collections.Pair[int32, uint64]]

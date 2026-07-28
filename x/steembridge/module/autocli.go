@@ -54,9 +54,9 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{},
 				},
 				{
-					RpcMethod:      "PendingWithdrawals",
-					Use:            "pending-withdrawals ",
-					Short:          "Query pending-withdrawals",
+					RpcMethod:      "RequestedWithdrawals",
+					Use:            "requested-withdrawals",
+					Short:          "Query bridge-out request records",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{},
 				},
 				{

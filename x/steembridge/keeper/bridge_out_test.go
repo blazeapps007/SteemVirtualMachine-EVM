@@ -46,7 +46,7 @@ func TestBridgeOut_ToNullIsAnOrdinaryWithdrawal(t *testing.T) {
 	require.Len(t, genesis.WithdrawalList, 1)
 	w := genesis.WithdrawalList[0]
 	require.Equal(t, "null", w.DestinationSteemAccount)
-	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_PENDING, w.Status)
+	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED, w.Status)
 	require.Equal(t, uint64(1000), w.AmountMillisteem)
 	require.True(t, types.MillisteemToAsteem(1000).Equal(genesis.TotalBurnedAsteem))
 }

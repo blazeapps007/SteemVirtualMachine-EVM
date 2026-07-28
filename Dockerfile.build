@@ -1,0 +1,36 @@
+# SteemVM build/codegen toolchain — Go + gcc + Ignite CLI.
+#
+# This image is NOT a node. It exists to regenerate protobuf (.pb.go) and to
+# compile/test the chain in isolation, WITHOUT touching a running validator.
+# Run it with the repo bind-mounted so regenerated files land on your host:
+#
+#   docker build -t steemvm-build - < Dockerfile.build
+#   docker run --rm -v "$PWD":/workspace -w /workspace steemvm-build \
+#     bash -c 'make proto-gen && go build ./... && go test ./x/steembridge/... ./relayer/...'
+#
+# Or just run scripts/build.sh, which wires up the mount and build caches.
+
+FROM golang:1.26.5-trixie
+
+# build-essential = gcc/make for CGO (secp256k1) and the Makefile; curl for the
+# Ignite installer; git for version stamping and proto tooling.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      git build-essential curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Ignite CLI powers `make proto-gen` (ignite generate proto-go). Defaults to the
+# latest release; pin for reproducible codegen with:
+#   docker build --build-arg IGNITE_VERSION=v28.x.y -t steemvm-build - < Dockerfile.build
+ARG IGNITE_VERSION=latest
+RUN if [ "$IGNITE_VERSION" = "latest" ]; then \
+      curl -sL "https://get.ignite.com/cli!" | bash; \
+    else \
+      curl -sL "https://get.ignite.com/cli@${IGNITE_VERSION}!" | bash; \
+    fi \
+ && ignite version
+
+# The repo is bind-mounted here at runtime (owned by a different host user), so
+# mark it a safe git directory for the version-stamping git calls in the build.
+RUN git config --global --add safe.directory /workspace
+WORKDIR /workspace

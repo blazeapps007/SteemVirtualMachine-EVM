@@ -175,7 +175,7 @@ func runCycle(
 	var msgs []sdk.Msg
 	lastFullBlock := state.LastScannedBlock
 	for _, nb := range blocks {
-		transfers := ExtractGatewayTransfers(nb.Num, nb.Block, gateway)
+		transfers := ExtractGatewayTransfers(nb.Num, nb.Block, gateway, cfg.SteemSymbol)
 		blockMsgs := make([]sdk.Msg, 0, len(transfers))
 		for _, transfer := range transfers {
 			intent := RouteMemo(transfer.Memo)
@@ -183,6 +183,15 @@ func runCycle(
 				continue
 			}
 			if intent == IntentDeposit && !params.Params.BridgeEnabled {
+				continue
+			}
+			// Only attest transfers whose memo resolves to a supported
+			// destination (a steem1.../0x address, optionally svm-deposit /
+			// svm-register prefixed) — the exact in-consensus parser. Transfers
+			// with an unparseable memo (a human note, a wrong address, etc.) are
+			// ignored: we don't broadcast attestations, and no on-chain record
+			// is created for transfers the bridge cannot act on.
+			if _, _, ok := types.DeriveDestination(transfer.Memo); !ok {
 				continue
 			}
 			attested, err := alreadyAttested(ctx, bridgeQuery, transfer, intent, valoperAddr)

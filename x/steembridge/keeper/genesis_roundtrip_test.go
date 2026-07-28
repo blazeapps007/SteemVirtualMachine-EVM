@@ -44,7 +44,7 @@ func TestGenesisRoundTrip_SecondaryIndexes(t *testing.T) {
 		},
 		DepositCount: 2,
 		WithdrawalList: []types.Withdrawal{
-			{Id: 0, AmountAsteem: math.NewInt(5), Status: types.WithdrawalStatus_WITHDRAWAL_STATUS_PENDING},
+			{Id: 0, AmountAsteem: math.NewInt(5), Status: types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED},
 		},
 		WithdrawalCount:   1,
 		TotalMintedAsteem: math.NewInt(1_000_000_000_000_000),
@@ -82,9 +82,9 @@ func TestGenesisRoundTrip_SecondaryIndexes(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, hasMinted)
 
-		hasWithdrawalPending, err := f.keeper.WithdrawalByStatus.Has(f.ctx, collections.Join(int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_PENDING), uint64(0)))
+		hasWithdrawalRequested, err := f.keeper.WithdrawalByStatus.Has(f.ctx, collections.Join(int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED), uint64(0)))
 		require.NoError(t, err)
-		require.True(t, hasWithdrawalPending)
+		require.True(t, hasWithdrawalRequested)
 	})
 
 	exported, err := f.keeper.ExportGenesis(f.ctx)

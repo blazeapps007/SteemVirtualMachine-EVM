@@ -89,6 +89,10 @@ query-gas-limit = "0"
   poll-interval = "3s"
   start-block = 0
   steem-rpc-url = "https://api.moecki.online"
+  # Testnet: the Steem testnet denotes STEEM as "TESTS" (and SBD as "TBD", which
+  # the bridge ignores). Set to "STEEM" for Steem mainnet. Must match across all
+  # validators watching the same network.
+  steem-symbol = "TESTS"
 
 [streaming]
 

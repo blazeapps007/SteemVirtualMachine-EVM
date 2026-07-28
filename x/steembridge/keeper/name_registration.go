@@ -171,7 +171,7 @@ func (k Keeper) setNameRegistrationStatus(ctx context.Context, registration *typ
 func (k Keeper) resolveNameRegistration(ctx context.Context, registration *types.NameRegistration, params types.Params) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	destAddr, destType, ok := DeriveDestination(registration.Memo)
+	destAddr, destType, ok := types.DeriveDestination(registration.Memo)
 
 	// Re-check the minimum in case params changed between acceptance and
 	// resolution; a below-minimum registration must never activate.

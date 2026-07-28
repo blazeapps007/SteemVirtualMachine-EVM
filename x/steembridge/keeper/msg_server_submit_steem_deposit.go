@@ -48,7 +48,10 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 		return nil, err
 	}
 	if alreadyConfirmed {
-		return nil, types.ErrDuplicateConfirmation
+		// Benign no-op: this validator already confirmed this key (a same-block
+		// or retried resubmission). Not an error, so the redundant zero-fee
+		// attestation tx succeeds rather than failing.
+		return &types.MsgSubmitSteemDepositResponse{}, nil
 	}
 
 	dedupKey := collections.Join(msg.Txid, msg.OpIndex)
@@ -99,7 +102,11 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 
 		switch deposit.Status {
 		case types.DepositStatus_DEPOSIT_STATUS_MINTED, types.DepositStatus_DEPOSIT_STATUS_UNCLAIMABLE:
-			return nil, types.ErrDepositAlreadyMinted
+			// Benign no-op: another validator's attestation already resolved
+			// this deposit (usually earlier in this same block, once the 2/3
+			// threshold was crossed). Succeed silently so this redundant
+			// zero-fee attestation does not fail.
+			return &types.MsgSubmitSteemDepositResponse{}, nil
 		}
 
 		if !matchesPending(deposit, msg) {
