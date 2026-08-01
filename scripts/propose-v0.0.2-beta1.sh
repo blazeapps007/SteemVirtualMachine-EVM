@@ -81,7 +81,20 @@ echo
     --arg gateway "$GATEWAY" \
     --arg deposit "$DEPOSIT" \
     --arg date "$UPGRADE_DATE" '
-    .params.gateway_account = $gateway
+    # `query ... --output json` emits LegacyDec (bridge_confirmation_threshold)
+    # as the raw scaled integer, e.g. "666666666666666667" for 0.666…, WITHOUT a
+    # decimal point. MsgUpdateParams parses it as a decimal and scales by 1e18
+    # again, producing a value > 1 that ValidateBasic rejects. Convert it back to
+    # the decimal string the Msg expects (18 fractional digits).
+    def todec:
+      tostring as $s
+      | if ($s | test("\\.")) then $s
+        else ($s | length) as $n
+          | if $n > 18 then ($s[0:$n-18]) + "." + ($s[$n-18:])
+            else "0." + ("0000000000000000000"[0:18-$n]) + $s end
+        end;
+    .params.bridge_confirmation_threshold |= todec
+    | .params.gateway_account = $gateway
     | { messages: [
           { "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             authority: $gov,
