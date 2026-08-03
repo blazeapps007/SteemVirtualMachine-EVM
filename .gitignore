@@ -10,6 +10,13 @@ release/
 config.yml
 config.yml_backup
 
+# Per-validator node config — the repo ships *.example templates; each validator's
+# live copy is seeded from them (see docker-compose.yml) and stays local, so edits
+# (moniker, keys, gas price, Steem RPC) are never tracked, pushed, or block a pull.
+# genesis.json and client.toml stay tracked — every validator must run them identically.
+Instructions/app.toml
+Instructions/config.toml
+
 # AI assistant / tooling artifacts
 .claude/
 CLAUDE.md

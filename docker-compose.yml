@@ -27,6 +27,11 @@ services:
         if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
           /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm
         fi
+        # app.toml/config.toml are per-validator (gitignored). Seed them from the
+        # tracked *.example templates on first run; your local edits persist after.
+        for f in app.toml config.toml; do
+          [ -f /workspace/Instructions/$f ] || cp /workspace/Instructions/$f.example /workspace/Instructions/$f
+        done
         rm -f /root/.steemvm/config/app.toml /root/.steemvm/config/config.toml /root/.steemvm/config/client.toml /root/.steemvm/config/genesis.json
         cp /workspace/Instructions/app.toml /workspace/Instructions/config.toml /workspace/Instructions/client.toml /root/.steemvm/config/
         cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
