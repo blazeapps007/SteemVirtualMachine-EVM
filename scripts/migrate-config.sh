@@ -37,6 +37,12 @@ command -v git >/dev/null || { echo "ERROR: git not found on PATH." >&2; exit 1;
 cd "$REPO_DIR"
 echo "==> repo: $REPO_DIR   remote: $REMOTE   branch: $BRANCH"
 
+# --- 0. stop git from tracking the executable bit ---------------------------
+# A stray `chmod +x` on a tracked file (e.g. the scripts) otherwise counts as an
+# unstaged change and blocks `git pull`. Disabling fileMode makes pulls robust.
+git config core.fileMode false
+echo "    set core.fileMode=false (chmod no longer blocks pulls)"
+
 # --- 1. drop any skip-worktree flags from an earlier manual workaround -------
 for f in $FILES; do
   git update-index --no-skip-worktree "$f" 2>/dev/null || true
