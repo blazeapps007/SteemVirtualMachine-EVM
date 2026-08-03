@@ -26,14 +26,20 @@ REMOTE="${GIT_REMOTE:-origin}"
 BRANCH="${GIT_BRANCH:-main}"
 FILES="Instructions/app.toml Instructions/config.toml"
 
-# --- locate the repo --------------------------------------------------------
-REPO_DIR="${REPO_DIR:-$PWD}"
+# --- locate the repo (from your current dir; never a hardcoded path) --------
+command -v git >/dev/null || { echo "ERROR: git not found on PATH." >&2; exit 1; }
+# Priority: explicit REPO_DIR env > the git checkout that contains your current
+# directory (works from the repo root OR any subdirectory) > the current dir.
+if [ -z "${REPO_DIR:-}" ]; then
+  REPO_DIR="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "$REPO_DIR" ] || REPO_DIR="$PWD"
+fi
 if [ ! -f "$REPO_DIR/docker-compose.yml" ] || [ ! -d "$REPO_DIR/Instructions" ]; then
-  echo "ERROR: '$REPO_DIR' is not a SteemVM checkout (no docker-compose.yml / Instructions)." >&2
-  echo "       cd into your repo first, or pass REPO_DIR=/path/to/SteemVirtualMachine-EVM." >&2
+  echo "ERROR: couldn't find your SteemVM checkout from '$PWD'." >&2
+  echo "       Run this from inside the repo (any subdirectory is fine)," >&2
+  echo "       or pass REPO_DIR=/path/to/SteemVirtualMachine-EVM." >&2
   exit 1
 fi
-command -v git >/dev/null || { echo "ERROR: git not found on PATH." >&2; exit 1; }
 cd "$REPO_DIR"
 echo "==> repo: $REPO_DIR   remote: $REMOTE   branch: $BRANCH"
 
