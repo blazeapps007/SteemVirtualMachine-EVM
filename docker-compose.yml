@@ -29,9 +29,10 @@ services:
         fi
         # app.toml/config.toml are per-validator (gitignored). Seed them from the
         # tracked *.example templates on first run; your local edits persist after.
-        for f in app.toml config.toml; do
-          [ -f /workspace/Instructions/$f ] || cp /workspace/Instructions/$f.example /workspace/Instructions/$f
-        done
+        # (No shell vars here — docker compose would substitute $VAR before the
+        # container runs; explicit paths sidestep that entirely.)
+        [ -f /workspace/Instructions/app.toml ]   || cp /workspace/Instructions/app.toml.example   /workspace/Instructions/app.toml
+        [ -f /workspace/Instructions/config.toml ] || cp /workspace/Instructions/config.toml.example /workspace/Instructions/config.toml
         rm -f /root/.steemvm/config/app.toml /root/.steemvm/config/config.toml /root/.steemvm/config/client.toml /root/.steemvm/config/genesis.json
         cp /workspace/Instructions/app.toml /workspace/Instructions/config.toml /workspace/Instructions/client.toml /root/.steemvm/config/
         cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
