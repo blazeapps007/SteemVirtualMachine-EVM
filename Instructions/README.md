@@ -401,7 +401,7 @@ sent `1000.000 STEEM` to the gateway with an EVM address as the memo:
 
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge submit-steem-deposit \
-  bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice blaze.apps 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a \
+  bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
   --chain-id steemvm --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
@@ -416,7 +416,7 @@ Field-by-field:
 | `steem-block` | Steem block number the transaction was included in |
 | `steem-timestamp` | The Steem block timestamp, exactly as Steem reports it |
 | `steem-sender` | Steem account that sent the transfer |
-| `gateway-account` | The gateway account the transfer was sent to — must match the on-chain param (`blaze.apps`) or the tx is rejected |
+| `gateway-account` | The gateway account the transfer was sent to — must match the on-chain param (`svm.bank`) or the tx is rejected |
 | `amount-millisteem` | Amount in millisteem: STEEM × 1000, so `1000.000 STEEM` = `1000000` |
 | `memo` | The transfer's memo, verbatim — a `steem...` bech32 address or a `0x...` EVM address; this decides who receives the minted `asteem` |
 
@@ -601,7 +601,7 @@ certificates with [certbot](https://certbot.eff.org/).
   `details` is missing, malformed, or a key isn't a valid `STM…` value. It must
   read `owner=STM…;active=STM…;posting=STM…` with no `steem=` entry.
 - **Registration never appears** — validators only attest Steem's *irreversible*
-  blocks, so allow a minute or two. Confirm you sent to `blaze.apps`, sent at
+  blocks, so allow a minute or two. Confirm you sent to `svm.bank`, sent at
   least `0.001 STEEM`, and used the `svm-register ` prefix followed by a space
   and the address.
 - **`confirm-name` fails** — it must be signed by the address in the memo, and
