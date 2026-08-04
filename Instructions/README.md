@@ -129,7 +129,7 @@ transfer on the Steem blockchain:
 
 | Field | Value |
 |---|---|
-| **To** | `blaze.apps` (the gateway account) |
+| **To** | `svm.bank` (the gateway account) |
 | **Amount** | `0.001 STEEM` (the minimum; more is fine) |
 | **Memo** | `svm-register <your steem1... address from step 4>` |
 
