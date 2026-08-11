@@ -362,28 +362,47 @@ have submitted **identical** facts, the chain acts on them.
 
 `<address>` is either a `steem1...` or a `0x...` address.
 
-### The built-in relayer (recommended)
+### The bridge oracle (recommended)
 
-The node binary does the watching and attesting for you. Enable it in
-`/root/.steemvm/config/app.toml`:
+Attesting is handled by a **separate `steem-oracle` container**, not the node
+binary — so your validator's signing key lives only in the oracle's environment,
+never in the chain config. It's wired into `docker-compose.yml` as an opt-in
+`oracle` profile.
 
-```toml
-[steem-relayer]
-steem-rpc-url = "https://api.steemit.com"
-key-name = "blazed007"        # your keyring key (the validator operator account)
-```
+1. Put your validator operator key in a **gitignored `.env`** next to
+   `docker-compose.yml` (it is `.gitignore`d — never commit it). Provide **one**
+   of `ORACLE_PRIVATE_KEY` or `ORACLE_MNEMONIC`:
 
-and restart the node. The relayer polls Steem's **last irreversible block**
-every 3 seconds, scans transfers to the gateway account, and broadcasts the
-attestation transactions automatically (fee-exempt — they cost you nothing).
-Its scan cursor persists in `data/steem_relayer_state.json`; it idles
-harmlessly while your validator is not bonded, and catches up automatically
-after downtime.
+   ```sh
+   # .env
+   ORACLE_PRIVATE_KEY=0x<your eth_secp256k1 private key>   # MetaMask-style hex
+   # ---- or ----
+   ORACLE_MNEMONIC=word1 word2 ... word24                 # the key's mnemonic
 
-Check where it has scanned to:
+   ORACLE_STEEM_RPC=https://api.steemit.com                # Steem mainnet RPC to scan
+   COMPOSE_PROFILES=oracle                                 # include the oracle in `docker compose up`
+   ```
+
+   Use your **validator operator account** key — only a bonded validator's
+   attestations count and are fee-exempt.
+
+2. Start it alongside the node:
+
+   ```sh
+   docker compose --profile oracle up -d      # or just `docker compose up -d` if COMPOSE_PROFILES=oracle
+   ```
+
+The oracle reaches your node at `http://steemvm:26657` over the compose network,
+polls Steem's **last irreversible block** every 3 seconds, scans transfers to
+the gateway account, and broadcasts the matching deposit / name-registration
+attestations automatically (fee-exempt for bonded validators). Its scan cursor
+persists in the `oracle-data` volume; it idles harmlessly while your key is not
+a bonded validator, and catches up automatically after downtime.
+
+Follow it:
 
 ```sh
-docker exec steemvm-node cat /root/.steemvm/data/steem_relayer_state.json
+docker compose logs -f oracle
 ```
 
 ### Manual attestation (fallback)

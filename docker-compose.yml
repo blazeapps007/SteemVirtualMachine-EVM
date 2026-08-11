@@ -43,7 +43,44 @@ services:
           --json-rpc.api "eth,net,web3,txpool,debug" \
           --json-rpc.enable-indexer
 
+  # Standalone Steem bridge oracle. Opt-in — it only starts with the "oracle"
+  # profile, so a plain `docker compose up` runs just the node:
+  #     docker compose --profile oracle up -d
+  # (or set COMPOSE_PROFILES=oracle in a local .env to always include it).
+  #
+  # Supply your validator operator key via a gitignored .env file next to this
+  # compose (ORACLE_PRIVATE_KEY or ORACLE_MNEMONIC) — NEVER commit it. Only a
+  # bonded validator's attestations count and are fee-exempt.
+  oracle:
+    image: golang:1.26.5-trixie
+    container_name: steemvm-oracle
+    working_dir: /workspace
+    profiles: ["oracle"]
+    depends_on:
+      - steemvm
+    restart: unless-stopped
+    environment:
+      GOPATH: /root/go
+      CGO_ENABLED: "1"
+      ORACLE_STEEM_RPC: "${ORACLE_STEEM_RPC:-https://api.steemit.com}"
+      ORACLE_NODE_RPC: "http://steemvm:26657"
+      ORACLE_PRIVATE_KEY: "${ORACLE_PRIVATE_KEY:-}"
+      ORACLE_MNEMONIC: "${ORACLE_MNEMONIC:-}"
+    volumes:
+      - .:/workspace
+      - oracle-data:/oracle-data
+      - gopath:/root/go
+      - go-build-cache:/root/.cache/go-build
+    command:
+      - sh
+      - -ec
+      - |
+        git config --global --add safe.directory /workspace
+        go build -o /usr/local/bin/steem-oracle ./oracle
+        exec steem-oracle
+
 volumes:
   steemvm-home:
+  oracle-data:
   gopath:
   go-build-cache:

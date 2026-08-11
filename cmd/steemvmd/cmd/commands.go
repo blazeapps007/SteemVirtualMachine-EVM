@@ -26,7 +26,6 @@ import (
 	cosmosevmserver "github.com/cosmos/evm/server"
 
 	"steemvm/app"
-	"steemvm/relayer"
 )
 
 func initRootCmd(
@@ -51,7 +50,6 @@ func initRootCmd(
 		appExport,
 		addModuleInitFlags,
 	)
-	attachSteemRelayer(rootCmd)
 
 	// add keybase, auxiliary RPC, query, genesis, and tx child commands
 	rootCmd.AddCommand(
@@ -68,25 +66,6 @@ func initRootCmd(
 
 // addModuleInitFlags adds more flags to the start command.
 func addModuleInitFlags(startCmd *cobra.Command) {
-}
-
-// attachSteemRelayer wraps the start command so the in-process Steem relayer
-// (relayer.Start) is spawned alongside the node. cosmos/evm's StartOptions
-// exposes no post-setup hook, so wrapping RunE is the extension point. The
-// relayer is a no-op unless app.toml's [steem-relayer] section is configured,
-// and it can never crash the node — every failure path inside it logs.
-func attachSteemRelayer(rootCmd *cobra.Command) {
-	startCmd, _, err := rootCmd.Find([]string{"start"})
-	if err != nil || startCmd == nil || startCmd.RunE == nil {
-		return
-	}
-	origRunE := startCmd.RunE
-	startCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		svrCtx := server.GetServerContextFromCmd(cmd)
-		clientCtx := client.GetClientContextFromCmd(cmd)
-		go relayer.Start(cmd.Context(), svrCtx, clientCtx)
-		return origRunE(cmd, args)
-	}
 }
 
 func queryCommand() *cobra.Command {

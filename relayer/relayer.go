@@ -2,55 +2,44 @@ package relayer
 
 import (
 	"context"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"time"
 
 	rpchttp "github.com/cometbft/cometbft/rpc/client/http"
 
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/server"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"steemvm/x/steembridge/types"
 )
 
-// Start runs the in-process Steem relayer until ctx is canceled. It is
-// spawned as a goroutine by the start command and MUST never crash the node:
-// every failure path logs and retries. It returns immediately when the
-// [steem-relayer] app.toml section is not configured.
-func Start(ctx context.Context, svrCtx *server.Context, clientCtx client.Context) {
-	logger := svrCtx.Logger.With("module", "steem-relayer")
-
-	cfg := ReadFromAppOpts(svrCtx.Viper)
-	if !cfg.Enabled() {
-		logger.Info("steem relayer disabled (set [steem-relayer] steem-rpc-url and key-name in app.toml to enable)")
-		return
-	}
-
-	// Resolve the signing key from the node's keyring.
+// Run drives the Steem relayer loop until ctx is canceled. It is a pure
+// library entry point: the standalone oracle binary supplies a fully-built
+// clientCtx (codec + in-memory keyring holding cfg.KeyName), the SteemVM node
+// RPC endpoint to broadcast/query against, the relayer Config, and a directory
+// for the scan-cursor state file. Every cycle failure is logged and retried;
+// Run only returns on ctx cancellation or a fatal setup error.
+func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, nodeRPC string, cfg Config, stateDir string) error {
+	// Resolve the signing key from the supplied keyring.
 	if clientCtx.Keyring == nil {
-		logger.Error("steem relayer: no keyring available on client context")
-		return
+		return fmt.Errorf("no keyring available on client context")
 	}
 	record, err := clientCtx.Keyring.Key(cfg.KeyName)
 	if err != nil {
-		logger.Error("steem relayer: key not found in keyring", "key", cfg.KeyName, "err", err)
-		return
+		return fmt.Errorf("key %q not found in keyring: %w", cfg.KeyName, err)
 	}
 	signerAddr, err := record.GetAddress()
 	if err != nil {
-		logger.Error("steem relayer: cannot read key address", "err", err)
-		return
+		return fmt.Errorf("cannot read key address: %w", err)
 	}
 	valoperAddr := sdk.ValAddress(signerAddr).String()
 
-	// Connect to the local node RPC.
-	rpcClient, err := rpchttp.New(svrCtx.Config.RPC.ListenAddress, "/websocket")
+	// Connect to the SteemVM node RPC (broadcast + ABCI queries route through it).
+	rpcClient, err := rpchttp.New(nodeRPC, "/websocket")
 	if err != nil {
-		logger.Error("steem relayer: cannot create local RPC client", "err", err)
-		return
+		return fmt.Errorf("cannot create node RPC client for %q: %w", nodeRPC, err)
 	}
 	clientCtx = clientCtx.
 		WithClient(rpcClient).
@@ -58,26 +47,25 @@ func Start(ctx context.Context, svrCtx *server.Context, clientCtx client.Context
 		WithFromAddress(signerAddr).
 		WithBroadcastMode("sync")
 
-	// Wait until the local node is up and synced, then learn the chain-id.
+	// Wait until the node is up and synced, then learn the chain-id.
 	chainID := waitForLocalNode(ctx, logger, rpcClient)
 	if chainID == "" {
-		return // ctx canceled
+		return ctx.Err() // ctx canceled
 	}
 	clientCtx = clientCtx.WithChainID(chainID)
 
 	steem := NewSteemClient(cfg.SteemRPCURL)
 	bridgeQuery := types.NewQueryClient(clientCtx)
 	stakingQuery := stakingtypes.NewQueryClient(clientCtx)
-	stateDir := filepath.Join(svrCtx.Config.RootDir, "data")
 
 	state, err := LoadState(stateDir)
 	if err != nil {
-		logger.Error("steem relayer: cannot load state", "err", err)
-		return
+		return fmt.Errorf("cannot load state from %q: %w", stateDir, err)
 	}
 
-	logger.Info("steem relayer started",
-		"steem_rpc", cfg.SteemRPCURL, "key", cfg.KeyName, "signer", signerAddr.String(),
+	logger.Info("steem oracle started",
+		"steem_rpc", cfg.SteemRPCURL, "node_rpc", nodeRPC, "chain_id", chainID,
+		"signer", signerAddr.String(), "valoper", valoperAddr,
 		"poll_interval", cfg.PollInterval.String(), "last_scanned_block", state.LastScannedBlock)
 
 	ticker := time.NewTicker(cfg.PollInterval)
@@ -87,13 +75,13 @@ func Start(ctx context.Context, svrCtx *server.Context, clientCtx client.Context
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("steem relayer stopped")
-			return
+			logger.Info("steem oracle stopped")
+			return nil
 		case <-ticker.C:
 		}
 
 		if err := runCycle(ctx, logger, cfg, clientCtx, steem, bridgeQuery, stakingQuery, signerAddr, valoperAddr, stateDir, &state, &notBondedLogged); err != nil {
-			logger.Error("steem relayer cycle failed", "err", err)
+			logger.Error("steem oracle cycle failed", "err", err)
 		}
 	}
 }

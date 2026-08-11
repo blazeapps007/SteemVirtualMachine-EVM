@@ -6,7 +6,6 @@ import (
 	cosmosevmserverconfig "github.com/cosmos/evm/server/config"
 
 	"steemvm/app"
-	"steemvm/relayer"
 )
 
 // initCometBFTConfig helps to override default CometBFT Config values.
@@ -24,11 +23,11 @@ func initCometBFTConfig() *cmtcfg.Config {
 // initAppConfig helps to override default appConfig template and configs.
 // return "", nil if no custom configuration is required for the application.
 //
-// The generated app.toml carries three extra families of sections:
-//   - cosmos/evm's [evm]/[json-rpc]/[tls] (the JSON-RPC server reads
-//     evm-chain-id from here — it MUST default to app.EVMChainID or wallets
-//     hit "incorrect chain-id; expected 262144"),
-//   - the [steem-relayer] section for the in-binary validator relayer.
+// The generated app.toml carries cosmos/evm's [evm]/[json-rpc]/[tls] sections
+// (the JSON-RPC server reads evm-chain-id from here — it MUST default to
+// app.EVMChainID or wallets hit "incorrect chain-id; expected 262144"). The
+// Steem relayer no longer lives in this binary; it is a standalone oracle (see
+// the oracle/ package) configured entirely from its own environment.
 func initAppConfig() (string, interface{}) {
 	type CustomAppConfig struct {
 		serverconfig.Config `mapstructure:",squash"`
@@ -36,7 +35,6 @@ func initAppConfig() (string, interface{}) {
 		EVM     cosmosevmserverconfig.EVMConfig     `mapstructure:"evm"`
 		JSONRPC cosmosevmserverconfig.JSONRPCConfig `mapstructure:"json-rpc"`
 		TLS     cosmosevmserverconfig.TLSConfig     `mapstructure:"tls"`
-		Relayer relayer.Config                      `mapstructure:"steem-relayer"`
 	}
 
 	// Optionally allow the chain developer to overwrite the SDK's default
@@ -64,12 +62,10 @@ func initAppConfig() (string, interface{}) {
 		EVM:     *evmCfg,
 		JSONRPC: *cosmosevmserverconfig.DefaultJSONRPCConfig(),
 		TLS:     *cosmosevmserverconfig.DefaultTLSConfig(),
-		Relayer: relayer.DefaultConfig(),
 	}
 
 	customAppTemplate := serverconfig.DefaultConfigTemplate +
-		cosmosevmserverconfig.DefaultEVMConfigTemplate +
-		relayer.DefaultConfigTemplate
+		cosmosevmserverconfig.DefaultEVMConfigTemplate
 
 	return customAppTemplate, customAppConfig
 }

@@ -17,6 +17,10 @@ config.yml_backup
 Instructions/app.toml
 Instructions/config.toml
 
+# Oracle secrets — the standalone bridge oracle reads ORACLE_PRIVATE_KEY /
+# ORACLE_MNEMONIC from a local .env used by docker-compose. NEVER commit it.
+.env
+
 # AI assistant / tooling artifacts
 .claude/
 CLAUDE.md
