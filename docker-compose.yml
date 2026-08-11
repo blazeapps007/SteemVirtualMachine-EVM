@@ -29,8 +29,8 @@ services:
         fi
         # app.toml/config.toml are per-validator (gitignored). Seed them from the
         # tracked *.example templates on first run; your local edits persist after.
-        # (No shell vars here — docker compose would substitute $VAR before the
-        # container runs; explicit paths sidestep that entirely.)
+        # (No shell vars here — docker compose would substitute variables before
+        # the container runs; explicit paths sidestep that entirely.)
         [ -f /workspace/Instructions/app.toml ]   || cp /workspace/Instructions/app.toml.example   /workspace/Instructions/app.toml
         [ -f /workspace/Instructions/config.toml ] || cp /workspace/Instructions/config.toml.example /workspace/Instructions/config.toml
         rm -f /root/.steemvm/config/app.toml /root/.steemvm/config/config.toml /root/.steemvm/config/client.toml /root/.steemvm/config/genesis.json
@@ -45,12 +45,12 @@ services:
 
   # Standalone Steem bridge oracle. Opt-in — it only starts with the "oracle"
   # profile, so a plain `docker compose up` runs just the node:
+  #     cp oracle/.env.example oracle/.env    # then edit oracle/.env
   #     docker compose --profile oracle up -d
-  # (or set COMPOSE_PROFILES=oracle in a local .env to always include it).
   #
-  # Supply your validator operator key via a gitignored .env file next to this
-  # compose (ORACLE_PRIVATE_KEY or ORACLE_MNEMONIC) — NEVER commit it. Only a
-  # bonded validator's attestations count and are fee-exempt.
+  # All oracle config (incl. your validator key) comes from oracle/.env — see
+  # oracle/.env.example. That file is gitignored; NEVER commit it. Only a bonded
+  # validator's attestations count and are fee-exempt.
   oracle:
     image: golang:1.26.5-trixie
     container_name: steemvm-oracle
@@ -59,13 +59,12 @@ services:
     depends_on:
       - steemvm
     restart: unless-stopped
+    env_file:
+      - path: oracle/.env
+        required: false
     environment:
       GOPATH: /root/go
       CGO_ENABLED: "1"
-      ORACLE_STEEM_RPC: "${ORACLE_STEEM_RPC:-https://api.steemit.com}"
-      ORACLE_NODE_RPC: "http://steemvm:26657"
-      ORACLE_PRIVATE_KEY: "${ORACLE_PRIVATE_KEY:-}"
-      ORACLE_MNEMONIC: "${ORACLE_MNEMONIC:-}"
     volumes:
       - .:/workspace
       - oracle-data:/oracle-data

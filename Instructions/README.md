@@ -385,23 +385,27 @@ step 4). The oracle just needs that key exported into its own environment.
    key MetaMask uses). **Treat it like a password** — anyone who has it controls
    your validator's signing and funds.
 
-2. **Put it in a gitignored `.env`** next to `docker-compose.yml` (it is
-   `.gitignore`d — never commit it):
+2. **Create `oracle/.env`** from the template and paste your key in (the file
+   is `.gitignore`d — never commit it):
 
    ```sh
-   # .env
-   ORACLE_PRIVATE_KEY=<paste the hex from step 1>   # a leading 0x is fine too
-   ORACLE_STEEM_RPC=https://api.steemit.com          # Steem mainnet RPC to scan
-   COMPOSE_PROFILES=oracle                            # include the oracle in `docker compose up`
+   cp oracle/.env.example oracle/.env
    ```
 
-   > Prefer not to export a raw key? Use `ORACLE_MNEMONIC="word1 … word24"` (the
+   Then edit `oracle/.env`:
+
+   ```sh
+   ORACLE_PRIVATE_KEY=<paste the hex from step 1>   # a leading 0x is fine too
+   ORACLE_STEEM_RPC=https://api.steemit.com          # already the default
+   ```
+
+   > Prefer not to export a raw key? Set `ORACLE_MNEMONIC="word1 … word24"` (the
    > mnemonic from step 4) instead of `ORACLE_PRIVATE_KEY`.
 
 3. **Start it alongside the node:**
 
    ```sh
-   docker compose --profile oracle up -d      # or just `docker compose up -d` if COMPOSE_PROFILES=oracle
+   docker compose --profile oracle up -d
    ```
 
 The oracle reaches your node at `http://steemvm:26657` over the compose network,
