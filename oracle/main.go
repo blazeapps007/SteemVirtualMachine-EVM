@@ -131,7 +131,7 @@ func newClientContext() (client.Context, error) {
 		depinject.Configs(
 			app.AppConfig(),
 			depinject.Supply(log.NewNopLogger()),
-			depinject.Provide(provideClientContext),
+			depinject.Provide(ProvideClientContext),
 			depinject.Provide(app.ProvideMsgEthereumTxCustomGetSigner),
 		),
 		&clientCtx,
@@ -148,7 +148,7 @@ func newClientContext() (client.Context, error) {
 	return clientCtx, nil
 }
 
-func provideClientContext(
+func ProvideClientContext(
 	appCodec codec.Codec,
 	interfaceRegistry codectypes.InterfaceRegistry,
 	txConfigOpts tx.ConfigOptions,
