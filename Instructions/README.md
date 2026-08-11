@@ -369,24 +369,36 @@ binary — so your validator's signing key lives only in the oracle's environmen
 never in the chain config. It's wired into `docker-compose.yml` as an opt-in
 `oracle` profile.
 
-1. Put your validator operator key in a **gitignored `.env`** next to
-   `docker-compose.yml` (it is `.gitignore`d — never commit it). Provide **one**
-   of `ORACLE_PRIVATE_KEY` or `ORACLE_MNEMONIC`:
+Your validator key already lives in the node's keyring (you created it in
+step 4). The oracle just needs that key exported into its own environment.
+
+1. **Export the private key** from the keyring — use the same account you
+   validate with (only a bonded validator's attestations count and are
+   fee-exempt):
+
+   ```sh
+   docker exec steemvm-node /root/go/bin/steemvmd keys unsafe-export-eth-key blazed007 \
+     --keyring-backend test --home /root/.steemvm
+   ```
+
+   This prints the raw `eth_secp256k1` private key as 64 hex characters (the same
+   key MetaMask uses). **Treat it like a password** — anyone who has it controls
+   your validator's signing and funds.
+
+2. **Put it in a gitignored `.env`** next to `docker-compose.yml` (it is
+   `.gitignore`d — never commit it):
 
    ```sh
    # .env
-   ORACLE_PRIVATE_KEY=0x<your eth_secp256k1 private key>   # MetaMask-style hex
-   # ---- or ----
-   ORACLE_MNEMONIC=word1 word2 ... word24                 # the key's mnemonic
-
-   ORACLE_STEEM_RPC=https://api.steemit.com                # Steem mainnet RPC to scan
-   COMPOSE_PROFILES=oracle                                 # include the oracle in `docker compose up`
+   ORACLE_PRIVATE_KEY=<paste the hex from step 1>   # a leading 0x is fine too
+   ORACLE_STEEM_RPC=https://api.steemit.com          # Steem mainnet RPC to scan
+   COMPOSE_PROFILES=oracle                            # include the oracle in `docker compose up`
    ```
 
-   Use your **validator operator account** key — only a bonded validator's
-   attestations count and are fee-exempt.
+   > Prefer not to export a raw key? Use `ORACLE_MNEMONIC="word1 … word24"` (the
+   > mnemonic from step 4) instead of `ORACLE_PRIVATE_KEY`.
 
-2. Start it alongside the node:
+3. **Start it alongside the node:**
 
    ```sh
    docker compose --profile oracle up -d      # or just `docker compose up -d` if COMPOSE_PROFILES=oracle
