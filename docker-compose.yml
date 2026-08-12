@@ -43,19 +43,19 @@ services:
           --json-rpc.api "eth,net,web3,txpool,debug" \
           --json-rpc.enable-indexer
 
-  # Standalone Steem bridge oracle. Opt-in — it only starts with the "oracle"
-  # profile, so a plain `docker compose up` runs just the node:
-  #     cp oracle/.env.example oracle/.env    # then edit oracle/.env
-  #     docker compose --profile oracle up -d
+  # Standalone Steem bridge oracle. Starts by default alongside the node:
+  #     cp oracle/.env.example oracle/.env    # then edit oracle/.env (your key)
+  #     docker compose up -d
   #
   # All oracle config (incl. your validator key) comes from oracle/.env — see
   # oracle/.env.example. That file is gitignored; NEVER commit it. Only a bonded
-  # validator's attestations count and are fee-exempt.
+  # validator's attestations count and are fee-exempt. If oracle/.env has no key,
+  # the oracle just restart-loops harmlessly ("provide the signing key") until you
+  # add one — the node is unaffected.
   oracle:
     image: golang:1.26.5-trixie
     container_name: steemvm-oracle
     working_dir: /workspace
-    profiles: ["oracle"]
     depends_on:
       - steemvm
     restart: unless-stopped

@@ -366,8 +366,8 @@ have submitted **identical** facts, the chain acts on them.
 
 Attesting is handled by a **separate `steem-oracle` container**, not the node
 binary — so your validator's signing key lives only in the oracle's environment,
-never in the chain config. It's wired into `docker-compose.yml` as an opt-in
-`oracle` profile.
+never in the chain config. It's wired into `docker-compose.yml` and starts by
+default alongside the node.
 
 Your validator key already lives in the node's keyring (you created it in
 step 4). The oracle just needs that key exported into its own environment.
@@ -402,14 +402,14 @@ step 4). The oracle just needs that key exported into its own environment.
    > Prefer not to export a raw key? Set `ORACLE_MNEMONIC="word1 … word24"` (the
    > mnemonic from step 4) instead of `ORACLE_PRIVATE_KEY`.
 
-3. **Start it alongside the node:**
+3. **Start (or restart) the stack** — the oracle comes up with the node:
 
    ```sh
-   docker compose --profile oracle up -d
+   docker compose up -d
    ```
 
 The oracle reaches your node at `http://steemvm:26657` over the compose network,
-polls Steem's **last irreversible block** every 3 seconds, scans transfers to
+polls Steem's **last irreversible block** every minute, scans transfers to
 the gateway account, and broadcasts the matching deposit / name-registration
 attestations automatically (fee-exempt for bonded validators). Its scan cursor
 persists in the `oracle-data` volume; it idles harmlessly while your key is not
