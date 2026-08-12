@@ -71,34 +71,21 @@ If either command fails, install [Docker Desktop](https://docs.docker.com/get-do
 > completed a coordinated upgrade (v0.0.2-Beta1 at block 254133), so a brand-new
 > node **cannot** replay from genesis with the current binary — it would halt
 > with an app-hash mismatch at a pre-upgrade block. Instead, bootstrap from a
-> recent snapshot. Do this **before the first `docker compose up`** — state-sync
-> only runs on a node with no local data.
+> recent snapshot with the helper — run it **once, before your first
+> `docker compose up`** (state-sync only runs on a node with no data yet):
 >
-> 1. Get a recent trusted height + hash from a public RPC (needs `jq`):
+> ```sh
+> bash scripts/statesync.sh
+> ```
 >
->    ```sh
->    SNAP_RPC="https://steemvmd.steemscanner.com"
->    LATEST=$(curl -s "$SNAP_RPC/block" | jq -r '.result.block.header.height')
->    TRUST_HEIGHT=$((LATEST - 2000))
->    TRUST_HASH=$(curl -s "$SNAP_RPC/block?height=$TRUST_HEIGHT" | jq -r '.result.block_id.hash')
->    echo "trust_height=$TRUST_HEIGHT  trust_hash=$TRUST_HASH"
->    ```
->
-> 2. In [`Instructions/config.toml`](config.toml), under `[statesync]`, set:
->
->    ```toml
->    enable = true
->    # rpc_servers is pre-filled with a public endpoint; add a second, different
->    # RPC as a light-client witness if you have one.
->    trust_height = <TRUST_HEIGHT from step 1>
->    trust_hash   = "<TRUST_HASH from step 1>"
->    ```
->
-> Then run `docker compose up -d` below. In the logs you'll see
-> `Discovering snapshots…` → `Applying snapshot chunk…`, and the node jumps to the
-> snapshot height in seconds instead of replaying millions of blocks; it switches
-> to normal block sync automatically once done. (This needs peers that serve
-> snapshots — see the note under step 3.)
+> It reads a recent trusted height + hash from a public RPC and writes the
+> `[statesync]` block into [`Instructions/config.toml`](config.toml) for you. Then
+> `docker compose up -d` (below) fast-syncs from a snapshot in **seconds** instead
+> of replaying millions of blocks — you'll see `Discovering snapshots…` →
+> `Applying snapshot chunk…` in the logs, and it switches to normal block sync once
+> done. Point it at a different RPC with `SNAP_RPC=https://your.rpc bash
+> scripts/statesync.sh`. (Needs peers serving snapshots — see the note under
+> step 3.)
 
 From the repository root:
 
