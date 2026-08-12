@@ -16,8 +16,8 @@
 # Env overrides:
 #   SNAP_RPC      public RPC to read the trusted height/hash from
 #                 (default https://steemvmd.steemscanner.com)
-#   RPC_SERVERS   comma-separated rpc_servers for light-client verification
-#                 (default: SNAP_RPC twice — replace one with a 2nd real RPC)
+#   RPC_SERVERS   comma-separated rpc_servers (two light-client witnesses that
+#                 serve snapshots; default: the two public provider nodes)
 #   TRUST_OFFSET  how far back from the tip to trust (default 2000 blocks)
 #
 # Portable: bash + curl + git. Works on Ubuntu / macOS / Git-Bash / WSL.
@@ -27,7 +27,7 @@ set -euo pipefail
 SNAP_RPC="${SNAP_RPC:-https://steemvmd.steemscanner.com}"
 SNAP_RPC="${SNAP_RPC%/}"
 TRUST_OFFSET="${TRUST_OFFSET:-2000}"
-RPC_SERVERS="${RPC_SERVERS:-$SNAP_RPC:443,$SNAP_RPC:443}"
+RPC_SERVERS="${RPC_SERVERS:-http://167.235.9.31:26657,http://57.131.13.43:26657}"
 
 command -v curl >/dev/null || { echo "ERROR: curl not found on PATH." >&2; exit 1; }
 command -v git  >/dev/null || { echo "ERROR: git not found on PATH." >&2; exit 1; }

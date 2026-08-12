@@ -375,7 +375,7 @@ enable = false
 # — see "Joining with state-sync" in Instructions/README.md. rpc_servers is
 # pre-filled with a public endpoint; add a second, different RPC as a witness
 # if you have one.
-rpc_servers = "https://steemvmd.steemscanner.com:443,https://steemvmd.steemscanner.com:443"
+rpc_servers = "http://167.235.9.31:26657,http://57.131.13.43:26657"
 trust_height = 0
 trust_hash = ""
 trust_period = "168h0m0s"
