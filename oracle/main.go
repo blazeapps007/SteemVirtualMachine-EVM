@@ -15,9 +15,11 @@
 //	ORACLE_PRIVATE_KEY    validator key as hex (0x… eth_secp256k1)  ─┐ one of these
 //	ORACLE_MNEMONIC       validator key as a BIP39 mnemonic          ─┘ is required
 //	ORACLE_STATE_DIR      dir for the scan-cursor state file    (default /oracle-data)
-//	ORACLE_POLL_INTERVAL  Steem poll cadence                    (default 3s)
+//	ORACLE_POLL_INTERVAL  Steem poll cadence                    (default 1m)
 //	ORACLE_MAX_BLOCKS     max Steem blocks scanned per cycle     (default 100)
-//	ORACLE_START_BLOCK    first Steem block to scan on a fresh state (default 0 = use chain param)
+//	ORACLE_START_BLOCK    fresh-scan start: a block number, or "latest" to start
+//	                      at Steem's current tip (new validators skip all history)
+//	                      (default 0 = use the chain's relayer_start_block anchor)
 package main
 
 import (
@@ -84,9 +86,26 @@ func run(logger log.Logger) error {
 	} else if ok {
 		cfg.MaxBlocksPerPoll = n
 	}
-	if n, ok, err := envUint("ORACLE_START_BLOCK"); err != nil {
-		return err
-	} else if ok {
+	// ORACLE_START_BLOCK: where a *fresh* oracle (no saved cursor yet) begins its
+	// Steem scan. A block number starts there; "latest" starts at Steem's current
+	// last-irreversible block — so a new validator skips all history and only
+	// attests deposits from now on. Empty/0 defers to the chain's
+	// relayer_start_block anchor. (Ignored once a cursor exists in the state dir.)
+	switch raw := strings.ToLower(strings.TrimSpace(os.Getenv("ORACLE_START_BLOCK"))); raw {
+	case "", "0":
+		// leave cfg.StartBlock = 0 → use on-chain relayer_start_block, else tip
+	case "latest", "now", "tip":
+		lib, err := relayer.NewSteemClient(cfg.SteemRPCURL).LastIrreversibleBlock()
+		if err != nil {
+			return fmt.Errorf("resolving ORACLE_START_BLOCK=%q: %w", raw, err)
+		}
+		cfg.StartBlock = lib
+		logger.Info("oracle will start from the current Steem tip", "start_block", lib)
+	default:
+		n, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return fmt.Errorf("ORACLE_START_BLOCK must be a block number or \"latest\": %w", err)
+		}
 		cfg.StartBlock = n
 	}
 

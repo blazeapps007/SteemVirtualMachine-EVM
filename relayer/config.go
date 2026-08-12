@@ -33,14 +33,14 @@ type Config struct {
 }
 
 // DefaultConfig returns the relayer's default configuration (Steem mainnet
-// symbol, 3s poll, 100 blocks/cycle). SteemRPCURL and KeyName must still be
-// supplied by the caller.
+// symbol, 1-minute poll, 100 blocks/cycle). SteemRPCURL and KeyName must still
+// be supplied by the caller.
 func DefaultConfig() Config {
 	return Config{
 		SteemRPCURL:      "",
 		SteemSymbol:      "STEEM",
 		KeyName:          "",
-		PollInterval:     3 * time.Second,
+		PollInterval:     time.Minute,
 		MaxBlocksPerPoll: 100,
 		StartBlock:       0,
 	}
