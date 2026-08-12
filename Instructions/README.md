@@ -67,6 +67,39 @@ If either command fails, install [Docker Desktop](https://docs.docker.com/get-do
 > setup re-copies the files from `Instructions/` into the node home on **every**
 > start, so an edit made only inside the container is wiped on the next restart.
 
+> **Joining the chain now? You must state-sync (required).** SteemVM has already
+> completed a coordinated upgrade (v0.0.2-Beta1 at block 254133), so a brand-new
+> node **cannot** replay from genesis with the current binary — it would halt
+> with an app-hash mismatch at a pre-upgrade block. Instead, bootstrap from a
+> recent snapshot. Do this **before the first `docker compose up`** — state-sync
+> only runs on a node with no local data.
+>
+> 1. Get a recent trusted height + hash from a public RPC (needs `jq`):
+>
+>    ```sh
+>    SNAP_RPC="https://steemvmd.steemscanner.com"
+>    LATEST=$(curl -s "$SNAP_RPC/block" | jq -r '.result.block.header.height')
+>    TRUST_HEIGHT=$((LATEST - 2000))
+>    TRUST_HASH=$(curl -s "$SNAP_RPC/block?height=$TRUST_HEIGHT" | jq -r '.result.block_id.hash')
+>    echo "trust_height=$TRUST_HEIGHT  trust_hash=$TRUST_HASH"
+>    ```
+>
+> 2. In [`Instructions/config.toml`](config.toml), under `[statesync]`, set:
+>
+>    ```toml
+>    enable = true
+>    # rpc_servers is pre-filled with a public endpoint; add a second, different
+>    # RPC as a light-client witness if you have one.
+>    trust_height = <TRUST_HEIGHT from step 1>
+>    trust_hash   = "<TRUST_HASH from step 1>"
+>    ```
+>
+> Then run `docker compose up -d` below. In the logs you'll see
+> `Discovering snapshots…` → `Applying snapshot chunk…`, and the node jumps to the
+> snapshot height in seconds instead of replaying millions of blocks; it switches
+> to normal block sync automatically once done. (This needs peers that serve
+> snapshots — see the note under step 3.)
+
 From the repository root:
 
 ```sh
@@ -91,6 +124,16 @@ curl -s http://localhost:26657/status | grep catching_up
 
 Wait until it reports `"catching_up": false`. You can also watch the block
 height climb in the logs (`docker compose logs -f`).
+
+> **Serving snapshots (for state-sync).** So that *future* validators can
+> state-sync, nodes need to produce snapshots. `Instructions/app.toml` ships with
+> `[state-sync] snapshot-interval = 1000`, so a fresh node serves them
+> automatically. If you're an **existing** operator (your `app.toml` predates
+> this), set `snapshot-interval = 1000` in `Instructions/app.toml` and restart
+> (`docker compose up -d`) to start serving. State-sync fetches snapshot chunks
+> over p2p from your `persistent_peers`, so at least a couple of reachable peers
+> must have snapshots for it to work — the first one appears at the next block
+> height that's a multiple of 1000 after you enable it.
 
 ## 4. Create your address (key)
 
