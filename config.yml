@@ -5,6 +5,15 @@ build:
     # underscore-dir convention), so _BridgeInfra/main.go would otherwise
     # make the build ambiguous.
     main: cmd/steemvmd
+    # `ignite chain build` does NOT read the Makefile — it stamps the binary
+    # version itself, defaulting to `git describe --tags`, which is EMPTY on a
+    # shallow/tagless checkout (so `steemvmd version` prints nothing). These
+    # ldflags make ignite stamp the SAME fixed version as `make install`.
+    # ⚠ Keep Version below in sync with `VERSION` in the Makefile every release.
+    ldflags:
+        - "-X github.com/cosmos/cosmos-sdk/version.Name=steemvm"
+        - "-X github.com/cosmos/cosmos-sdk/version.AppName=steemvmd"
+        - "-X github.com/cosmos/cosmos-sdk/version.Version=0.0.2-Beta1"
     proto:
         path: proto
 accounts:
