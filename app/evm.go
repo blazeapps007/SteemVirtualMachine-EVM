@@ -44,6 +44,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec/legacy"
 	"github.com/cosmos/evm/crypto/ethsecp256k1"
 
+	oracledataprecompile "steemvm/precompiles/oracledata"
 	steembridgeprecompile "steemvm/precompiles/steembridge"
 	steembridgekeeper "steemvm/x/steembridge/keeper"
 )
@@ -169,6 +170,13 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		app.AuthKeeper.AddressCodec(),
 	)
 	app.EVMKeeper.RegisterStaticPrecompile(steembridgePrecompile.Address(), steembridgePrecompile)
+
+	// Register the read-only oracle price-feed precompile (0x...0902). Like the
+	// steembridge one, its address must ALSO be listed in the evm module's
+	// active_static_precompiles param to be callable. OracleDataKeeper is already
+	// populated: depinject runs before registerEVMModules.
+	oracledataPrecompile := oracledataprecompile.NewPrecompile(app.OracleDataKeeper)
+	app.EVMKeeper.RegisterStaticPrecompile(oracledataPrecompile.Address(), oracledataPrecompile)
 
 	// register evm modules
 	if err := app.RegisterModules(

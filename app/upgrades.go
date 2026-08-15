@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 
 	"cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
@@ -10,6 +11,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	oracledataprecompile "steemvm/precompiles/oracledata"
 	oracledatatypes "steemvm/x/oracle/data/types"
 )
 
@@ -48,6 +50,17 @@ func (app *App) RegisterUpgradeHandlers() {
 			distrParams.CommunityTax = math.LegacyZeroDec()
 			if err := app.DistrKeeper.Params.Set(ctx, distrParams); err != nil {
 				return vm, err
+			}
+
+			// Activate the oracle price-feed precompile (0x...0902) so EVM callers
+			// can reach it. SetParams re-sorts the list, so order/idempotency are
+			// handled; guard the append so a re-run doesn't duplicate the entry.
+			evmParams := app.EVMKeeper.GetParams(sdkCtx)
+			if !slices.Contains(evmParams.ActiveStaticPrecompiles, oracledataprecompile.PrecompileAddress) {
+				evmParams.ActiveStaticPrecompiles = append(evmParams.ActiveStaticPrecompiles, oracledataprecompile.PrecompileAddress)
+				if err := app.EVMKeeper.SetParams(sdkCtx, evmParams); err != nil {
+					return vm, err
+				}
 			}
 
 			return vm, nil
