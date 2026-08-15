@@ -75,7 +75,10 @@ func run(logger log.Logger) error {
 	cfg.KeyName = keyName
 	cfg.SteemRPCURL = steemRPC
 	// SteemSymbol stays "STEEM" (DefaultConfig) — the oracle watches Steem
-	// mainnet, where the bridgeable asset is always "STEEM". Not configurable.
+	// mainnet, where the bridgeable STEEM asset is always "STEEM". Not configurable.
+	// ORACLE_SBD_SYMBOL enables SBD bridging (set to "SBD") once the chain has
+	// upgraded to v0.0.3; empty (default) keeps SBD off — the v0.0.3 feature-gate.
+	cfg.SbdSymbol = strings.TrimSpace(os.Getenv("ORACLE_SBD_SYMBOL"))
 	if d, ok, err := envDuration("ORACLE_POLL_INTERVAL"); err != nil {
 		return err
 	} else if ok {

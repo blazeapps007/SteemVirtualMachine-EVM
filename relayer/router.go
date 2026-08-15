@@ -38,6 +38,11 @@ func RouteMemo(memo string) Intent {
 // verbatim (including the memo — the chain strips intent prefixes itself in
 // DeriveDestination, so every validator's submission stays byte-identical).
 func BuildMsg(t Transfer, intent Intent, validator sdk.AccAddress, gateway string) sdk.Msg {
+	// The name service is STEEM-only; an SBD transfer is always a deposit even if
+	// its memo looks like a registration.
+	if t.Asset == types.BridgeAsset_BRIDGE_ASSET_SBD {
+		intent = IntentDeposit
+	}
 	switch intent {
 	case IntentRegister:
 		return &types.MsgSubmitNameRegistration{
@@ -62,6 +67,7 @@ func BuildMsg(t Transfer, intent Intent, validator sdk.AccAddress, gateway strin
 			GatewayAccount:   gateway,
 			AmountMillisteem: t.AmountMillisteem,
 			Memo:             t.Memo,
+			Asset:            t.Asset,
 		}
 	}
 }

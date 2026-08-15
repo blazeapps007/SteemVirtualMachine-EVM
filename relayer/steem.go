@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	steembridgetypes "steemvm/x/steembridge/types"
 )
 
 // Transfer is one Steem transfer operation addressed to the gateway account,
@@ -22,6 +24,8 @@ type Transfer struct {
 	From             string
 	AmountMillisteem uint64
 	Memo             string
+	// Asset is which native Steem asset was transferred (STEEM or SBD).
+	Asset steembridgetypes.BridgeAsset
 }
 
 // SteemClient is a minimal Steem condenser_api JSON-RPC client. The relayer
@@ -149,14 +153,15 @@ func (c *SteemClient) FetchBlocks(from, to uint64) ([]NumberedBlock, error) {
 	return blocks, nil
 }
 
-// ExtractGatewayTransfers scans a block for STEEM transfer operations whose
-// recipient is the gateway account. Non-transfer operations, transfers to
-// other accounts, and amounts not denominated in the bridgeable symbol
-// (mainnet "STEEM", testnet "TESTS"; SBD/TBD are skipped) are ignored. OpIndex
-// is the operation's index within its transaction, matching the module's
-// (txid, op_index) dedup key. The block's timestamp string is used verbatim
-// so all validators submit byte-identical facts.
-func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, symbol string) []Transfer {
+// ExtractGatewayTransfers scans a block for STEEM and SBD transfer operations
+// whose recipient is the gateway account. steemSymbol qualifies as STEEM
+// (mainnet "STEEM"); if sbdSymbol is non-empty, transfers in that symbol
+// (mainnet "SBD") are also extracted and tagged BRIDGE_ASSET_SBD — leaving
+// sbdSymbol "" disables SBD (the v0.0.3 feature-gate). Other symbols
+// (TBD/VESTS) and non-transfer ops are ignored. OpIndex matches the module's
+// (txid, op_index) dedup key. The block timestamp is used verbatim so all
+// validators submit byte-identical facts.
+func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, steemSymbol, sbdSymbol string) []Transfer {
 	if block == nil {
 		return nil
 	}
@@ -188,10 +193,21 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, symbol
 			if op.To != gateway {
 				continue
 			}
-			amount, ok := ParseSteemAmount(op.Amount, symbol)
-			if !ok {
+
+			var amount uint64
+			var asset steembridgetypes.BridgeAsset
+			if a, ok := ParseSteemAmount(op.Amount, steemSymbol); ok {
+				amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_STEEM
+			} else if sbdSymbol != "" {
+				a, ok := ParseSteemAmount(op.Amount, sbdSymbol)
+				if !ok {
+					continue
+				}
+				amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_SBD
+			} else {
 				continue
 			}
+
 			transfers = append(transfers, Transfer{
 				Txid:             txid,
 				OpIndex:          uint32(opIndex), //nolint:gosec // ops per tx are tiny
@@ -200,6 +216,7 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, symbol
 				From:             op.From,
 				AmountMillisteem: amount,
 				Memo:             op.Memo,
+				Asset:            asset,
 			})
 		}
 	}

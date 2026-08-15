@@ -163,7 +163,7 @@ func runCycle(
 	var msgs []sdk.Msg
 	lastFullBlock := state.LastScannedBlock
 	for _, nb := range blocks {
-		transfers := ExtractGatewayTransfers(nb.Num, nb.Block, gateway, cfg.SteemSymbol)
+		transfers := ExtractGatewayTransfers(nb.Num, nb.Block, gateway, cfg.SteemSymbol, cfg.SbdSymbol)
 		blockMsgs := make([]sdk.Msg, 0, len(transfers))
 		for _, transfer := range transfers {
 			intent := RouteMemo(transfer.Memo)

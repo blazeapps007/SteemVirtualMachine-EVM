@@ -136,7 +136,7 @@ func TestExtractGatewayTransfers(t *testing.T) {
 	var block *steemBlock
 	require.NoError(t, json.Unmarshal([]byte(blockFixture), &block))
 
-	transfers := ExtractGatewayTransfers(107795182, block, "blaze.apps", "STEEM")
+	transfers := ExtractGatewayTransfers(107795182, block, "blaze.apps", "STEEM", "")
 	require.Len(t, transfers, 2)
 
 	first := transfers[0]
@@ -156,7 +156,7 @@ func TestExtractGatewayTransfers(t *testing.T) {
 }
 
 func TestExtractGatewayTransfers_TxidFallbackAndNilBlock(t *testing.T) {
-	require.Nil(t, ExtractGatewayTransfers(1, nil, "blaze.apps", "STEEM"))
+	require.Nil(t, ExtractGatewayTransfers(1, nil, "blaze.apps", "STEEM", ""))
 
 	// No per-tx transaction_id: fall back to the block-level list.
 	raw := `{
@@ -168,7 +168,7 @@ func TestExtractGatewayTransfers_TxidFallbackAndNilBlock(t *testing.T) {
 	}`
 	var block *steemBlock
 	require.NoError(t, json.Unmarshal([]byte(raw), &block))
-	transfers := ExtractGatewayTransfers(2, block, "gw", "STEEM")
+	transfers := ExtractGatewayTransfers(2, block, "gw", "STEEM", "")
 	require.Len(t, transfers, 1)
 	require.Equal(t, "aabbccddeeff00112233445566778899aabbccdd", transfers[0].Txid)
 }
