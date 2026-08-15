@@ -1,0 +1,54 @@
+syntax = "proto3";
+package steemvm.oracle.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/oracle/types";
+
+// Params defines the parameters of the parent x/oracle unified slashing engine.
+// Price-specific params (vote_period, whitelist, bands) live in x/oracle/data;
+// these are the SHARED slashing/reward params both duties are judged by (§2b).
+message Params {
+  option (amino.name) = "steemvm/x/oracle/Params";
+  option (gogoproto.equal) = true;
+
+  // slash_window is the number of blocks between evaluations. The combined
+  // per-validator counter is tallied continuously and judged once per window.
+  uint64 slash_window = 1;
+  // slash_fraction is the fraction of a validator's stake slashed when it fails
+  // the window (also jailed).
+  string slash_fraction = 2 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // min_valid_per_window is the minimum combined weighted participation score a
+  // validator must reach over the window to avoid a slash.
+  string min_valid_per_window = 3 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // w_price and w_bridge weight the two duties in the combined score. They are
+  // renormalized over whichever duties were active in the window.
+  string w_price = 4 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  string w_bridge = 5 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // duty_floor is the anti-masking guard: any ACTIVE duty whose rate is at or
+  // below this is slashed regardless of the combined score (default 0 → a
+  // validator that attested none of an active duty is always slashed).
+  string duty_floor = 6 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // reward_distribution_window is the block span over which performance rewards
+  // are averaged (rewards themselves are deferred; the field is carried now).
+  uint64 reward_distribution_window = 7;
+  // bridge_grace_blocks is how long after a bridge event finalizes a validator
+  // may still attest and be counted as a hit (absorbs brief RPC blips).
+  uint64 bridge_grace_blocks = 8;
+}
