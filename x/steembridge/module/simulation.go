@@ -30,19 +30,19 @@ func (am AppModule) RegisterStoreDecoder(_ simtypes.StoreDecoderRegistry) {}
 func (am AppModule) WeightedOperations(simState module.SimulationState) []simtypes.WeightedOperation {
 	operations := make([]simtypes.WeightedOperation, 0)
 	const (
-		opWeightMsgSubmitSteemDeposit          = "op_weight_msg_steembridge"
-		defaultWeightMsgSubmitSteemDeposit int = 100
+		opWeightMsgAttestDeposit          = "op_weight_msg_steembridge"
+		defaultWeightMsgAttestDeposit int = 100
 	)
 
-	var weightMsgSubmitSteemDeposit int
-	simState.AppParams.GetOrGenerate(opWeightMsgSubmitSteemDeposit, &weightMsgSubmitSteemDeposit, nil,
+	var weightMsgAttestDeposit int
+	simState.AppParams.GetOrGenerate(opWeightMsgAttestDeposit, &weightMsgAttestDeposit, nil,
 		func(_ *rand.Rand) {
-			weightMsgSubmitSteemDeposit = defaultWeightMsgSubmitSteemDeposit
+			weightMsgAttestDeposit = defaultWeightMsgAttestDeposit
 		},
 	)
 	operations = append(operations, simulation.NewWeightedOperation(
-		weightMsgSubmitSteemDeposit,
-		steembridgesimulation.SimulateMsgSubmitSteemDeposit(am.authKeeper, am.bankKeeper, am.keeper, simState.TxConfig),
+		weightMsgAttestDeposit,
+		steembridgesimulation.SimulateMsgAttestDeposit(am.authKeeper, am.bankKeeper, am.keeper, simState.TxConfig),
 	))
 	const (
 		opWeightMsgBridgeOut          = "op_weight_msg_steembridge"

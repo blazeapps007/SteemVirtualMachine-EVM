@@ -52,7 +52,7 @@ func BuildMsg(t Transfer, intent Intent, validator sdk.AccAddress, gateway strin
 			Memo:             t.Memo,
 		}
 	default:
-		return &types.MsgSubmitSteemDeposit{
+		return &types.MsgAttestDeposit{
 			Validator:        validator.String(),
 			Txid:             t.Txid,
 			OpIndex:          t.OpIndex,

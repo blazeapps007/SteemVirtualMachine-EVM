@@ -17,11 +17,14 @@ func enableBridge(t *testing.T, f *fixtureWithFakes) {
 	params.BridgeEnabled = true
 	params.GatewayAccount = "gateway-account"
 	params.BridgeConfirmationThreshold = math.LegacyMustNewDecFromStr("0.666666666666666667")
+	// Core deposit/bridge-out tests assert gross amounts; the 0.25% fee is
+	// covered by dedicated fee tests, so disable it in the shared helper.
+	params.BridgeFeeBps = 0
 	require.NoError(t, f.keeper.Params.Set(f.ctx, params))
 }
 
-func baseDepositMsg(validator testValidator, txid string, opIndex uint32) *types.MsgSubmitSteemDeposit {
-	return &types.MsgSubmitSteemDeposit{
+func baseDepositMsg(validator testValidator, txid string, opIndex uint32) *types.MsgAttestDeposit {
+	return &types.MsgAttestDeposit{
 		Validator:        validator.AccAddr,
 		Txid:             txid,
 		OpIndex:          opIndex,
@@ -34,7 +37,7 @@ func baseDepositMsg(validator testValidator, txid string, opIndex uint32) *types
 	}
 }
 
-func TestSubmitSteemDeposit_DedupCreatesOneDepositAcrossConfirmers(t *testing.T) {
+func TestAttestDeposit_DedupCreatesOneDepositAcrossConfirmers(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -45,11 +48,11 @@ func TestSubmitSteemDeposit_DedupCreatesOneDepositAcrossConfirmers(t *testing.T)
 	f.stakingKeeper.setValidator(v2.ValAddr, 100, true)
 
 	msg1 := baseDepositMsg(v1, "aaaa000000000000000000000000000000000000", 0)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg1)
+	_, err := ms.AttestDeposit(f.ctx, msg1)
 	require.NoError(t, err)
 
 	msg2 := baseDepositMsg(v2, "aaaa000000000000000000000000000000000000", 0)
-	_, err = ms.SubmitSteemDeposit(f.ctx, msg2)
+	_, err = ms.AttestDeposit(f.ctx, msg2)
 	require.NoError(t, err)
 
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
@@ -58,7 +61,7 @@ func TestSubmitSteemDeposit_DedupCreatesOneDepositAcrossConfirmers(t *testing.T)
 	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 2)
 }
 
-func TestSubmitSteemDeposit_DuplicateConfirmationIsBenignNoOp(t *testing.T) {
+func TestAttestDeposit_DuplicateConfirmationIsBenignNoOp(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -67,12 +70,12 @@ func TestSubmitSteemDeposit_DuplicateConfirmationIsBenignNoOp(t *testing.T) {
 	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
 
 	msg := baseDepositMsg(v1, "bbbb000000000000000000000000000000000000", 0)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err)
 
 	// The same validator re-submitting the same key (a same-block resubmission
 	// race) is a benign no-op success, not a failure.
-	resp, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	resp, err := ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -82,7 +85,7 @@ func TestSubmitSteemDeposit_DuplicateConfirmationIsBenignNoOp(t *testing.T) {
 	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 1, "duplicate confirmation must not be recorded twice")
 }
 
-func TestSubmitSteemDeposit_MismatchLeavesDepositUntouched(t *testing.T) {
+func TestAttestDeposit_MismatchLeavesDepositUntouched(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -94,13 +97,13 @@ func TestSubmitSteemDeposit_MismatchLeavesDepositUntouched(t *testing.T) {
 
 	txid := "cccc000000000000000000000000000000000000"
 	msg1 := baseDepositMsg(v1, txid, 0)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg1)
+	_, err := ms.AttestDeposit(f.ctx, msg1)
 	require.NoError(t, err)
 
 	msg2 := baseDepositMsg(v2, txid, 0)
 	msg2.AmountMillisteem = 9999 // conflicting raw fact
 
-	resp, err := ms.SubmitSteemDeposit(f.ctx, msg2)
+	resp, err := ms.AttestDeposit(f.ctx, msg2)
 	require.NoError(t, err, "a mismatch is a benign no-op, not a tx error")
 	require.NotNil(t, resp)
 
@@ -111,7 +114,7 @@ func TestSubmitSteemDeposit_MismatchLeavesDepositUntouched(t *testing.T) {
 	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 1, "the mismatching validator's confirmation must not be recorded")
 }
 
-func TestSubmitSteemDeposit_ThresholdMintsToDerivedDestination(t *testing.T) {
+func TestAttestDeposit_ThresholdMintsToDerivedDestination(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -133,7 +136,7 @@ func TestSubmitSteemDeposit_ThresholdMintsToDerivedDestination(t *testing.T) {
 
 	msg1 := baseDepositMsg(v1, txid, 0)
 	msg1.Memo = dest.String()
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg1)
+	_, err := ms.AttestDeposit(f.ctx, msg1)
 	require.NoError(t, err)
 
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
@@ -142,7 +145,7 @@ func TestSubmitSteemDeposit_ThresholdMintsToDerivedDestination(t *testing.T) {
 
 	msg2 := baseDepositMsg(v2, txid, 0)
 	msg2.Memo = dest.String()
-	_, err = ms.SubmitSteemDeposit(f.ctx, msg2)
+	_, err = ms.AttestDeposit(f.ctx, msg2)
 	require.NoError(t, err)
 
 	genesis, err = f.keeper.ExportGenesis(f.ctx)
@@ -177,7 +180,7 @@ func lastConfirmedRatio(t *testing.T, ctx sdk.Context) string {
 	return ""
 }
 
-func TestSubmitSteemDeposit_ThresholdRecomputesLiveNotSnapshotted(t *testing.T) {
+func TestAttestDeposit_ThresholdRecomputesLiveNotSnapshotted(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 
@@ -208,12 +211,12 @@ func TestSubmitSteemDeposit_ThresholdRecomputesLiveNotSnapshotted(t *testing.T) 
 
 	// total bonded = vBig(800)+v1(100)+v2(100)+v3(100) = 1100 throughout,
 	// until v2 unbonds below.
-	_, err = ms.SubmitSteemDeposit(f.ctx, baseDepositMsg(v1, txid, 0))
+	_, err = ms.AttestDeposit(f.ctx, baseDepositMsg(v1, txid, 0))
 	require.NoError(t, err)
 	// confirmed = v1(100); total = 1100
 	require.Equal(t, math.LegacyNewDec(100).QuoInt64(1100).String(), lastConfirmedRatio(t, sdkCtx))
 
-	_, err = ms.SubmitSteemDeposit(f.ctx, baseDepositMsg(v2, txid, 0))
+	_, err = ms.AttestDeposit(f.ctx, baseDepositMsg(v2, txid, 0))
 	require.NoError(t, err)
 	// confirmed = v1+v2 = 200; total unchanged = 1100
 	require.Equal(t, math.LegacyNewDec(200).QuoInt64(1100).String(), lastConfirmedRatio(t, sdkCtx))
@@ -223,7 +226,7 @@ func TestSubmitSteemDeposit_ThresholdRecomputesLiveNotSnapshotted(t *testing.T) 
 	// from current bonded stake on every confirmation, never snapshotted.
 	f.stakingKeeper.setValidator(v2.ValAddr, 100, false)
 
-	_, err = ms.SubmitSteemDeposit(f.ctx, baseDepositMsg(v3, txid, 0))
+	_, err = ms.AttestDeposit(f.ctx, baseDepositMsg(v3, txid, 0))
 	require.NoError(t, err)
 	// confirmed = v1(100, bonded) + v2(EXCLUDED, unbonded) + v3(100, bonded) = 200
 	// total = vBig(800) + v1(100) + v3(100) = 1000 (v2 excluded from total too)
@@ -231,7 +234,7 @@ func TestSubmitSteemDeposit_ThresholdRecomputesLiveNotSnapshotted(t *testing.T) 
 	require.Equal(t, math.LegacyNewDec(200).QuoInt64(1000).String(), lastConfirmedRatio(t, sdkCtx))
 }
 
-func TestSubmitSteemDeposit_UnparseableMemoBecomesUnclaimable(t *testing.T) {
+func TestAttestDeposit_UnparseableMemoBecomesUnclaimable(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -241,7 +244,7 @@ func TestSubmitSteemDeposit_UnparseableMemoBecomesUnclaimable(t *testing.T) {
 
 	msg := baseDepositMsg(v1, "2222000000000000000000000000000000000000", 0)
 	msg.Memo = "not-an-address"
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err)
 
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
@@ -251,7 +254,7 @@ func TestSubmitSteemDeposit_UnparseableMemoBecomesUnclaimable(t *testing.T) {
 	require.True(t, genesis.TotalMintedAsteem.IsZero())
 }
 
-func TestSubmitSteemDeposit_OutOfRangeAmountBecomesUnclaimable(t *testing.T) {
+func TestAttestDeposit_OutOfRangeAmountBecomesUnclaimable(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 
@@ -266,7 +269,7 @@ func TestSubmitSteemDeposit_OutOfRangeAmountBecomesUnclaimable(t *testing.T) {
 
 	msg := baseDepositMsg(v1, "3333000000000000000000000000000000000000", 0)
 	msg.AmountMillisteem = 1000 // exceeds the 500 max
-	_, err = ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err = ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err)
 
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
@@ -274,7 +277,7 @@ func TestSubmitSteemDeposit_OutOfRangeAmountBecomesUnclaimable(t *testing.T) {
 	require.Equal(t, types.DepositStatus_DEPOSIT_STATUS_UNCLAIMABLE, genesis.DepositList[0].Status)
 }
 
-func TestSubmitSteemDeposit_AlreadyMintedResubmissionIsBenignNoOp(t *testing.T) {
+func TestAttestDeposit_PostMintAttestationIsRecordedNotReminted(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -284,7 +287,7 @@ func TestSubmitSteemDeposit_AlreadyMintedResubmissionIsBenignNoOp(t *testing.T) 
 
 	txid := "4444000000000000000000000000000000000000"
 	msg := baseDepositMsg(v1, txid, 0)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err)
 
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
@@ -292,13 +295,13 @@ func TestSubmitSteemDeposit_AlreadyMintedResubmissionIsBenignNoOp(t *testing.T) 
 	require.True(t, genesis.DepositList[0].Minted, "sole bonded validator confirming alone must reach 100% >= 2/3")
 	mintedBefore := genesis.TotalMintedAsteem
 
-	// A late validator attests the already-minted deposit — the common
-	// same-block race once 2/3 is crossed. It must be a benign no-op success,
-	// NOT a failed tx, and must NOT mint again or record another confirmation.
+	// A late validator attests the already-minted deposit. It must succeed and
+	// must NOT mint again — but its attestation IS recorded now, so the deposit
+	// captures every validator that attested (bridge-participation data).
 	v2 := newTestValidator(t, 2)
 	f.stakingKeeper.setValidator(v2.ValAddr, 100, true)
 	msg2 := baseDepositMsg(v2, txid, 0)
-	resp, err := ms.SubmitSteemDeposit(f.ctx, msg2)
+	resp, err := ms.AttestDeposit(f.ctx, msg2)
 	require.NoError(t, err, "attesting an already-resolved deposit must not fail")
 	require.NotNil(t, resp)
 
@@ -306,11 +309,11 @@ func TestSubmitSteemDeposit_AlreadyMintedResubmissionIsBenignNoOp(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, genesis.DepositList, 1)
 	require.Equal(t, types.DepositStatus_DEPOSIT_STATUS_MINTED, genesis.DepositList[0].Status)
-	require.True(t, mintedBefore.Equal(genesis.TotalMintedAsteem), "the redundant attestation must not mint again")
-	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 1, "the redundant attestation must not be recorded")
+	require.True(t, mintedBefore.Equal(genesis.TotalMintedAsteem), "the late attestation must not mint again")
+	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 2, "the late validator's attestation is recorded")
 }
 
-func TestSubmitSteemDeposit_GatewayMismatchRejected(t *testing.T) {
+func TestAttestDeposit_GatewayMismatchRejected(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -320,11 +323,11 @@ func TestSubmitSteemDeposit_GatewayMismatchRejected(t *testing.T) {
 
 	msg := baseDepositMsg(v1, "5555000000000000000000000000000000000000", 0)
 	msg.GatewayAccount = "wrong-gateway"
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.ErrorIs(t, err, types.ErrInvalidGatewayAccount)
 }
 
-func TestSubmitSteemDeposit_BridgeDisabledRejected(t *testing.T) {
+func TestAttestDeposit_BridgeDisabledRejected(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	// bridge stays disabled (DefaultParams)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -333,11 +336,11 @@ func TestSubmitSteemDeposit_BridgeDisabledRejected(t *testing.T) {
 	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
 
 	msg := baseDepositMsg(v1, "6666000000000000000000000000000000000000", 0)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.ErrorIs(t, err, types.ErrBridgeDisabled)
 }
 
-func TestSubmitSteemDeposit_UnbondedValidatorRejected(t *testing.T) {
+func TestAttestDeposit_UnbondedValidatorRejected(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -346,6 +349,6 @@ func TestSubmitSteemDeposit_UnbondedValidatorRejected(t *testing.T) {
 	f.stakingKeeper.setValidator(v1.ValAddr, 100, false)
 
 	msg := baseDepositMsg(v1, "7777000000000000000000000000000000000000", 0)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.ErrorIs(t, err, types.ErrNotBondedValidator)
 }

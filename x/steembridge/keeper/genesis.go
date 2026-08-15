@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"cosmossdk.io/collections"
+	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"steemvm/x/steembridge/types"
@@ -57,6 +58,12 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 	if err := k.Totals.Set(ctx, types.BridgeTotals{
 		TotalMintedAsteem: genState.TotalMintedAsteem,
 		TotalBurnedAsteem: genState.TotalBurnedAsteem,
+		// SBD totals are not (yet) part of GenesisState; zero-init so the
+		// non-nullable math.Int fields are never nil. (Export currently drops
+		// them — add total_minted_asbd/total_burned_asbd to genesis.proto to
+		// round-trip once SBD volume matters.)
+		TotalMintedAsbd: math.ZeroInt(),
+		TotalBurnedAsbd: math.ZeroInt(),
 	}); err != nil {
 		return err
 	}

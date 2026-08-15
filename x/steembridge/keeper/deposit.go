@@ -34,27 +34,28 @@ func (k Keeper) lookupDepositByTxid(ctx context.Context, txid string, opIndex ui
 // matchesPending reports whether a new submission's raw facts exactly match
 // an existing pending deposit's stored raw facts. (txid, opIndex) are equal
 // by construction since existing was looked up by that same key.
-func matchesPending(existing types.Deposit, msg *types.MsgSubmitSteemDeposit) bool {
+func matchesPending(existing types.Deposit, msg *types.MsgAttestDeposit) bool {
 	return existing.SteemBlock == msg.SteemBlock &&
 		existing.SteemTimestamp == msg.SteemTimestamp &&
 		existing.SteemSender == msg.SteemSender &&
 		existing.GatewayAccount == msg.GatewayAccount &&
 		existing.AmountMillisteem == msg.AmountMillisteem &&
-		existing.Memo == msg.Memo
+		existing.Memo == msg.Memo &&
+		existing.Asset == msg.Asset
 }
 
 // ValidateDepositAcceptance performs the read-only, stateful checks that
-// decide whether a MsgSubmitSteemDeposit submission would be accepted by
-// SubmitSteemDeposit: the bridge must be enabled, the gateway account must
+// decide whether a MsgAttestDeposit submission would be accepted by
+// AttestDeposit: the bridge must be enabled, the gateway account must
 // match, this validator must not have already confirmed this key, the key
 // must not already be resolved (minted or unclaimable), and if a pending
 // deposit already exists its raw facts must exactly match this submission.
 //
-// This is the single source of truth shared by both SubmitSteemDeposit
+// This is the single source of truth shared by both AttestDeposit
 // itself and the ante handler's fee-exemption decorator (app/ante_steembridge.go),
 // so the two can never drift on what counts as "would be accepted."
 // It performs no state mutation.
-func (k Keeper) ValidateDepositAcceptance(ctx context.Context, msg *types.MsgSubmitSteemDeposit) error {
+func (k Keeper) ValidateDepositAcceptance(ctx context.Context, msg *types.MsgAttestDeposit) error {
 	params, err := k.Params.Get(ctx)
 	if err != nil {
 		return err
@@ -139,7 +140,7 @@ func (k Keeper) resolveDeposit(ctx context.Context, deposit *types.Deposit, para
 		return nil
 	}
 
-	mintAmount, err := k.creditBridgedSteem(ctx, destAddr, deposit.AmountMillisteem)
+	mintAmount, err := k.creditBridged(ctx, destAddr, deposit.Asset, deposit.AmountMillisteem, params.BridgeFeeBps)
 	if err != nil {
 		return err
 	}
@@ -167,34 +168,50 @@ func (k Keeper) resolveDeposit(ctx context.Context, deposit *types.Deposit, para
 	return nil
 }
 
-// creditBridgedSteem is the single place bridged STEEM enters circulation. It
-// mints the asteem equivalent of amountMillisteem, sends it to destAddr, and
-// records it in the running mint totals, returning the minted asteem amount for
-// event emission. Both deposit resolution and name-registration resolution (the
-// registration fee funds the destination's confirmation gas) go through here,
-// so the two can never drift on how STEEM is credited or accounted for. The
-// bank balance change reaches the EVM stateDB automatically via the balance
-// handler, so no extra EVM bookkeeping is needed.
-func (k Keeper) creditBridgedSteem(ctx context.Context, destAddr sdk.AccAddress, amountMillisteem uint64) (math.Int, error) {
-	mintAmount := types.MillisteemToAsteem(amountMillisteem)
-	coins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, mintAmount))
+// creditBridged is the single place bridged STEEM/SBD enters circulation. Per the
+// "virtual transaction" model it mints the FULL gross amount into the
+// STEEMBLACKHOLE module account, then sends the net (gross - fee) to destAddr — so
+// on-chain the deposit reads as a transfer *from* the black hole, not a bare mint —
+// and routes the fee to the bridge_reward account (100% staking reward, §4b). The
+// black hole nets to zero (all minted is sent out). Name-registration resolution
+// also goes through here with feeBps=0 and STEEM, so the paths can't drift. Returns
+// the net amount credited to destAddr for event emission. The bank balance change
+// reaches the EVM stateDB automatically via the balance handler.
+func (k Keeper) creditBridged(ctx context.Context, destAddr sdk.AccAddress, asset types.BridgeAsset, grossMilli uint64, feeBps uint32) (math.Int, error) {
+	denom := types.DenomForAsset(asset)
+	netMilli, feeMilli := types.ApplyBridgeFee(grossMilli, feeBps)
 
-	if err := k.bankKeeper.MintCoins(ctx, types.ModuleName, coins); err != nil {
+	grossAmt := types.MillisteemToAsteem(grossMilli)
+	netAmt := types.MillisteemToAsteem(netMilli)
+	feeAmt := types.MillisteemToAsteem(feeMilli)
+
+	if err := k.bankKeeper.MintCoins(ctx, types.BlackHoleModuleName, sdk.NewCoins(sdk.NewCoin(denom, grossAmt))); err != nil {
 		return math.Int{}, err
 	}
-	if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, destAddr, coins); err != nil {
-		return math.Int{}, err
+	if netAmt.IsPositive() {
+		if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.BlackHoleModuleName, destAddr, sdk.NewCoins(sdk.NewCoin(denom, netAmt))); err != nil {
+			return math.Int{}, err
+		}
+	}
+	if feeAmt.IsPositive() {
+		if err := k.bankKeeper.SendCoinsFromModuleToModule(ctx, types.BlackHoleModuleName, types.BridgeRewardModuleName, sdk.NewCoins(sdk.NewCoin(denom, feeAmt))); err != nil {
+			return math.Int{}, err
+		}
 	}
 
 	totals, err := k.Totals.Get(ctx)
 	if err != nil {
 		return math.Int{}, err
 	}
-	totals.TotalMintedAsteem = totals.TotalMintedAsteem.Add(mintAmount)
+	if asset == types.BridgeAsset_BRIDGE_ASSET_SBD {
+		totals.TotalMintedAsbd = totals.TotalMintedAsbd.Add(grossAmt)
+	} else {
+		totals.TotalMintedAsteem = totals.TotalMintedAsteem.Add(grossAmt)
+	}
 	if err := k.Totals.Set(ctx, totals); err != nil {
 		return math.Int{}, err
 	}
-	return mintAmount, nil
+	return netAmt, nil
 }
 
 // txHashHex derives an audit-trail reference for the current transaction.

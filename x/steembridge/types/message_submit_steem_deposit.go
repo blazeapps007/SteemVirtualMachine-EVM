@@ -14,7 +14,7 @@ var steemTxidRegex = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // reach any state access. It intentionally does NOT check anything stateful
 // (bridge enabled, gateway match, dedup) — that's ValidateDepositAcceptance's
 // job in the keeper, which needs store access this method doesn't have.
-func (msg *MsgSubmitSteemDeposit) ValidateBasic() error {
+func (msg *MsgAttestDeposit) ValidateBasic() error {
 	if !steemTxidRegex.MatchString(msg.Txid) {
 		return errortypes.ErrInvalidRequest.Wrapf("txid %q must be 40 lowercase hex characters", msg.Txid)
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 // MaxFreeDepositsPerValidatorPerBlock caps how many fee-exempt validator
-// attestations (MsgSubmitSteemDeposit and MsgSubmitNameRegistration draw
+// attestations (MsgAttestDeposit and MsgSubmitNameRegistration draw
 // from this single shared budget) a single validator can have processed free
 // of charge in a single block, as defense in depth alongside the stateful
 // acceptance checks the ante handler also performs.

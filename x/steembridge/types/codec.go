@@ -12,7 +12,11 @@ func RegisterInterfaces(registrar codectypes.InterfaceRegistry) {
 	)
 
 	registrar.RegisterImplementations((*sdk.Msg)(nil),
-		&MsgSubmitSteemDeposit{},
+		&MsgAttestDeposit{},
+	)
+
+	registrar.RegisterImplementations((*sdk.Msg)(nil),
+		&MsgAttestWithdrawalPayout{},
 	)
 
 	registrar.RegisterImplementations((*sdk.Msg)(nil),

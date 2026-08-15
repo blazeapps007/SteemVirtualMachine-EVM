@@ -12,7 +12,7 @@ import (
 	"steemvm/x/steembridge/types"
 )
 
-func SimulateMsgSubmitSteemDeposit(
+func SimulateMsgAttestDeposit(
 	ak types.AuthKeeper,
 	bk types.BankKeeper,
 	k keeper.Keeper,
@@ -21,12 +21,12 @@ func SimulateMsgSubmitSteemDeposit(
 	return func(r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		simAccount, _ := simtypes.RandomAcc(r, accs)
-		msg := &types.MsgSubmitSteemDeposit{
+		msg := &types.MsgAttestDeposit{
 			Validator: simAccount.Address.String(),
 		}
 
-		// TODO: Handle the SubmitSteemDeposit simulation
+		// TODO: Handle the AttestDeposit simulation
 
-		return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "SubmitSteemDeposit simulation not implemented"), nil, nil
+		return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "AttestDeposit simulation not implemented"), nil, nil
 	}
 }

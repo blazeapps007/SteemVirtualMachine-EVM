@@ -2,14 +2,17 @@ syntax = "proto3";
 package steemvm.steembridge.v1;
 
 import "gogoproto/gogo.proto";
+import "steemvm/steembridge/v1/asset.proto";
+import "steemvm/steembridge/v1/deposit.proto";
 
 option go_package = "steemvm/x/steembridge/types";
 
-// WithdrawalStatus is the status of a withdrawal. A withdrawal is an immutable
-// bridge-out request record (asteem already burned); there is no on-chain
-// relay/completion flow, so REQUESTED is the only status.
+// WithdrawalStatus is the lifecycle status of a withdrawal. REQUESTED is the
+// bridge-out request (funds already burned); PROCESSED means bonded validators
+// have attested (2/3) that the gateway paid the user on Steem.
 enum WithdrawalStatus {
   WITHDRAWAL_STATUS_REQUESTED = 0;
+  WITHDRAWAL_STATUS_PROCESSED = 1;
 }
 
 // Withdrawal defines the Withdrawal message.
@@ -17,13 +20,27 @@ message Withdrawal {
   uint64 id = 1;
   string sender = 2;
   string destination_steem_account = 3;
+  // amount_asteem is the base-unit amount the sender burned (the DenomForAsset(asset)
+  // amount; the field name is historical). amount_millisteem below is the NET payout.
   string amount_asteem = 4 [
     (gogoproto.customtype) = "cosmossdk.io/math.Int",
     (gogoproto.nullable) = false
   ];
+  // amount_millisteem is the NET Steem-side payout (gross minus the bridge fee).
   uint64 amount_millisteem = 5;
   string memo = 6;
   string burn_tx_hash = 7;
   WithdrawalStatus status = 8;
   uint64 created_at = 9;
+  // asset is which native Steem asset this withdrawal pays out (STEEM/SBD).
+  BridgeAsset asset = 10;
+  // fee_millisteem is the bridge fee withheld from the payout (gross - net).
+  uint64 fee_millisteem = 11;
+  // steem_payout_txid / payout_op_index reference the gateway's Steem payout, set
+  // when the withdrawal is marked PROCESSED.
+  string steem_payout_txid = 12;
+  uint32 payout_op_index = 13;
+  uint64 processed_at = 14;
+  // validator_confirmations records the bonded validators that attested the payout.
+  repeated Confirmation validator_confirmations = 15;
 }

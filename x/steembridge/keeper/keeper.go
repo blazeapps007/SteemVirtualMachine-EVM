@@ -24,6 +24,7 @@ type Keeper struct {
 
 	bankKeeper    types.BankKeeper
 	stakingKeeper types.StakingKeeper
+	distrKeeper   types.DistrKeeper
 	DepositSeq    collections.Sequence
 	Deposit       collections.Map[uint64, types.Deposit]
 	WithdrawalSeq collections.Sequence
@@ -40,12 +41,15 @@ type Keeper struct {
 	// expiry sweep are ordered prefix scans instead of full-table filters.
 	DepositByStatus    collections.KeySet[collections.Pair[int32, uint64]]
 	WithdrawalByStatus collections.KeySet[collections.Pair[int32, uint64]]
+	// WithdrawalConfirmedBy records which validators have already attested a
+	// given withdrawal's Steem payout (dedup for MsgAttestWithdrawalPayout).
+	WithdrawalConfirmedBy collections.KeySet[collections.Pair[uint64, []byte]]
 
 	// Totals holds cumulative mint/burn statistics for the BridgeStatistics query.
 	Totals collections.Item[types.BridgeTotals]
 
 	// FreeDepositCounter backs the ante handler's per-validator, per-block
-	// cap on fee-exempt validator attestations (MsgSubmitSteemDeposit and
+	// cap on fee-exempt validator attestations (MsgAttestDeposit and
 	// MsgSubmitNameRegistration share this single budget).
 	FreeDepositCounter collections.Map[[]byte, types.FreeDepositCounter]
 
@@ -82,6 +86,7 @@ func NewKeeper(
 
 	bankKeeper types.BankKeeper,
 	stakingKeeper types.StakingKeeper,
+	distrKeeper types.DistrKeeper,
 ) Keeper {
 	if _, err := addressCodec.BytesToString(authority); err != nil {
 		panic(fmt.Sprintf("invalid authority address %s: %s", authority, err))
@@ -97,6 +102,7 @@ func NewKeeper(
 
 		bankKeeper:    bankKeeper,
 		stakingKeeper: stakingKeeper,
+		distrKeeper:   distrKeeper,
 		Params:        collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
 		Deposit:       collections.NewMap(sb, types.DepositKey, "deposit", collections.Uint64Key, codec.CollValue[types.Deposit](cdc)),
 		DepositSeq:    collections.NewSequence(sb, types.DepositCountKey, "depositSequence"),
@@ -119,6 +125,10 @@ func NewKeeper(
 		WithdrawalByStatus: collections.NewKeySet(
 			sb, types.WithdrawalByStatusKey, "withdrawal_by_status",
 			collections.PairKeyCodec(collections.Int32Key, collections.Uint64Key),
+		),
+		WithdrawalConfirmedBy: collections.NewKeySet(
+			sb, types.WithdrawalConfirmedByKey, "withdrawal_confirmed_by",
+			collections.PairKeyCodec(collections.Uint64Key, collections.BytesKey),
 		),
 		Totals: collections.NewItem(sb, types.TotalsKey, "totals", codec.CollValue[types.BridgeTotals](cdc)),
 		FreeDepositCounter: collections.NewMap(

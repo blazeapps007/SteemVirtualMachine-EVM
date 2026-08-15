@@ -72,6 +72,28 @@ func (f *fakeBankKeeper) SendCoinsFromModuleToAccount(_ context.Context, moduleN
 	return nil
 }
 
+func (f *fakeBankKeeper) SendCoinsFromModuleToModule(_ context.Context, from, to string, amt sdk.Coins) error {
+	newBal, negative := f.balances[from].SafeSub(amt...)
+	if negative {
+		return fmt.Errorf("insufficient module balance")
+	}
+	f.balances[from] = newBal
+	f.balances[to] = f.balances[to].Add(amt...)
+	return nil
+}
+
+func (f *fakeBankKeeper) GetAllBalances(_ context.Context, addr sdk.AccAddress) sdk.Coins {
+	return f.balances[addr.String()]
+}
+
+// fakeDistrKeeper is a no-op DistrKeeper; SplitFees runs in BeginBlock and is
+// not exercised by the keeper unit tests.
+type fakeDistrKeeper struct{}
+
+func (fakeDistrKeeper) FundCommunityPool(_ context.Context, _ sdk.Coins, _ sdk.AccAddress) error {
+	return nil
+}
+
 // fakeStakingKeeper is a minimal, in-memory implementation of
 // types.StakingKeeper letting tests directly control bonded status and
 // voting power per validator, including changing them between confirmations
@@ -131,7 +153,7 @@ func (f *fakeStakingKeeper) TotalBondedTokens(context.Context) (math.Int, error)
 }
 
 // testValidator is a test-only bundle of a single validator's account bech32
-// string (used as MsgSubmitSteemDeposit.Validator, the tx signer) and its
+// string (used as MsgAttestDeposit.Validator, the tx signer) and its
 // corresponding operator address (same 20 bytes, different bech32 prefix).
 type testValidator struct {
 	AccAddr string
@@ -188,6 +210,7 @@ func initFixtureWithFakes(t *testing.T) *fixtureWithFakes {
 		authority,
 		bankKeeper,
 		stakingKeeper,
+		&fakeDistrKeeper{},
 	)
 
 	if err := k.Params.Set(ctx, types.DefaultParams()); err != nil {

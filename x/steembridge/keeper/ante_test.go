@@ -47,7 +47,7 @@ func TestValidateDepositAcceptance_Boundaries(t *testing.T) {
 	})
 
 	ms := keeper.NewMsgServerImpl(f.keeper)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err)
 
 	t.Run("duplicate confirmation from the same validator", func(t *testing.T) {
@@ -79,7 +79,7 @@ func TestValidateDepositAcceptance_AlreadyMinted(t *testing.T) {
 	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
 
 	msg := baseDepositMsg(v1, "bbbb111111111111111111111111111111111111", 0)
-	_, err := ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err := ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err) // sole bonded validator confirming alone reaches 100% >= 2/3, mints
 
 	v2 := newTestValidator(t, 2)

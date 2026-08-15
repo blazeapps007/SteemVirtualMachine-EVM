@@ -9,8 +9,8 @@ import (
 	"steemvm/x/steembridge/types"
 )
 
-func validSubmitDepositMsg() *types.MsgSubmitSteemDeposit {
-	return &types.MsgSubmitSteemDeposit{
+func validSubmitDepositMsg() *types.MsgAttestDeposit {
+	return &types.MsgAttestDeposit{
 		Validator:        sdk.AccAddress(make([]byte, 20)).String(),
 		Txid:             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // 40 lowercase hex
 		OpIndex:          0,
@@ -23,7 +23,7 @@ func validSubmitDepositMsg() *types.MsgSubmitSteemDeposit {
 	}
 }
 
-func TestMsgSubmitSteemDeposit_ValidateBasic(t *testing.T) {
+func TestMsgAttestDeposit_ValidateBasic(t *testing.T) {
 	require.NoError(t, validSubmitDepositMsg().ValidateBasic())
 
 	t.Run("uppercase txid rejected", func(t *testing.T) {

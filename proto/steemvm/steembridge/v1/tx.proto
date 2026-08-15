@@ -6,6 +6,7 @@ import "amino/amino.proto";
 import "cosmos/msg/v1/msg.proto";
 import "cosmos_proto/cosmos.proto";
 import "gogoproto/gogo.proto";
+import "steemvm/steembridge/v1/asset.proto";
 import "steemvm/steembridge/v1/params.proto";
 
 option go_package = "steemvm/x/steembridge/types";
@@ -18,11 +19,16 @@ service Msg {
   // parameters. The authority defaults to the x/gov module account.
   rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
 
-  // SubmitSteemDeposit defines the SubmitSteemDeposit RPC.
-  rpc SubmitSteemDeposit(MsgSubmitSteemDeposit) returns (MsgSubmitSteemDepositResponse);
+  // AttestDeposit is a bonded validator's attestation of a Steem gateway deposit
+  // (STEEM or SBD). At 2/3 bonded power the deposit finalizes and mints.
+  rpc AttestDeposit(MsgAttestDeposit) returns (MsgAttestDepositResponse);
 
   // BridgeOut defines the BridgeOut RPC.
   rpc BridgeOut(MsgBridgeOut) returns (MsgBridgeOutResponse);
+
+  // AttestWithdrawalPayout is a bonded validator's attestation that the gateway
+  // paid a bridge-out on Steem. At 2/3 the withdrawal is marked PROCESSED.
+  rpc AttestWithdrawalPayout(MsgAttestWithdrawalPayout) returns (MsgAttestWithdrawalPayoutResponse);
 
   // SubmitNameRegistration defines the SubmitNameRegistration RPC.
   rpc SubmitNameRegistration(MsgSubmitNameRegistration) returns (MsgSubmitNameRegistrationResponse);
@@ -51,8 +57,8 @@ message MsgUpdateParams {
 // MsgUpdateParams message.
 message MsgUpdateParamsResponse {}
 
-// MsgSubmitSteemDeposit defines the MsgSubmitSteemDeposit message.
-message MsgSubmitSteemDeposit {
+// MsgAttestDeposit is a bonded validator's attestation of a Steem gateway deposit.
+message MsgAttestDeposit {
   option (cosmos.msg.v1.signer) = "validator";
   string validator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
   string txid = 2;
@@ -63,10 +69,12 @@ message MsgSubmitSteemDeposit {
   string gateway_account = 7;
   uint64 amount_millisteem = 8;
   string memo = 9;
+  // asset is which native Steem asset was deposited (STEEM or SBD).
+  BridgeAsset asset = 10;
 }
 
-// MsgSubmitSteemDepositResponse defines the MsgSubmitSteemDepositResponse message.
-message MsgSubmitSteemDepositResponse {}
+// MsgAttestDepositResponse defines the MsgAttestDeposit response.
+message MsgAttestDepositResponse {}
 
 // MsgBridgeOut defines the MsgBridgeOut message.
 message MsgBridgeOut {
@@ -78,10 +86,27 @@ message MsgBridgeOut {
     (gogoproto.nullable) = false
   ];
   string memo = 4;
+  // asset is which native coin to burn (STEEM=asteem, SBD=asbd). Default STEEM.
+  BridgeAsset asset = 5;
 }
 
 // MsgBridgeOutResponse defines the MsgBridgeOutResponse message.
 message MsgBridgeOutResponse {}
+
+// MsgAttestWithdrawalPayout is a bonded validator's attestation that the gateway
+// paid a bridge-out to the user on Steem (memo "svm-withdrawal <id>").
+message MsgAttestWithdrawalPayout {
+  option (cosmos.msg.v1.signer) = "validator";
+  string validator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 withdrawal_id = 2;
+  string steem_txid = 3;
+  uint32 op_index = 4;
+  uint64 steem_block = 5;
+  string steem_timestamp = 6;
+}
+
+// MsgAttestWithdrawalPayoutResponse defines the MsgAttestWithdrawalPayout response.
+message MsgAttestWithdrawalPayoutResponse {}
 
 // MsgSubmitNameRegistration is a bonded validator's attestation that a Steem
 // account sent a qualifying transfer to the gateway requesting a name link.

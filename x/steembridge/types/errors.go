@@ -30,6 +30,10 @@ var (
 	ErrConfirmerNotDestination     = errors.Register(ModuleName, 1116, "signer is not the registration's derived destination")
 	ErrRegistrationBelowMinimum    = errors.Register(ModuleName, 1117, "registration amount below the name registration minimum")
 	ErrTooManyFreeConfirmations    = errors.Register(ModuleName, 1118, "too many free name confirmations from this address this block")
+	ErrWithdrawalNotFound              = errors.Register(ModuleName, 1119, "withdrawal not found")
+	ErrWithdrawalAlreadyProcessed      = errors.Register(ModuleName, 1120, "withdrawal already processed")
+	ErrDuplicateWithdrawalConfirmation = errors.Register(ModuleName, 1121, "validator has already attested this withdrawal payout")
+	ErrWithdrawalPayoutMismatch        = errors.Register(ModuleName, 1122, "withdrawal payout attestation does not match the recorded payout facts")
 )
 
 // IsBenignAttestationError reports whether an acceptance error represents a
@@ -50,5 +54,7 @@ func IsBenignAttestationError(err error) bool {
 	}
 	return goerrors.Is(err, ErrDepositAlreadyMinted) ||
 		goerrors.Is(err, ErrRegistrationAlreadyResolved) ||
-		goerrors.Is(err, ErrDuplicateConfirmation)
+		goerrors.Is(err, ErrDuplicateConfirmation) ||
+		goerrors.Is(err, ErrWithdrawalAlreadyProcessed) ||
+		goerrors.Is(err, ErrDuplicateWithdrawalConfirmation)
 }

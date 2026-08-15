@@ -27,7 +27,7 @@ func TestExpireDeposits(t *testing.T) {
 
 	txid := "8888000000000000000000000000000000000000"
 	msg := baseDepositMsg(v1, txid, 0)
-	_, err = ms.SubmitSteemDeposit(f.ctx, msg)
+	_, err = ms.AttestDeposit(f.ctx, msg)
 	require.NoError(t, err)
 
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
@@ -45,7 +45,7 @@ func TestExpireDeposits(t *testing.T) {
 	// The (txid, opIndex) key must be resubmittable fresh after expiry: a
 	// brand new deposit record must be created rather than reusing/erroring
 	// on the expired one.
-	_, err = ms.SubmitSteemDeposit(sdkCtx, baseDepositMsg(v1, txid, 0))
+	_, err = ms.AttestDeposit(sdkCtx, baseDepositMsg(v1, txid, 0))
 	require.NoError(t, err)
 
 	genesis, err = f.keeper.ExportGenesis(f.ctx)
@@ -69,7 +69,7 @@ func TestExpireDeposits_NotYetTimedOutSurvives(t *testing.T) {
 	f.stakingKeeper.setValidator(vOther.ValAddr, 100, true)
 
 	txid := "9999000000000000000000000000000000000000"
-	_, err = ms.SubmitSteemDeposit(f.ctx, baseDepositMsg(v1, txid, 0))
+	_, err = ms.AttestDeposit(f.ctx, baseDepositMsg(v1, txid, 0))
 	require.NoError(t, err)
 
 	sdkCtx := sdk.UnwrapSDKContext(f.ctx).WithBlockHeight(50)

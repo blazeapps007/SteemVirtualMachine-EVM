@@ -1,6 +1,8 @@
 package app
 
 import (
+	_ "steemvm/x/oracle/data/module"
+	oracledatamoduletypes "steemvm/x/oracle/data/types"
 	_ "steemvm/x/steembridge/module"
 	steembridgemoduletypes "steemvm/x/steembridge/types"
 	_ "steemvm/x/steemvm/module"
@@ -92,8 +94,12 @@ var (
 		{Account: icatypes.ModuleName},
 		{Account: evmmoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}}, {Account: erc20moduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
 		{Account: feemarketmoduletypes.ModuleName},
-		// blocked account addresses
-		{Account: steembridgemoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}}}
+		{Account: steembridgemoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
+		// STEEMBLACKHOLE: bridge mints out of it and its balance is burned every
+		// EndBlock (Minter+Burner). bridge_reward holds the 0.25% bridge fee until
+		// it is routed to stakers (no special perms).
+		{Account: steembridgemoduletypes.BlackHoleModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
+		{Account: steembridgemoduletypes.BridgeRewardModuleName}}
 	blockAccAddrs = []string{
 		authtypes.FeeCollectorName,
 		distrtypes.ModuleName,
@@ -123,6 +129,9 @@ var (
 					// NOTE: staking module is required if HistoricalEntries param > 0
 					BeginBlockers: []string{
 						minttypes.ModuleName,
+						// steembridge fee-split (SplitFees) must run BEFORE distribution's
+						// BeginBlocker consumes the fee_collector balance.
+						steembridgemoduletypes.ModuleName,
 						distrtypes.ModuleName,
 						slashingtypes.ModuleName,
 						evidencetypes.ModuleName,
@@ -132,14 +141,14 @@ var (
 						// ibc modules
 						ibcexported.ModuleName,
 						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName},
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName},
 					EndBlockers: []string{
 						govtypes.ModuleName,
 						stakingtypes.ModuleName,
 						feegrant.ModuleName,
 						group.ModuleName,
 						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName},
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName},
 					// The following is mostly only needed when ModuleName != StoreKey name.
 					OverrideStoreKeys: []*runtimev1alpha1.StoreKeyConfig{
 						{
@@ -174,7 +183,7 @@ var (
 						ibctransfertypes.ModuleName,
 						icatypes.ModuleName,
 						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName},
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName},
 				}),
 			},
 			{
@@ -275,6 +284,9 @@ var (
 			}, {
 				Name:   steembridgemoduletypes.ModuleName,
 				Config: appconfig.WrapAny(&steembridgemoduletypes.Module{}),
+			}, {
+				Name:   oracledatamoduletypes.ModuleName,
+				Config: appconfig.WrapAny(&oracledatamoduletypes.Module{}),
 			}},
 	})
 )

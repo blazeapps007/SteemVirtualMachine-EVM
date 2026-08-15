@@ -1,0 +1,50 @@
+syntax = "proto3";
+package steemvm.oracle.data.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/oracle/data/types";
+
+// ExchangeRate is the finalized on-chain price for a whitelisted pair, set each
+// vote period from the power-weighted median of validator votes.
+message ExchangeRate {
+  // pair is the currency pair, e.g. "STEEM/USD".
+  string pair = 1;
+  // rate is the power-weighted median price.
+  string rate = 2 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // update_epoch is height / vote_period at the time the rate was set.
+  uint64 update_epoch = 3;
+  // update_time is the block time (unix seconds) the rate was set.
+  int64 update_time = 4;
+}
+
+// ExchangeRateTuple is a single (pair, rate) pair inside a revealed vote.
+message ExchangeRateTuple {
+  string pair = 1;
+  string rate = 2 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+}
+
+// AggregateExchangeRatePrevote is the stored commit (hash) of a validator's
+// upcoming vote. The hash binds the salt, the exchange-rate string, and the
+// validator, so the later reveal can be verified.
+message AggregateExchangeRatePrevote {
+  // hash is the commit hash submitted in the prevote.
+  string hash = 1;
+  // voter is the bech32 validator operator address.
+  string voter = 2;
+  // submit_block is the height the prevote was recorded.
+  uint64 submit_block = 3;
+}
+
+// AggregateExchangeRateVote is a validator's revealed vote for all pairs.
+message AggregateExchangeRateVote {
+  repeated ExchangeRateTuple exchange_rates = 1 [(gogoproto.nullable) = false];
+  // voter is the bech32 validator operator address.
+  string voter = 2;
+}

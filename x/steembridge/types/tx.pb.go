@@ -125,8 +125,8 @@ func (m *MsgUpdateParamsResponse) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_MsgUpdateParamsResponse proto.InternalMessageInfo
 
-// MsgSubmitSteemDeposit defines the MsgSubmitSteemDeposit message.
-type MsgSubmitSteemDeposit struct {
+// MsgAttestDeposit is a bonded validator's attestation of a Steem gateway deposit.
+type MsgAttestDeposit struct {
 	Validator        string `protobuf:"bytes,1,opt,name=validator,proto3" json:"validator,omitempty"`
 	Txid             string `protobuf:"bytes,2,opt,name=txid,proto3" json:"txid,omitempty"`
 	OpIndex          uint32 `protobuf:"varint,3,opt,name=op_index,json=opIndex,proto3" json:"op_index,omitempty"`
@@ -136,20 +136,22 @@ type MsgSubmitSteemDeposit struct {
 	GatewayAccount   string `protobuf:"bytes,7,opt,name=gateway_account,json=gatewayAccount,proto3" json:"gateway_account,omitempty"`
 	AmountMillisteem uint64 `protobuf:"varint,8,opt,name=amount_millisteem,json=amountMillisteem,proto3" json:"amount_millisteem,omitempty"`
 	Memo             string `protobuf:"bytes,9,opt,name=memo,proto3" json:"memo,omitempty"`
+	// asset is which native Steem asset was deposited (STEEM or SBD).
+	Asset BridgeAsset `protobuf:"varint,10,opt,name=asset,proto3,enum=steemvm.steembridge.v1.BridgeAsset" json:"asset,omitempty"`
 }
 
-func (m *MsgSubmitSteemDeposit) Reset()         { *m = MsgSubmitSteemDeposit{} }
-func (m *MsgSubmitSteemDeposit) String() string { return proto.CompactTextString(m) }
-func (*MsgSubmitSteemDeposit) ProtoMessage()    {}
-func (*MsgSubmitSteemDeposit) Descriptor() ([]byte, []int) {
+func (m *MsgAttestDeposit) Reset()         { *m = MsgAttestDeposit{} }
+func (m *MsgAttestDeposit) String() string { return proto.CompactTextString(m) }
+func (*MsgAttestDeposit) ProtoMessage()    {}
+func (*MsgAttestDeposit) Descriptor() ([]byte, []int) {
 	return fileDescriptor_71748d65a225c5c8, []int{2}
 }
-func (m *MsgSubmitSteemDeposit) XXX_Unmarshal(b []byte) error {
+func (m *MsgAttestDeposit) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *MsgSubmitSteemDeposit) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *MsgAttestDeposit) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_MsgSubmitSteemDeposit.Marshal(b, m, deterministic)
+		return xxx_messageInfo_MsgAttestDeposit.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -159,97 +161,104 @@ func (m *MsgSubmitSteemDeposit) XXX_Marshal(b []byte, deterministic bool) ([]byt
 		return b[:n], nil
 	}
 }
-func (m *MsgSubmitSteemDeposit) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgSubmitSteemDeposit.Merge(m, src)
+func (m *MsgAttestDeposit) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAttestDeposit.Merge(m, src)
 }
-func (m *MsgSubmitSteemDeposit) XXX_Size() int {
+func (m *MsgAttestDeposit) XXX_Size() int {
 	return m.Size()
 }
-func (m *MsgSubmitSteemDeposit) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgSubmitSteemDeposit.DiscardUnknown(m)
+func (m *MsgAttestDeposit) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAttestDeposit.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_MsgSubmitSteemDeposit proto.InternalMessageInfo
+var xxx_messageInfo_MsgAttestDeposit proto.InternalMessageInfo
 
-func (m *MsgSubmitSteemDeposit) GetValidator() string {
+func (m *MsgAttestDeposit) GetValidator() string {
 	if m != nil {
 		return m.Validator
 	}
 	return ""
 }
 
-func (m *MsgSubmitSteemDeposit) GetTxid() string {
+func (m *MsgAttestDeposit) GetTxid() string {
 	if m != nil {
 		return m.Txid
 	}
 	return ""
 }
 
-func (m *MsgSubmitSteemDeposit) GetOpIndex() uint32 {
+func (m *MsgAttestDeposit) GetOpIndex() uint32 {
 	if m != nil {
 		return m.OpIndex
 	}
 	return 0
 }
 
-func (m *MsgSubmitSteemDeposit) GetSteemBlock() uint64 {
+func (m *MsgAttestDeposit) GetSteemBlock() uint64 {
 	if m != nil {
 		return m.SteemBlock
 	}
 	return 0
 }
 
-func (m *MsgSubmitSteemDeposit) GetSteemTimestamp() string {
+func (m *MsgAttestDeposit) GetSteemTimestamp() string {
 	if m != nil {
 		return m.SteemTimestamp
 	}
 	return ""
 }
 
-func (m *MsgSubmitSteemDeposit) GetSteemSender() string {
+func (m *MsgAttestDeposit) GetSteemSender() string {
 	if m != nil {
 		return m.SteemSender
 	}
 	return ""
 }
 
-func (m *MsgSubmitSteemDeposit) GetGatewayAccount() string {
+func (m *MsgAttestDeposit) GetGatewayAccount() string {
 	if m != nil {
 		return m.GatewayAccount
 	}
 	return ""
 }
 
-func (m *MsgSubmitSteemDeposit) GetAmountMillisteem() uint64 {
+func (m *MsgAttestDeposit) GetAmountMillisteem() uint64 {
 	if m != nil {
 		return m.AmountMillisteem
 	}
 	return 0
 }
 
-func (m *MsgSubmitSteemDeposit) GetMemo() string {
+func (m *MsgAttestDeposit) GetMemo() string {
 	if m != nil {
 		return m.Memo
 	}
 	return ""
 }
 
-// MsgSubmitSteemDepositResponse defines the MsgSubmitSteemDepositResponse message.
-type MsgSubmitSteemDepositResponse struct {
+func (m *MsgAttestDeposit) GetAsset() BridgeAsset {
+	if m != nil {
+		return m.Asset
+	}
+	return BridgeAsset_BRIDGE_ASSET_STEEM
 }
 
-func (m *MsgSubmitSteemDepositResponse) Reset()         { *m = MsgSubmitSteemDepositResponse{} }
-func (m *MsgSubmitSteemDepositResponse) String() string { return proto.CompactTextString(m) }
-func (*MsgSubmitSteemDepositResponse) ProtoMessage()    {}
-func (*MsgSubmitSteemDepositResponse) Descriptor() ([]byte, []int) {
+// MsgAttestDepositResponse defines the MsgAttestDeposit response.
+type MsgAttestDepositResponse struct {
+}
+
+func (m *MsgAttestDepositResponse) Reset()         { *m = MsgAttestDepositResponse{} }
+func (m *MsgAttestDepositResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgAttestDepositResponse) ProtoMessage()    {}
+func (*MsgAttestDepositResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_71748d65a225c5c8, []int{3}
 }
-func (m *MsgSubmitSteemDepositResponse) XXX_Unmarshal(b []byte) error {
+func (m *MsgAttestDepositResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *MsgSubmitSteemDepositResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *MsgAttestDepositResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_MsgSubmitSteemDepositResponse.Marshal(b, m, deterministic)
+		return xxx_messageInfo_MsgAttestDepositResponse.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -259,17 +268,17 @@ func (m *MsgSubmitSteemDepositResponse) XXX_Marshal(b []byte, deterministic bool
 		return b[:n], nil
 	}
 }
-func (m *MsgSubmitSteemDepositResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgSubmitSteemDepositResponse.Merge(m, src)
+func (m *MsgAttestDepositResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAttestDepositResponse.Merge(m, src)
 }
-func (m *MsgSubmitSteemDepositResponse) XXX_Size() int {
+func (m *MsgAttestDepositResponse) XXX_Size() int {
 	return m.Size()
 }
-func (m *MsgSubmitSteemDepositResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgSubmitSteemDepositResponse.DiscardUnknown(m)
+func (m *MsgAttestDepositResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAttestDepositResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_MsgSubmitSteemDepositResponse proto.InternalMessageInfo
+var xxx_messageInfo_MsgAttestDepositResponse proto.InternalMessageInfo
 
 // MsgBridgeOut defines the MsgBridgeOut message.
 type MsgBridgeOut struct {
@@ -277,6 +286,8 @@ type MsgBridgeOut struct {
 	DestinationSteemAccount string                `protobuf:"bytes,2,opt,name=destination_steem_account,json=destinationSteemAccount,proto3" json:"destination_steem_account,omitempty"`
 	AmountAsteem            cosmossdk_io_math.Int `protobuf:"bytes,3,opt,name=amount_asteem,json=amountAsteem,proto3,customtype=cosmossdk.io/math.Int" json:"amount_asteem"`
 	Memo                    string                `protobuf:"bytes,4,opt,name=memo,proto3" json:"memo,omitempty"`
+	// asset is which native coin to burn (STEEM=asteem, SBD=asbd). Default STEEM.
+	Asset BridgeAsset `protobuf:"varint,5,opt,name=asset,proto3,enum=steemvm.steembridge.v1.BridgeAsset" json:"asset,omitempty"`
 }
 
 func (m *MsgBridgeOut) Reset()         { *m = MsgBridgeOut{} }
@@ -333,6 +344,13 @@ func (m *MsgBridgeOut) GetMemo() string {
 	return ""
 }
 
+func (m *MsgBridgeOut) GetAsset() BridgeAsset {
+	if m != nil {
+		return m.Asset
+	}
+	return BridgeAsset_BRIDGE_ASSET_STEEM
+}
+
 // MsgBridgeOutResponse defines the MsgBridgeOutResponse message.
 type MsgBridgeOutResponse struct {
 }
@@ -370,6 +388,129 @@ func (m *MsgBridgeOutResponse) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_MsgBridgeOutResponse proto.InternalMessageInfo
 
+// MsgAttestWithdrawalPayout is a bonded validator's attestation that the gateway
+// paid a bridge-out to the user on Steem (memo "svm-withdrawal <id>").
+type MsgAttestWithdrawalPayout struct {
+	Validator      string `protobuf:"bytes,1,opt,name=validator,proto3" json:"validator,omitempty"`
+	WithdrawalId   uint64 `protobuf:"varint,2,opt,name=withdrawal_id,json=withdrawalId,proto3" json:"withdrawal_id,omitempty"`
+	SteemTxid      string `protobuf:"bytes,3,opt,name=steem_txid,json=steemTxid,proto3" json:"steem_txid,omitempty"`
+	OpIndex        uint32 `protobuf:"varint,4,opt,name=op_index,json=opIndex,proto3" json:"op_index,omitempty"`
+	SteemBlock     uint64 `protobuf:"varint,5,opt,name=steem_block,json=steemBlock,proto3" json:"steem_block,omitempty"`
+	SteemTimestamp string `protobuf:"bytes,6,opt,name=steem_timestamp,json=steemTimestamp,proto3" json:"steem_timestamp,omitempty"`
+}
+
+func (m *MsgAttestWithdrawalPayout) Reset()         { *m = MsgAttestWithdrawalPayout{} }
+func (m *MsgAttestWithdrawalPayout) String() string { return proto.CompactTextString(m) }
+func (*MsgAttestWithdrawalPayout) ProtoMessage()    {}
+func (*MsgAttestWithdrawalPayout) Descriptor() ([]byte, []int) {
+	return fileDescriptor_71748d65a225c5c8, []int{6}
+}
+func (m *MsgAttestWithdrawalPayout) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgAttestWithdrawalPayout) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgAttestWithdrawalPayout.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgAttestWithdrawalPayout) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAttestWithdrawalPayout.Merge(m, src)
+}
+func (m *MsgAttestWithdrawalPayout) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgAttestWithdrawalPayout) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAttestWithdrawalPayout.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgAttestWithdrawalPayout proto.InternalMessageInfo
+
+func (m *MsgAttestWithdrawalPayout) GetValidator() string {
+	if m != nil {
+		return m.Validator
+	}
+	return ""
+}
+
+func (m *MsgAttestWithdrawalPayout) GetWithdrawalId() uint64 {
+	if m != nil {
+		return m.WithdrawalId
+	}
+	return 0
+}
+
+func (m *MsgAttestWithdrawalPayout) GetSteemTxid() string {
+	if m != nil {
+		return m.SteemTxid
+	}
+	return ""
+}
+
+func (m *MsgAttestWithdrawalPayout) GetOpIndex() uint32 {
+	if m != nil {
+		return m.OpIndex
+	}
+	return 0
+}
+
+func (m *MsgAttestWithdrawalPayout) GetSteemBlock() uint64 {
+	if m != nil {
+		return m.SteemBlock
+	}
+	return 0
+}
+
+func (m *MsgAttestWithdrawalPayout) GetSteemTimestamp() string {
+	if m != nil {
+		return m.SteemTimestamp
+	}
+	return ""
+}
+
+// MsgAttestWithdrawalPayoutResponse defines the MsgAttestWithdrawalPayout response.
+type MsgAttestWithdrawalPayoutResponse struct {
+}
+
+func (m *MsgAttestWithdrawalPayoutResponse) Reset()         { *m = MsgAttestWithdrawalPayoutResponse{} }
+func (m *MsgAttestWithdrawalPayoutResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgAttestWithdrawalPayoutResponse) ProtoMessage()    {}
+func (*MsgAttestWithdrawalPayoutResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_71748d65a225c5c8, []int{7}
+}
+func (m *MsgAttestWithdrawalPayoutResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgAttestWithdrawalPayoutResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgAttestWithdrawalPayoutResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgAttestWithdrawalPayoutResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAttestWithdrawalPayoutResponse.Merge(m, src)
+}
+func (m *MsgAttestWithdrawalPayoutResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgAttestWithdrawalPayoutResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAttestWithdrawalPayoutResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgAttestWithdrawalPayoutResponse proto.InternalMessageInfo
+
 // MsgSubmitNameRegistration is a bonded validator's attestation that a Steem
 // account sent a qualifying transfer to the gateway requesting a name link.
 type MsgSubmitNameRegistration struct {
@@ -389,7 +530,7 @@ func (m *MsgSubmitNameRegistration) Reset()         { *m = MsgSubmitNameRegistra
 func (m *MsgSubmitNameRegistration) String() string { return proto.CompactTextString(m) }
 func (*MsgSubmitNameRegistration) ProtoMessage()    {}
 func (*MsgSubmitNameRegistration) Descriptor() ([]byte, []int) {
-	return fileDescriptor_71748d65a225c5c8, []int{6}
+	return fileDescriptor_71748d65a225c5c8, []int{8}
 }
 func (m *MsgSubmitNameRegistration) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -489,7 +630,7 @@ func (m *MsgSubmitNameRegistrationResponse) Reset()         { *m = MsgSubmitName
 func (m *MsgSubmitNameRegistrationResponse) String() string { return proto.CompactTextString(m) }
 func (*MsgSubmitNameRegistrationResponse) ProtoMessage()    {}
 func (*MsgSubmitNameRegistrationResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_71748d65a225c5c8, []int{7}
+	return fileDescriptor_71748d65a225c5c8, []int{9}
 }
 func (m *MsgSubmitNameRegistrationResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -529,7 +670,7 @@ func (m *MsgConfirmName) Reset()         { *m = MsgConfirmName{} }
 func (m *MsgConfirmName) String() string { return proto.CompactTextString(m) }
 func (*MsgConfirmName) ProtoMessage()    {}
 func (*MsgConfirmName) Descriptor() ([]byte, []int) {
-	return fileDescriptor_71748d65a225c5c8, []int{8}
+	return fileDescriptor_71748d65a225c5c8, []int{10}
 }
 func (m *MsgConfirmName) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -580,7 +721,7 @@ func (m *MsgConfirmNameResponse) Reset()         { *m = MsgConfirmNameResponse{}
 func (m *MsgConfirmNameResponse) String() string { return proto.CompactTextString(m) }
 func (*MsgConfirmNameResponse) ProtoMessage()    {}
 func (*MsgConfirmNameResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_71748d65a225c5c8, []int{9}
+	return fileDescriptor_71748d65a225c5c8, []int{11}
 }
 func (m *MsgConfirmNameResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -612,10 +753,12 @@ var xxx_messageInfo_MsgConfirmNameResponse proto.InternalMessageInfo
 func init() {
 	proto.RegisterType((*MsgUpdateParams)(nil), "steemvm.steembridge.v1.MsgUpdateParams")
 	proto.RegisterType((*MsgUpdateParamsResponse)(nil), "steemvm.steembridge.v1.MsgUpdateParamsResponse")
-	proto.RegisterType((*MsgSubmitSteemDeposit)(nil), "steemvm.steembridge.v1.MsgSubmitSteemDeposit")
-	proto.RegisterType((*MsgSubmitSteemDepositResponse)(nil), "steemvm.steembridge.v1.MsgSubmitSteemDepositResponse")
+	proto.RegisterType((*MsgAttestDeposit)(nil), "steemvm.steembridge.v1.MsgAttestDeposit")
+	proto.RegisterType((*MsgAttestDepositResponse)(nil), "steemvm.steembridge.v1.MsgAttestDepositResponse")
 	proto.RegisterType((*MsgBridgeOut)(nil), "steemvm.steembridge.v1.MsgBridgeOut")
 	proto.RegisterType((*MsgBridgeOutResponse)(nil), "steemvm.steembridge.v1.MsgBridgeOutResponse")
+	proto.RegisterType((*MsgAttestWithdrawalPayout)(nil), "steemvm.steembridge.v1.MsgAttestWithdrawalPayout")
+	proto.RegisterType((*MsgAttestWithdrawalPayoutResponse)(nil), "steemvm.steembridge.v1.MsgAttestWithdrawalPayoutResponse")
 	proto.RegisterType((*MsgSubmitNameRegistration)(nil), "steemvm.steembridge.v1.MsgSubmitNameRegistration")
 	proto.RegisterType((*MsgSubmitNameRegistrationResponse)(nil), "steemvm.steembridge.v1.MsgSubmitNameRegistrationResponse")
 	proto.RegisterType((*MsgConfirmName)(nil), "steemvm.steembridge.v1.MsgConfirmName")
@@ -625,58 +768,66 @@ func init() {
 func init() { proto.RegisterFile("steemvm/steembridge/v1/tx.proto", fileDescriptor_71748d65a225c5c8) }
 
 var fileDescriptor_71748d65a225c5c8 = []byte{
-	// 813 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xd4, 0x56, 0x41, 0x6f, 0xe3, 0x44,
-	0x14, 0x8e, 0xdb, 0x6c, 0x76, 0x33, 0x49, 0xb3, 0xac, 0xd5, 0x4d, 0x1d, 0xa3, 0x4d, 0xb2, 0x29,
-	0xb0, 0x51, 0x61, 0x6d, 0xba, 0x68, 0x11, 0xf4, 0x96, 0xc0, 0xa5, 0x87, 0x00, 0x72, 0xe0, 0xc2,
-	0xc5, 0x9a, 0xc4, 0x83, 0x3b, 0x6a, 0xc6, 0x63, 0x79, 0x26, 0x21, 0xe5, 0x04, 0x1c, 0x38, 0x70,
-	0xe2, 0x67, 0x70, 0xec, 0x81, 0x7f, 0x80, 0x84, 0x7a, 0xac, 0x38, 0x21, 0x0e, 0x15, 0xb4, 0x42,
-	0x3d, 0xf0, 0x27, 0xd0, 0xcc, 0xd8, 0x8e, 0x13, 0x92, 0x36, 0x3d, 0x21, 0x2e, 0xed, 0xcc, 0x9b,
-	0x6f, 0xbe, 0xf7, 0x7d, 0xef, 0xbd, 0x8e, 0x0b, 0x1a, 0x8c, 0x23, 0x44, 0x26, 0xc4, 0x96, 0xbf,
-	0x07, 0x11, 0xf6, 0x7c, 0x64, 0x4f, 0xf6, 0x6d, 0x3e, 0xb5, 0xc2, 0x88, 0x72, 0xaa, 0x57, 0x63,
-	0x80, 0x95, 0x01, 0x58, 0x93, 0x7d, 0xf3, 0x11, 0x24, 0x38, 0xa0, 0xb6, 0xfc, 0xa9, 0xa0, 0xe6,
-	0xce, 0x90, 0x32, 0x42, 0x99, 0x4d, 0x98, 0x2f, 0x28, 0x08, 0xf3, 0xe3, 0x83, 0x9a, 0x3a, 0x70,
-	0xe5, 0xce, 0x56, 0x9b, 0xf8, 0x68, 0xdb, 0xa7, 0x3e, 0x55, 0x71, 0xb1, 0x8a, 0xa3, 0xbb, 0x2b,
-	0x54, 0x85, 0x30, 0x82, 0x24, 0xbe, 0xda, 0xfa, 0x45, 0x03, 0x0f, 0x7b, 0xcc, 0xff, 0x2c, 0xf4,
-	0x20, 0x47, 0x9f, 0xc8, 0x13, 0xfd, 0x5d, 0x50, 0x84, 0x63, 0x7e, 0x44, 0x23, 0xcc, 0x4f, 0x0c,
-	0xad, 0xa9, 0xb5, 0x8b, 0x5d, 0xe3, 0xd7, 0x9f, 0x9e, 0x6f, 0xc7, 0x39, 0x3b, 0x9e, 0x17, 0x21,
-	0xc6, 0xfa, 0x3c, 0xc2, 0x81, 0xef, 0xcc, 0xa0, 0x7a, 0x07, 0x14, 0x14, 0xb7, 0xb1, 0xd1, 0xd4,
-	0xda, 0xa5, 0x17, 0x75, 0x6b, 0xb9, 0x6d, 0x4b, 0xe5, 0xe9, 0x16, 0xcf, 0x2e, 0x1a, 0xb9, 0x1f,
-	0xaf, 0x4f, 0xf7, 0x34, 0x27, 0xbe, 0x78, 0xf0, 0xde, 0xb7, 0xd7, 0xa7, 0x7b, 0x33, 0xca, 0xef,
-	0xaf, 0x4f, 0xf7, 0x5e, 0x4f, 0x6c, 0x4c, 0xe7, 0x8c, 0x2c, 0x88, 0x6e, 0xd5, 0xc0, 0xce, 0x42,
-	0xc8, 0x41, 0x2c, 0xa4, 0x01, 0x43, 0xad, 0xbf, 0x36, 0xc0, 0xe3, 0x1e, 0xf3, 0xfb, 0xe3, 0x01,
-	0xc1, 0xbc, 0x2f, 0x38, 0x3e, 0x44, 0x21, 0x65, 0x98, 0x0b, 0xa7, 0x13, 0x38, 0xc2, 0x1e, 0xe4,
-	0x34, 0xba, 0xdd, 0x69, 0x0a, 0xd5, 0x75, 0x90, 0xe7, 0x53, 0xec, 0x49, 0x9f, 0x45, 0x47, 0xae,
-	0xf5, 0x1a, 0x78, 0x40, 0x43, 0x17, 0x07, 0x1e, 0x9a, 0x1a, 0x9b, 0x4d, 0xad, 0xbd, 0xe5, 0xdc,
-	0xa7, 0xe1, 0xa1, 0xd8, 0xea, 0x0d, 0x50, 0x92, 0xd2, 0xdd, 0xc1, 0x88, 0x0e, 0x8f, 0x8d, 0x7c,
-	0x53, 0x6b, 0xe7, 0x1d, 0x20, 0x43, 0x5d, 0x11, 0xd1, 0x9f, 0x81, 0x87, 0x0a, 0xc0, 0x31, 0x41,
-	0x8c, 0x43, 0x12, 0x1a, 0xf7, 0x24, 0x75, 0x45, 0x86, 0x3f, 0x4d, 0xa2, 0xfa, 0x53, 0x50, 0x56,
-	0x40, 0x86, 0x02, 0x0f, 0x45, 0x46, 0x41, 0xa2, 0x14, 0x7b, 0x5f, 0x86, 0x04, 0x97, 0x0f, 0x39,
-	0xfa, 0x12, 0x9e, 0xb8, 0x70, 0x38, 0xa4, 0xe3, 0x80, 0x1b, 0xf7, 0x15, 0x57, 0x1c, 0xee, 0xa8,
-	0xa8, 0xfe, 0x26, 0x78, 0x04, 0x89, 0x58, 0xb9, 0x04, 0x8f, 0x46, 0x58, 0x72, 0x18, 0x0f, 0xa4,
-	0xb6, 0x57, 0xd4, 0x41, 0x2f, 0x8d, 0x0b, 0xc7, 0x04, 0x11, 0x6a, 0x14, 0x95, 0x63, 0xb1, 0x3e,
-	0xa8, 0xc8, 0x66, 0xa5, 0x55, 0x69, 0x35, 0xc0, 0x93, 0xa5, 0x65, 0x4e, 0x1b, 0xf1, 0xa7, 0x06,
-	0xca, 0x3d, 0xe6, 0x77, 0x65, 0x07, 0x3f, 0x1e, 0x73, 0xfd, 0x6d, 0x50, 0x88, 0x8d, 0xdc, 0x56,
-	0xfc, 0x18, 0xa7, 0x1f, 0x80, 0x9a, 0x87, 0x18, 0xc7, 0x01, 0xe4, 0x98, 0x06, 0xae, 0x2a, 0x46,
-	0xe2, 0x53, 0xb5, 0x63, 0x27, 0x03, 0x90, 0x32, 0x12, 0xc3, 0x5d, 0xb0, 0x15, 0x1b, 0x86, 0xca,
-	0xec, 0xa6, 0x4c, 0xfa, 0x44, 0x8c, 0xe1, 0xef, 0x17, 0x8d, 0xc7, 0x2a, 0x31, 0xf3, 0x8e, 0x2d,
-	0x4c, 0x6d, 0x02, 0xf9, 0x91, 0x75, 0x18, 0x70, 0xa7, 0xac, 0xee, 0x74, 0xe6, 0xeb, 0x90, 0xcf,
-	0xd4, 0xa1, 0x24, 0xea, 0x10, 0x0b, 0x6c, 0x55, 0xc1, 0x76, 0xd6, 0x62, 0xea, 0xfd, 0xef, 0x0d,
-	0x50, 0x4b, 0xab, 0xf3, 0x11, 0x24, 0xc8, 0x41, 0x3e, 0x66, 0x3c, 0x92, 0x32, 0xff, 0x7f, 0x83,
-	0xb8, 0x0b, 0xb6, 0xe6, 0x6b, 0xaf, 0x26, 0x51, 0x4d, 0x67, 0x52, 0xf0, 0xff, 0x6e, 0x14, 0x77,
-	0xc1, 0xd3, 0x95, 0xc5, 0x4e, 0x5b, 0xf2, 0x8d, 0x06, 0x2a, 0x3d, 0xe6, 0x7f, 0x40, 0x83, 0x2f,
-	0x70, 0x44, 0x04, 0x4c, 0xf4, 0x61, 0xa8, 0xb6, 0x6b, 0xcc, 0xe4, 0x0c, 0x2a, 0x9c, 0x46, 0x99,
-	0x14, 0x6e, 0xdc, 0x92, 0xbc, 0x53, 0xc9, 0x86, 0x0f, 0xbd, 0x58, 0x68, 0x7a, 0xb1, 0x65, 0x80,
-	0xea, 0xbc, 0x84, 0x44, 0xdd, 0x8b, 0x9f, 0xf3, 0x60, 0xb3, 0xc7, 0x7c, 0xfd, 0x08, 0x94, 0xe7,
-	0x5e, 0xe7, 0x67, 0xab, 0x5e, 0xd5, 0x85, 0xe7, 0xcf, 0xb4, 0xd7, 0x04, 0x26, 0x19, 0xf5, 0xaf,
-	0x80, 0xbe, 0xe4, 0x8d, 0x7c, 0x7e, 0x03, 0xcd, 0xbf, 0xe1, 0xe6, 0xcb, 0x3b, 0xc1, 0xd3, 0xdc,
-	0x2e, 0x28, 0xce, 0x9e, 0x85, 0xd7, 0x6e, 0xe0, 0x48, 0x51, 0xe6, 0x5b, 0xeb, 0xa0, 0xd2, 0x04,
-	0xdf, 0x69, 0xa0, 0xba, 0xe2, 0x8f, 0x6f, 0xff, 0x56, 0xc9, 0x8b, 0x57, 0xcc, 0xf7, 0xef, 0x7c,
-	0x25, 0x15, 0x82, 0x40, 0x29, 0x3b, 0x71, 0x6f, 0xdc, 0xc0, 0x94, 0xc1, 0x99, 0xd6, 0x7a, 0xb8,
-	0x24, 0x8d, 0x79, 0xef, 0x6b, 0xf1, 0x61, 0xed, 0xbe, 0x3c, 0xbb, 0xac, 0x6b, 0xe7, 0x97, 0x75,
-	0xed, 0x8f, 0xcb, 0xba, 0xf6, 0xc3, 0x55, 0x3d, 0x77, 0x7e, 0x55, 0xcf, 0xfd, 0x76, 0x55, 0xcf,
-	0x7d, 0xfe, 0xea, 0xf2, 0xef, 0x2a, 0x3f, 0x09, 0x11, 0x1b, 0x14, 0xe4, 0x7f, 0x07, 0xef, 0xfc,
-	0x13, 0x00, 0x00, 0xff, 0xff, 0x23, 0x21, 0x9c, 0xba, 0xda, 0x08, 0x00, 0x00,
+	// 931 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xd4, 0x56, 0x3f, 0x6f, 0x23, 0x45,
+	0x14, 0xcf, 0x26, 0xb6, 0xef, 0xfc, 0x62, 0xfb, 0xee, 0x46, 0x21, 0x59, 0x2f, 0x3a, 0xc7, 0x67,
+	0x03, 0x67, 0x05, 0xb0, 0x2f, 0x41, 0x20, 0x2e, 0x9d, 0x0d, 0x4d, 0x0a, 0xc3, 0x69, 0x03, 0x42,
+	0xa2, 0xb1, 0x26, 0xde, 0x61, 0x33, 0x8a, 0x67, 0x67, 0xb5, 0x33, 0x4e, 0xe2, 0x0e, 0x28, 0x28,
+	0x10, 0x05, 0x3d, 0x7c, 0x00, 0xca, 0x14, 0xb4, 0xb4, 0xe8, 0xca, 0x13, 0x15, 0xa2, 0x38, 0xa1,
+	0xa4, 0x48, 0xc1, 0x97, 0x40, 0x33, 0xb3, 0x5e, 0xff, 0xc1, 0x76, 0x1c, 0x0a, 0x24, 0x1a, 0x7b,
+	0xe6, 0xcd, 0xef, 0xfd, 0xfb, 0xbd, 0xf7, 0x66, 0x07, 0xb6, 0x85, 0x24, 0x84, 0x9d, 0xb2, 0x86,
+	0xfe, 0x3f, 0x8a, 0xa8, 0xe7, 0x93, 0xc6, 0xe9, 0x6e, 0x43, 0x9e, 0xd7, 0xc3, 0x88, 0x4b, 0x8e,
+	0x36, 0x63, 0x40, 0x7d, 0x0c, 0x50, 0x3f, 0xdd, 0x75, 0x1e, 0x60, 0x46, 0x03, 0xde, 0xd0, 0xbf,
+	0x06, 0xea, 0x6c, 0x75, 0xb9, 0x60, 0x5c, 0x34, 0x98, 0xf0, 0x95, 0x09, 0x26, 0xfc, 0xf8, 0xa0,
+	0x68, 0x0e, 0x3a, 0x7a, 0xd7, 0x30, 0x9b, 0xf8, 0x68, 0xc3, 0xe7, 0x3e, 0x37, 0x72, 0xb5, 0x8a,
+	0xa5, 0x95, 0x39, 0x51, 0x61, 0x21, 0x88, 0x8c, 0x31, 0xd5, 0x39, 0x98, 0x10, 0x47, 0x98, 0xc5,
+	0xe6, 0x2b, 0xbf, 0x5a, 0x70, 0xaf, 0x2d, 0xfc, 0x4f, 0x43, 0x0f, 0x4b, 0xf2, 0x4c, 0x9f, 0xa0,
+	0xf7, 0x20, 0x8b, 0xfb, 0xf2, 0x98, 0x47, 0x54, 0x0e, 0x6c, 0xab, 0x6c, 0xd5, 0xb2, 0x2d, 0xfb,
+	0xb7, 0x9f, 0xdf, 0xde, 0x88, 0xe3, 0x6a, 0x7a, 0x5e, 0x44, 0x84, 0x38, 0x94, 0x11, 0x0d, 0x7c,
+	0x77, 0x04, 0x45, 0x4d, 0xc8, 0x18, 0xdb, 0xf6, 0x6a, 0xd9, 0xaa, 0xad, 0xef, 0x95, 0xea, 0xb3,
+	0xa9, 0xa9, 0x1b, 0x3f, 0xad, 0xec, 0xf3, 0x97, 0xdb, 0x2b, 0x3f, 0x5d, 0x5f, 0xec, 0x58, 0x6e,
+	0xac, 0xb8, 0xff, 0xfe, 0xd7, 0xd7, 0x17, 0x3b, 0x23, 0x93, 0xdf, 0x5e, 0x5f, 0xec, 0xbc, 0x3e,
+	0x4c, 0xe3, 0x7c, 0x22, 0x91, 0xa9, 0xa0, 0x2b, 0x45, 0xd8, 0x9a, 0x12, 0xb9, 0x44, 0x84, 0x3c,
+	0x10, 0xa4, 0xf2, 0xc3, 0x1a, 0xdc, 0x6f, 0x0b, 0xbf, 0x29, 0x25, 0x11, 0xf2, 0x43, 0x12, 0x72,
+	0x41, 0xa5, 0x4a, 0xf2, 0x14, 0xf7, 0xa8, 0x87, 0x25, 0x8f, 0x6e, 0x4e, 0x32, 0x81, 0x22, 0x04,
+	0x29, 0x79, 0x4e, 0x3d, 0x9d, 0x62, 0xd6, 0xd5, 0x6b, 0x54, 0x84, 0xbb, 0x3c, 0xec, 0xd0, 0xc0,
+	0x23, 0xe7, 0xf6, 0x5a, 0xd9, 0xaa, 0xe5, 0xdd, 0x3b, 0x3c, 0x3c, 0x50, 0x5b, 0xb4, 0x0d, 0xeb,
+	0x3a, 0xea, 0xce, 0x51, 0x8f, 0x77, 0x4f, 0xec, 0x54, 0xd9, 0xaa, 0xa5, 0x5c, 0xd0, 0xa2, 0x96,
+	0x92, 0xa0, 0xc7, 0x70, 0xcf, 0x00, 0x24, 0x65, 0x44, 0x48, 0xcc, 0x42, 0x3b, 0xad, 0x4d, 0x17,
+	0xb4, 0xf8, 0x93, 0xa1, 0x14, 0x3d, 0x82, 0x9c, 0x01, 0x0a, 0x12, 0x78, 0x24, 0xb2, 0x33, 0x1a,
+	0x65, 0xac, 0x1f, 0x6a, 0x91, 0xb2, 0xe5, 0x63, 0x49, 0xce, 0xf0, 0xa0, 0x83, 0xbb, 0x5d, 0xde,
+	0x0f, 0xa4, 0x7d, 0xc7, 0xd8, 0x8a, 0xc5, 0x4d, 0x23, 0x45, 0x6f, 0xc2, 0x03, 0xcc, 0xd4, 0xaa,
+	0xc3, 0x68, 0xaf, 0x47, 0xb5, 0x0d, 0xfb, 0xae, 0x8e, 0xed, 0xbe, 0x39, 0x68, 0x27, 0x72, 0x95,
+	0x31, 0x23, 0x8c, 0xdb, 0x59, 0x93, 0xb1, 0x5a, 0xa3, 0xa7, 0x90, 0xd6, 0xad, 0x66, 0x43, 0xd9,
+	0xaa, 0x15, 0xf6, 0xaa, 0xf3, 0x2a, 0xdd, 0xd2, 0xab, 0xa6, 0x82, 0xba, 0x46, 0x63, 0xbf, 0xa0,
+	0x4b, 0x9c, 0x10, 0x5a, 0x71, 0xc0, 0x9e, 0x2e, 0x4e, 0x52, 0xb9, 0x1f, 0x57, 0x21, 0xd7, 0x16,
+	0xbe, 0xb1, 0xf2, 0x71, 0x5f, 0xa2, 0x27, 0x90, 0x89, 0xd3, 0xbf, 0xa9, 0x64, 0x31, 0x0e, 0xed,
+	0x43, 0xd1, 0x23, 0x42, 0xd2, 0x00, 0x4b, 0xca, 0x83, 0x8e, 0xa1, 0x70, 0xc8, 0x8e, 0x29, 0xe2,
+	0xd6, 0x18, 0xe0, 0x50, 0x9d, 0x0f, 0x69, 0x6a, 0x41, 0x3e, 0xa6, 0x09, 0x1b, 0x8a, 0xd6, 0xb4,
+	0xd3, 0x87, 0xaa, 0x6f, 0xff, 0x78, 0xb9, 0xfd, 0x8a, 0x71, 0x2c, 0xbc, 0x93, 0x3a, 0xe5, 0x0d,
+	0x86, 0xe5, 0x71, 0xfd, 0x20, 0x90, 0x6e, 0xce, 0xe8, 0x34, 0x27, 0xd9, 0x4b, 0xcd, 0x62, 0x2f,
+	0x7d, 0x6b, 0xf6, 0xd6, 0x15, 0x7b, 0x71, 0x6e, 0x95, 0x4d, 0xd8, 0x18, 0x67, 0x27, 0xa1, 0xed,
+	0xbb, 0x55, 0x28, 0x26, 0x9c, 0x7e, 0x46, 0xe5, 0xb1, 0x17, 0xe1, 0x33, 0xdc, 0x7b, 0x86, 0x07,
+	0xbc, 0xff, 0xef, 0x3b, 0xbf, 0x0a, 0xf9, 0xb3, 0xc4, 0x56, 0x27, 0x1e, 0x81, 0x94, 0x9b, 0x1b,
+	0x09, 0x0f, 0x3c, 0xf4, 0x10, 0x20, 0x6e, 0x67, 0x35, 0x24, 0x9a, 0x2f, 0x37, 0x6b, 0x3a, 0x79,
+	0x7a, 0x52, 0x52, 0x0b, 0x27, 0x25, 0xbd, 0xcc, 0xa4, 0x64, 0x66, 0x4d, 0xca, 0x3f, 0x3a, 0xac,
+	0x0a, 0x8f, 0xe6, 0xb2, 0x91, 0x70, 0xf6, 0x97, 0xe1, 0xec, 0xb0, 0x7f, 0xc4, 0xa8, 0xfc, 0x08,
+	0x33, 0xe2, 0x12, 0x9f, 0x0a, 0x19, 0xe9, 0xae, 0xf8, 0xff, 0xdd, 0x16, 0x55, 0xc8, 0x4f, 0xb6,
+	0xba, 0xa1, 0xca, 0x5c, 0x21, 0xc3, 0xfe, 0xfe, 0xcf, 0xee, 0x8b, 0x39, 0x25, 0x99, 0x4d, 0x76,
+	0x52, 0x92, 0xaf, 0x2c, 0x28, 0xb4, 0x85, 0xff, 0x01, 0x0f, 0xbe, 0xa0, 0x11, 0x53, 0x30, 0x55,
+	0x87, 0xae, 0xd9, 0x2e, 0x71, 0x05, 0x8c, 0xa0, 0x2a, 0xd3, 0x68, 0xcc, 0xc5, 0xa8, 0x7b, 0x0b,
+	0xe3, 0xe2, 0x03, 0x2f, 0x0e, 0x34, 0x51, 0xac, 0xd8, 0xb0, 0x39, 0x19, 0xc2, 0x30, 0xba, 0xbd,
+	0x5f, 0xd2, 0xb0, 0xd6, 0x16, 0x3e, 0x3a, 0x86, 0xdc, 0xc4, 0xd7, 0xf3, 0xf1, 0xbc, 0x69, 0x9e,
+	0xfa, 0x3c, 0x39, 0x8d, 0x25, 0x81, 0x43, 0x8f, 0xe8, 0x04, 0xf2, 0x93, 0xdf, 0xb0, 0xda, 0x02,
+	0x0b, 0x13, 0x48, 0xe7, 0xc9, 0xb2, 0xc8, 0xc4, 0x59, 0x07, 0xb2, 0xa3, 0x6b, 0xf7, 0xb5, 0x05,
+	0xea, 0x09, 0xca, 0x79, 0x6b, 0x19, 0x54, 0xe2, 0xe0, 0x1b, 0x0b, 0x36, 0xe7, 0xdc, 0x50, 0xbb,
+	0x37, 0x46, 0x3b, 0xad, 0xe2, 0x3c, 0xbd, 0xb5, 0xca, 0x44, 0x20, 0x73, 0xc6, 0x7e, 0x51, 0x20,
+	0xb3, 0x55, 0x16, 0x06, 0xb2, 0xb8, 0xdf, 0x11, 0x81, 0xf5, 0xf1, 0x5e, 0x7f, 0x63, 0x81, 0xa5,
+	0x31, 0x9c, 0x53, 0x5f, 0x0e, 0x37, 0x74, 0xe3, 0xa4, 0xbf, 0x54, 0x4f, 0xae, 0xd6, 0xbb, 0xcf,
+	0x2f, 0x4b, 0xd6, 0x8b, 0xcb, 0x92, 0xf5, 0xe7, 0x65, 0xc9, 0xfa, 0xfe, 0xaa, 0xb4, 0xf2, 0xe2,
+	0xaa, 0xb4, 0xf2, 0xfb, 0x55, 0x69, 0xe5, 0xf3, 0x57, 0x67, 0xbf, 0xb8, 0xe4, 0x20, 0x24, 0xe2,
+	0x28, 0xa3, 0xdf, 0x8d, 0xef, 0xfc, 0x1d, 0x00, 0x00, 0xff, 0xff, 0xe8, 0x9d, 0xf5, 0x10, 0x18,
+	0x0b, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -694,10 +845,14 @@ type MsgClient interface {
 	// UpdateParams defines a (governance) operation for updating the module
 	// parameters. The authority defaults to the x/gov module account.
 	UpdateParams(ctx context.Context, in *MsgUpdateParams, opts ...grpc.CallOption) (*MsgUpdateParamsResponse, error)
-	// SubmitSteemDeposit defines the SubmitSteemDeposit RPC.
-	SubmitSteemDeposit(ctx context.Context, in *MsgSubmitSteemDeposit, opts ...grpc.CallOption) (*MsgSubmitSteemDepositResponse, error)
+	// AttestDeposit is a bonded validator's attestation of a Steem gateway deposit
+	// (STEEM or SBD). At 2/3 bonded power the deposit finalizes and mints.
+	AttestDeposit(ctx context.Context, in *MsgAttestDeposit, opts ...grpc.CallOption) (*MsgAttestDepositResponse, error)
 	// BridgeOut defines the BridgeOut RPC.
 	BridgeOut(ctx context.Context, in *MsgBridgeOut, opts ...grpc.CallOption) (*MsgBridgeOutResponse, error)
+	// AttestWithdrawalPayout is a bonded validator's attestation that the gateway
+	// paid a bridge-out on Steem. At 2/3 the withdrawal is marked PROCESSED.
+	AttestWithdrawalPayout(ctx context.Context, in *MsgAttestWithdrawalPayout, opts ...grpc.CallOption) (*MsgAttestWithdrawalPayoutResponse, error)
 	// SubmitNameRegistration defines the SubmitNameRegistration RPC.
 	SubmitNameRegistration(ctx context.Context, in *MsgSubmitNameRegistration, opts ...grpc.CallOption) (*MsgSubmitNameRegistrationResponse, error)
 	// ConfirmName defines the ConfirmName RPC.
@@ -721,9 +876,9 @@ func (c *msgClient) UpdateParams(ctx context.Context, in *MsgUpdateParams, opts 
 	return out, nil
 }
 
-func (c *msgClient) SubmitSteemDeposit(ctx context.Context, in *MsgSubmitSteemDeposit, opts ...grpc.CallOption) (*MsgSubmitSteemDepositResponse, error) {
-	out := new(MsgSubmitSteemDepositResponse)
-	err := c.cc.Invoke(ctx, "/steemvm.steembridge.v1.Msg/SubmitSteemDeposit", in, out, opts...)
+func (c *msgClient) AttestDeposit(ctx context.Context, in *MsgAttestDeposit, opts ...grpc.CallOption) (*MsgAttestDepositResponse, error) {
+	out := new(MsgAttestDepositResponse)
+	err := c.cc.Invoke(ctx, "/steemvm.steembridge.v1.Msg/AttestDeposit", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -733,6 +888,15 @@ func (c *msgClient) SubmitSteemDeposit(ctx context.Context, in *MsgSubmitSteemDe
 func (c *msgClient) BridgeOut(ctx context.Context, in *MsgBridgeOut, opts ...grpc.CallOption) (*MsgBridgeOutResponse, error) {
 	out := new(MsgBridgeOutResponse)
 	err := c.cc.Invoke(ctx, "/steemvm.steembridge.v1.Msg/BridgeOut", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) AttestWithdrawalPayout(ctx context.Context, in *MsgAttestWithdrawalPayout, opts ...grpc.CallOption) (*MsgAttestWithdrawalPayoutResponse, error) {
+	out := new(MsgAttestWithdrawalPayoutResponse)
+	err := c.cc.Invoke(ctx, "/steemvm.steembridge.v1.Msg/AttestWithdrawalPayout", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -762,10 +926,14 @@ type MsgServer interface {
 	// UpdateParams defines a (governance) operation for updating the module
 	// parameters. The authority defaults to the x/gov module account.
 	UpdateParams(context.Context, *MsgUpdateParams) (*MsgUpdateParamsResponse, error)
-	// SubmitSteemDeposit defines the SubmitSteemDeposit RPC.
-	SubmitSteemDeposit(context.Context, *MsgSubmitSteemDeposit) (*MsgSubmitSteemDepositResponse, error)
+	// AttestDeposit is a bonded validator's attestation of a Steem gateway deposit
+	// (STEEM or SBD). At 2/3 bonded power the deposit finalizes and mints.
+	AttestDeposit(context.Context, *MsgAttestDeposit) (*MsgAttestDepositResponse, error)
 	// BridgeOut defines the BridgeOut RPC.
 	BridgeOut(context.Context, *MsgBridgeOut) (*MsgBridgeOutResponse, error)
+	// AttestWithdrawalPayout is a bonded validator's attestation that the gateway
+	// paid a bridge-out on Steem. At 2/3 the withdrawal is marked PROCESSED.
+	AttestWithdrawalPayout(context.Context, *MsgAttestWithdrawalPayout) (*MsgAttestWithdrawalPayoutResponse, error)
 	// SubmitNameRegistration defines the SubmitNameRegistration RPC.
 	SubmitNameRegistration(context.Context, *MsgSubmitNameRegistration) (*MsgSubmitNameRegistrationResponse, error)
 	// ConfirmName defines the ConfirmName RPC.
@@ -779,11 +947,14 @@ type UnimplementedMsgServer struct {
 func (*UnimplementedMsgServer) UpdateParams(ctx context.Context, req *MsgUpdateParams) (*MsgUpdateParamsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateParams not implemented")
 }
-func (*UnimplementedMsgServer) SubmitSteemDeposit(ctx context.Context, req *MsgSubmitSteemDeposit) (*MsgSubmitSteemDepositResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SubmitSteemDeposit not implemented")
+func (*UnimplementedMsgServer) AttestDeposit(ctx context.Context, req *MsgAttestDeposit) (*MsgAttestDepositResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AttestDeposit not implemented")
 }
 func (*UnimplementedMsgServer) BridgeOut(ctx context.Context, req *MsgBridgeOut) (*MsgBridgeOutResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BridgeOut not implemented")
+}
+func (*UnimplementedMsgServer) AttestWithdrawalPayout(ctx context.Context, req *MsgAttestWithdrawalPayout) (*MsgAttestWithdrawalPayoutResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AttestWithdrawalPayout not implemented")
 }
 func (*UnimplementedMsgServer) SubmitNameRegistration(ctx context.Context, req *MsgSubmitNameRegistration) (*MsgSubmitNameRegistrationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitNameRegistration not implemented")
@@ -814,20 +985,20 @@ func _Msg_UpdateParams_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_SubmitSteemDeposit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgSubmitSteemDeposit)
+func _Msg_AttestDeposit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgAttestDeposit)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).SubmitSteemDeposit(ctx, in)
+		return srv.(MsgServer).AttestDeposit(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/steemvm.steembridge.v1.Msg/SubmitSteemDeposit",
+		FullMethod: "/steemvm.steembridge.v1.Msg/AttestDeposit",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).SubmitSteemDeposit(ctx, req.(*MsgSubmitSteemDeposit))
+		return srv.(MsgServer).AttestDeposit(ctx, req.(*MsgAttestDeposit))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -846,6 +1017,24 @@ func _Msg_BridgeOut_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MsgServer).BridgeOut(ctx, req.(*MsgBridgeOut))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_AttestWithdrawalPayout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgAttestWithdrawalPayout)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).AttestWithdrawalPayout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/steemvm.steembridge.v1.Msg/AttestWithdrawalPayout",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).AttestWithdrawalPayout(ctx, req.(*MsgAttestWithdrawalPayout))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -896,12 +1085,16 @@ var _Msg_serviceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_UpdateParams_Handler,
 		},
 		{
-			MethodName: "SubmitSteemDeposit",
-			Handler:    _Msg_SubmitSteemDeposit_Handler,
+			MethodName: "AttestDeposit",
+			Handler:    _Msg_AttestDeposit_Handler,
 		},
 		{
 			MethodName: "BridgeOut",
 			Handler:    _Msg_BridgeOut_Handler,
+		},
+		{
+			MethodName: "AttestWithdrawalPayout",
+			Handler:    _Msg_AttestWithdrawalPayout_Handler,
 		},
 		{
 			MethodName: "SubmitNameRegistration",
@@ -979,7 +1172,7 @@ func (m *MsgUpdateParamsResponse) MarshalToSizedBuffer(dAtA []byte) (int, error)
 	return len(dAtA) - i, nil
 }
 
-func (m *MsgSubmitSteemDeposit) Marshal() (dAtA []byte, err error) {
+func (m *MsgAttestDeposit) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -989,16 +1182,21 @@ func (m *MsgSubmitSteemDeposit) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *MsgSubmitSteemDeposit) MarshalTo(dAtA []byte) (int, error) {
+func (m *MsgAttestDeposit) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *MsgSubmitSteemDeposit) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *MsgAttestDeposit) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
 	_ = l
+	if m.Asset != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Asset))
+		i--
+		dAtA[i] = 0x50
+	}
 	if len(m.Memo) > 0 {
 		i -= len(m.Memo)
 		copy(dAtA[i:], m.Memo)
@@ -1059,7 +1257,7 @@ func (m *MsgSubmitSteemDeposit) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-func (m *MsgSubmitSteemDepositResponse) Marshal() (dAtA []byte, err error) {
+func (m *MsgAttestDepositResponse) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -1069,12 +1267,12 @@ func (m *MsgSubmitSteemDepositResponse) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *MsgSubmitSteemDepositResponse) MarshalTo(dAtA []byte) (int, error) {
+func (m *MsgAttestDepositResponse) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *MsgSubmitSteemDepositResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *MsgAttestDepositResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
@@ -1102,6 +1300,11 @@ func (m *MsgBridgeOut) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.Asset != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Asset))
+		i--
+		dAtA[i] = 0x28
+	}
 	if len(m.Memo) > 0 {
 		i -= len(m.Memo)
 		copy(dAtA[i:], m.Memo)
@@ -1152,6 +1355,88 @@ func (m *MsgBridgeOutResponse) MarshalTo(dAtA []byte) (int, error) {
 }
 
 func (m *MsgBridgeOutResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgAttestWithdrawalPayout) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgAttestWithdrawalPayout) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgAttestWithdrawalPayout) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.SteemTimestamp) > 0 {
+		i -= len(m.SteemTimestamp)
+		copy(dAtA[i:], m.SteemTimestamp)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.SteemTimestamp)))
+		i--
+		dAtA[i] = 0x32
+	}
+	if m.SteemBlock != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.SteemBlock))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.OpIndex != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.OpIndex))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.SteemTxid) > 0 {
+		i -= len(m.SteemTxid)
+		copy(dAtA[i:], m.SteemTxid)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.SteemTxid)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if m.WithdrawalId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.WithdrawalId))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Validator) > 0 {
+		i -= len(m.Validator)
+		copy(dAtA[i:], m.Validator)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Validator)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgAttestWithdrawalPayoutResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgAttestWithdrawalPayoutResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgAttestWithdrawalPayoutResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
@@ -1355,7 +1640,7 @@ func (m *MsgUpdateParamsResponse) Size() (n int) {
 	return n
 }
 
-func (m *MsgSubmitSteemDeposit) Size() (n int) {
+func (m *MsgAttestDeposit) Size() (n int) {
 	if m == nil {
 		return 0
 	}
@@ -1394,10 +1679,13 @@ func (m *MsgSubmitSteemDeposit) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
+	if m.Asset != 0 {
+		n += 1 + sovTx(uint64(m.Asset))
+	}
 	return n
 }
 
-func (m *MsgSubmitSteemDepositResponse) Size() (n int) {
+func (m *MsgAttestDepositResponse) Size() (n int) {
 	if m == nil {
 		return 0
 	}
@@ -1426,10 +1714,52 @@ func (m *MsgBridgeOut) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
+	if m.Asset != 0 {
+		n += 1 + sovTx(uint64(m.Asset))
+	}
 	return n
 }
 
 func (m *MsgBridgeOutResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgAttestWithdrawalPayout) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Validator)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.WithdrawalId != 0 {
+		n += 1 + sovTx(uint64(m.WithdrawalId))
+	}
+	l = len(m.SteemTxid)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.OpIndex != 0 {
+		n += 1 + sovTx(uint64(m.OpIndex))
+	}
+	if m.SteemBlock != 0 {
+		n += 1 + sovTx(uint64(m.SteemBlock))
+	}
+	l = len(m.SteemTimestamp)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgAttestWithdrawalPayoutResponse) Size() (n int) {
 	if m == nil {
 		return 0
 	}
@@ -1685,7 +2015,7 @@ func (m *MsgUpdateParamsResponse) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *MsgSubmitSteemDeposit) Unmarshal(dAtA []byte) error {
+func (m *MsgAttestDeposit) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -1708,10 +2038,10 @@ func (m *MsgSubmitSteemDeposit) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: MsgSubmitSteemDeposit: wiretype end group for non-group")
+			return fmt.Errorf("proto: MsgAttestDeposit: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgSubmitSteemDeposit: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: MsgAttestDeposit: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
@@ -1963,6 +2293,25 @@ func (m *MsgSubmitSteemDeposit) Unmarshal(dAtA []byte) error {
 			}
 			m.Memo = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 10:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Asset", wireType)
+			}
+			m.Asset = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Asset |= BridgeAsset(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -1984,7 +2333,7 @@ func (m *MsgSubmitSteemDeposit) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *MsgSubmitSteemDepositResponse) Unmarshal(dAtA []byte) error {
+func (m *MsgAttestDepositResponse) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -2007,10 +2356,10 @@ func (m *MsgSubmitSteemDepositResponse) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: MsgSubmitSteemDepositResponse: wiretype end group for non-group")
+			return fmt.Errorf("proto: MsgAttestDepositResponse: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgSubmitSteemDepositResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: MsgAttestDepositResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -2193,6 +2542,25 @@ func (m *MsgBridgeOut) Unmarshal(dAtA []byte) error {
 			}
 			m.Memo = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Asset", wireType)
+			}
+			m.Asset = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Asset |= BridgeAsset(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -2241,6 +2609,259 @@ func (m *MsgBridgeOutResponse) Unmarshal(dAtA []byte) error {
 		}
 		if fieldNum <= 0 {
 			return fmt.Errorf("proto: MsgBridgeOutResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgAttestWithdrawalPayout) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgAttestWithdrawalPayout: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgAttestWithdrawalPayout: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Validator", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Validator = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field WithdrawalId", wireType)
+			}
+			m.WithdrawalId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.WithdrawalId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SteemTxid", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SteemTxid = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field OpIndex", wireType)
+			}
+			m.OpIndex = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.OpIndex |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SteemBlock", wireType)
+			}
+			m.SteemBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SteemBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SteemTimestamp", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SteemTimestamp = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgAttestWithdrawalPayoutResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgAttestWithdrawalPayoutResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgAttestWithdrawalPayoutResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:

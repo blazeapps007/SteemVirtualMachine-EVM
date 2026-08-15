@@ -44,19 +44,35 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 		return nil, errorsmod.Wrap(types.ErrInvalidAmount, "amount must be a whole multiple of 10^15 asteem (one millisteem)")
 	}
 
-	coins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, msg.AmountAsteem))
-	if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, senderAddr, types.ModuleName, coins); err != nil {
-		return nil, err
+	denom := types.DenomForAsset(msg.Asset)
+	grossMilli := msg.AmountAsteem.Quo(types.MillisteemToAsteemFactor).Uint64()
+	netMilli, feeMilli := types.ApplyBridgeFee(grossMilli, params.BridgeFeeBps)
+	netAsteem := types.MillisteemToAsteem(netMilli)
+	feeAsteem := types.MillisteemToAsteem(feeMilli)
+
+	// Net -> STEEMBLACKHOLE (burned by the EndBlock sweep, the app's sole burn
+	// point); fee -> bridge_reward (100% staking reward, §4b). Together they remove
+	// the full amount from the sender.
+	if netAsteem.IsPositive() {
+		if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, senderAddr, types.BlackHoleModuleName, sdk.NewCoins(sdk.NewCoin(denom, netAsteem))); err != nil {
+			return nil, err
+		}
 	}
-	if err := k.bankKeeper.BurnCoins(ctx, types.ModuleName, coins); err != nil {
-		return nil, err
+	if feeAsteem.IsPositive() {
+		if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, senderAddr, types.BridgeRewardModuleName, sdk.NewCoins(sdk.NewCoin(denom, feeAsteem))); err != nil {
+			return nil, err
+		}
 	}
 
 	totals, err := k.Totals.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	totals.TotalBurnedAsteem = totals.TotalBurnedAsteem.Add(msg.AmountAsteem)
+	if msg.Asset == types.BridgeAsset_BRIDGE_ASSET_SBD {
+		totals.TotalBurnedAsbd = totals.TotalBurnedAsbd.Add(netAsteem)
+	} else {
+		totals.TotalBurnedAsteem = totals.TotalBurnedAsteem.Add(netAsteem)
+	}
 	if err := k.Totals.Set(ctx, totals); err != nil {
 		return nil, err
 	}
@@ -71,7 +87,9 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 		Sender:                  msg.Sender,
 		DestinationSteemAccount: msg.DestinationSteemAccount,
 		AmountAsteem:            msg.AmountAsteem,
-		AmountMillisteem:        msg.AmountAsteem.Quo(types.MillisteemToAsteemFactor).Uint64(),
+		AmountMillisteem:        netMilli,
+		FeeMillisteem:           feeMilli,
+		Asset:                   msg.Asset,
 		Memo:                    msg.Memo,
 		BurnTxHash:              txHashHex(sdkCtx),
 		Status:                  types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED,
@@ -90,12 +108,12 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 			types.EventTypeWithdrawalCreated,
 			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(withdrawalID, 10)),
 			sdk.NewAttribute(types.AttributeKeyDestination, msg.DestinationSteemAccount),
-			sdk.NewAttribute(types.AttributeKeyAmount, msg.AmountAsteem.String()),
+			sdk.NewAttribute(types.AttributeKeyAmount, netAsteem.String()),
 		),
 		sdk.NewEvent(
 			types.EventTypeWithdrawalBurned,
 			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(withdrawalID, 10)),
-			sdk.NewAttribute(types.AttributeKeyAmount, msg.AmountAsteem.String()),
+			sdk.NewAttribute(types.AttributeKeyAmount, netAsteem.String()),
 		),
 	})
 

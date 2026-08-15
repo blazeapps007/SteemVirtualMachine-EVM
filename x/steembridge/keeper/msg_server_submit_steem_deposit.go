@@ -12,13 +12,13 @@ import (
 	"steemvm/x/steembridge/types"
 )
 
-// SubmitSteemDeposit implements the module's core bridge-in flow: verify the
+// AttestDeposit implements the module's core bridge-in flow: verify the
 // signer is a bonded validator, dedup on (txid, opIndex), record or match
 // against the pending deposit, accumulate live bonded voting power, and mint
 // once the confirmation threshold is first reached. See the module design
 // note on ValidateDepositAcceptance for why the acceptance checks live there
 // and are called from here rather than duplicated.
-func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitSteemDeposit) (*types.MsgSubmitSteemDepositResponse, error) {
+func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposit) (*types.MsgAttestDepositResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	params, err := k.Params.Get(ctx)
@@ -51,7 +51,7 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 		// Benign no-op: this validator already confirmed this key (a same-block
 		// or retried resubmission). Not an error, so the redundant zero-fee
 		// attestation tx succeeds rather than failing.
-		return &types.MsgSubmitSteemDepositResponse{}, nil
+		return &types.MsgAttestDepositResponse{}, nil
 	}
 
 	dedupKey := collections.Join(msg.Txid, msg.OpIndex)
@@ -78,6 +78,7 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 			GatewayAccount:   msg.GatewayAccount,
 			AmountMillisteem: msg.AmountMillisteem,
 			Memo:             msg.Memo,
+			Asset:            msg.Asset,
 			Status:           types.DepositStatus_DEPOSIT_STATUS_PENDING,
 			CreatedAt:        uint64(sdkCtx.BlockHeight()),
 		}
@@ -100,17 +101,15 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 			return nil, err
 		}
 
-		switch deposit.Status {
-		case types.DepositStatus_DEPOSIT_STATUS_MINTED, types.DepositStatus_DEPOSIT_STATUS_UNCLAIMABLE:
-			// Benign no-op: another validator's attestation already resolved
-			// this deposit (usually earlier in this same block, once the 2/3
-			// threshold was crossed). Succeed silently so this redundant
-			// zero-fee attestation does not fail.
-			return &types.MsgSubmitSteemDepositResponse{}, nil
-		}
+		// The deposit may already be resolved (MINTED or UNCLAIMABLE). We do NOT
+		// stop here: attestations that arrive after the 2/3 threshold was crossed
+		// are still recorded below, so ValidatorConfirmations captures the full set
+		// of validators that attested — not just the quorum that crossed first
+		// (bridge-participation data). Re-resolution is prevented by the PENDING
+		// status guard further down.
 
 		if !matchesPending(deposit, msg) {
-			// The submission is rejected but the pending deposit is left
+			// The submission is rejected but the stored deposit is left
 			// completely untouched. This is deliberately a benign (non-error)
 			// message outcome, not a failed tx, so the mismatch event below
 			// is actually committed and observable on-chain for auditing —
@@ -132,7 +131,7 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 				sdk.NewAttribute(types.AttributeKeyStoredMemo, deposit.Memo),
 				sdk.NewAttribute(types.AttributeKeySubmittedMemo, msg.Memo),
 			))
-			return &types.MsgSubmitSteemDepositResponse{}, nil
+			return &types.MsgAttestDepositResponse{}, nil
 		}
 	}
 
@@ -160,7 +159,10 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 		sdk.NewAttribute(types.AttributeKeyConfirmedRatio, ratio.String()),
 	))
 
-	if ratio.GTE(params.BridgeConfirmationThreshold) {
+	// Resolve exactly once, the first time the threshold is crossed. Later
+	// attestations against an already-resolved deposit are recorded (above) but
+	// never re-mint.
+	if deposit.Status == types.DepositStatus_DEPOSIT_STATUS_PENDING && ratio.GTE(params.BridgeConfirmationThreshold) {
 		if err := k.resolveDeposit(ctx, &deposit, params); err != nil {
 			return nil, err
 		}
@@ -170,5 +172,5 @@ func (k msgServer) SubmitSteemDeposit(ctx context.Context, msg *types.MsgSubmitS
 		return nil, err
 	}
 
-	return &types.MsgSubmitSteemDepositResponse{}, nil
+	return &types.MsgAttestDepositResponse{}, nil
 }

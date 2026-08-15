@@ -3,26 +3,66 @@ package app
 import (
 	"context"
 
+	"cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+
+	oracledatatypes "steemvm/x/oracle/data/types"
 )
 
 // UpgradeName is the on-chain name of this software upgrade. It MUST match the
-// plan name used in the governance software-upgrade proposal, and is the key
-// x/upgrade uses to look up the handler below at the upgrade height.
-const UpgradeName = "v0.0.2-Beta1"
+// plan name used in the governance software-upgrade proposal (see
+// scripts/propose.sh), and is the key x/upgrade uses to look up the handler at
+// the upgrade height.
+const UpgradeName = "v0.0.3"
 
-// RegisterUpgradeHandlers wires the upgrade handler for UpgradeName. This
-// release changes no module state and adds no new store keys (the erc20 IBC
-// middleware is a pure app-wiring change), so the handler just runs the
-// standard module migrations — a no-op version bump that is future-proof if a
-// later module needs a migration. Called from New() before app.Load.
+// RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On
+// the IN-PLACE upgrade path this: runs module migrations, registers the native
+// SBD coin (bank metadata + ERC20 precompile, via the same registerSBD helper the
+// genesis/InitChainer path uses), sets distribution community_tax to 0 (the
+// 50/25/25 fee split is handled by the steembridge fee-split BeginBlocker), and
+// adds the new x/oracle/data module store. On the fresh-genesis path the handler
+// is never invoked — InitChainer does the SBD registration and genesis carries
+// community_tax=0. Called from New() before app.Load.
 func (app *App) RegisterUpgradeHandlers() {
 	app.UpgradeKeeper.SetUpgradeHandler(
 		UpgradeName,
 		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
-			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			vm, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return vm, err
+			}
+
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			if err := app.registerSBD(sdkCtx); err != nil {
+				return vm, err
+			}
+
+			distrParams, err := app.DistrKeeper.Params.Get(ctx)
+			if err != nil {
+				return vm, err
+			}
+			distrParams.CommunityTax = math.LegacyZeroDec()
+			if err := app.DistrKeeper.Params.Set(ctx, distrParams); err != nil {
+				return vm, err
+			}
+
+			return vm, nil
 		},
 	)
+
+	// Add the new x/oracle/data store key at the upgrade height (in-place path).
+	upgradeInfo, err := app.UpgradeKeeper.ReadUpgradeInfoFromDisk()
+	if err != nil {
+		panic(err)
+	}
+	if upgradeInfo.Name == UpgradeName && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
+		storeUpgrades := storetypes.StoreUpgrades{
+			Added: []string{oracledatatypes.StoreKey},
+		}
+		app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storeUpgrades))
+	}
 }

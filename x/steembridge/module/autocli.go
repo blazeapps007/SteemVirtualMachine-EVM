@@ -56,7 +56,13 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				{
 					RpcMethod:      "RequestedWithdrawals",
 					Use:            "requested-withdrawals",
-					Short:          "Query bridge-out request records",
+					Short:          "Query bridge-out request records (still to pay)",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{},
+				},
+				{
+					RpcMethod:      "ProcessedWithdrawals",
+					Use:            "processed-withdrawals",
+					Short:          "Query withdrawals paid out on Steem (PROCESSED)",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{},
 				},
 				{
@@ -136,16 +142,22 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Skip:      true, // skipped because authority gated
 				},
 				{
-					RpcMethod:      "SubmitSteemDeposit",
-					Use:            "submit-steem-deposit [txid] [op-index] [steem-block] [steem-timestamp] [steem-sender] [gateway-account] [amount-millisteem] [memo]",
-					Short:          "Send a submit-steem-deposit tx",
-					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "txid"}, {ProtoField: "op_index"}, {ProtoField: "steem_block"}, {ProtoField: "steem_timestamp"}, {ProtoField: "steem_sender"}, {ProtoField: "gateway_account"}, {ProtoField: "amount_millisteem"}, {ProtoField: "memo"}},
+					RpcMethod:      "AttestDeposit",
+					Use:            "attest-deposit [txid] [op-index] [steem-block] [steem-timestamp] [steem-sender] [gateway-account] [amount-millisteem] [memo] [asset]",
+					Short:          "Attest a Steem gateway deposit (bonded validators only)",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "txid"}, {ProtoField: "op_index"}, {ProtoField: "steem_block"}, {ProtoField: "steem_timestamp"}, {ProtoField: "steem_sender"}, {ProtoField: "gateway_account"}, {ProtoField: "amount_millisteem"}, {ProtoField: "memo"}, {ProtoField: "asset"}},
 				},
 				{
 					RpcMethod:      "BridgeOut",
-					Use:            "bridge-out [destination-steem-account] [amount-asteem] [memo]",
+					Use:            "bridge-out [destination-steem-account] [amount-asteem] [memo] [asset]",
 					Short:          "Send a bridge-out tx",
-					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "destination_steem_account"}, {ProtoField: "amount_asteem"}, {ProtoField: "memo"}},
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "destination_steem_account"}, {ProtoField: "amount_asteem"}, {ProtoField: "memo"}, {ProtoField: "asset"}},
+				},
+				{
+					RpcMethod:      "AttestWithdrawalPayout",
+					Use:            "attest-withdrawal-payout [withdrawal-id] [steem-txid] [op-index] [steem-block] [steem-timestamp]",
+					Short:          "Attest a Steem bridge-out payout (bonded validators only)",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "withdrawal_id"}, {ProtoField: "steem_txid"}, {ProtoField: "op_index"}, {ProtoField: "steem_block"}, {ProtoField: "steem_timestamp"}},
 				},
 				{
 					RpcMethod:      "SubmitNameRegistration",

@@ -132,8 +132,11 @@ func (AppModule) ConsensusVersion() uint64 { return 1 }
 
 // BeginBlock contains the logic that is automatically triggered at the beginning of each block.
 // The begin block implementation is optional.
-func (am AppModule) BeginBlock(_ context.Context) error {
-	return nil
+func (am AppModule) BeginBlock(ctx context.Context) error {
+	// Split tx fees 50/25/25 and route accrued bridge fees to stakers. Ordered
+	// BEFORE distribution's BeginBlocker in app_config so it runs on the pending
+	// fee_collector balance before AllocateTokens consumes it.
+	return am.keeper.SplitFees(ctx)
 }
 
 // EndBlock contains the logic that is automatically triggered at the end of each block.
@@ -142,5 +145,10 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	if err := am.keeper.ExpireDeposits(ctx); err != nil {
 		return err
 	}
-	return am.keeper.ExpireNameRegistrations(ctx)
+	if err := am.keeper.ExpireNameRegistrations(ctx); err != nil {
+		return err
+	}
+	// STEEMBLACKHOLE sweep: destroy everything that landed in the black hole this
+	// block (bridge-out net, fee-split 25% burn, stray sends). The app's sole burn.
+	return am.keeper.SweepBlackHole(ctx)
 }

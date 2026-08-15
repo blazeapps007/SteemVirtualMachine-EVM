@@ -39,4 +39,8 @@ message Params {
   // consensus logic never reads it. Governance may move it forward to spare
   // newly joining validators a long backfill.
   uint64 relayer_start_block = 11;
+  // bridge_fee_bps is the bridge fee in basis points (25 = 0.25%), applied to
+  // both deposits and bridge-outs, for both assets. The fee is routed to the
+  // staking reward pool. Must be <= 10000.
+  uint32 bridge_fee_bps = 12;
 }

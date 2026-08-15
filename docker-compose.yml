@@ -3,9 +3,18 @@ services:
     image: golang:1.26.5-trixie
     container_name: steemvm-node
     working_dir: /workspace
+    restart: unless-stopped
     environment:
       GOPATH: /root/go
       CGO_ENABLED: "1"
+      # cosmovisor: run the node under cosmovisor so it auto-swaps to the staged
+      # upgrade binary exactly at the governance upgrade height (no manual action
+      # at the block, ~no downtime). See scripts/propose.sh + scripts/upgrade.sh.
+      DAEMON_HOME: /root/.steemvm
+      DAEMON_NAME: steemvmd
+      DAEMON_RESTART_AFTER_UPGRADE: "true"
+      DAEMON_ALLOW_DOWNLOAD_BINARIES: "false"
+      UNSAFE_SKIP_BACKUP: "true"
     volumes:
       - .:/workspace
       - steemvm-home:/root/.steemvm
@@ -23,20 +32,38 @@ services:
       - -ec
       - |
         git config --global --add safe.directory /workspace
+        # Run under cosmovisor so the node auto-swaps to the staged upgrade binary
+        # at the governance upgrade height. cosmovisor + steemvmd both build from
+        # this checkout via `make install`.
+        [ -x /root/go/bin/cosmovisor ] || go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.0
         make install
         if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
           /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm
         fi
         # app.toml/config.toml are per-validator (gitignored). Seed them from the
         # tracked *.example templates on first run; your local edits persist after.
-        # (No shell vars here — docker compose would substitute variables before
-        # the container runs; explicit paths sidestep that entirely.)
+        # (Explicit paths only, except the cosmovisor staging below, which escapes
+        # shell vars as $$ so docker compose does not eat them.)
         [ -f /workspace/Instructions/app.toml ]   || cp /workspace/Instructions/app.toml.example   /workspace/Instructions/app.toml
         [ -f /workspace/Instructions/config.toml ] || cp /workspace/Instructions/config.toml.example /workspace/Instructions/config.toml
         rm -f /root/.steemvm/config/app.toml /root/.steemvm/config/config.toml /root/.steemvm/config/client.toml /root/.steemvm/config/genesis.json
         cp /workspace/Instructions/app.toml /workspace/Instructions/config.toml /workspace/Instructions/client.toml /root/.steemvm/config/
         cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
-        exec /root/go/bin/steemvmd start \
+        # cosmovisor layout: the CURRENT binary lives in genesis/bin and keeps
+        # running until the upgrade height. IMPORTANT: adopt cosmovisor while still
+        # on the current release, so genesis/bin bootstraps to the OLD binary; then
+        # pull the new version — it is only STAGED below, never run early.
+        mkdir -p /root/.steemvm/cosmovisor/genesis/bin
+        [ -f /root/.steemvm/cosmovisor/genesis/bin/steemvmd ] || cp /root/go/bin/steemvmd /root/.steemvm/cosmovisor/genesis/bin/steemvmd
+        # Stage the freshly-built binary under its own stamped version name (e.g.
+        # v0.0.3). cosmovisor swaps to it only when an on-chain plan of that exact
+        # name reaches its height, so a mismatched build can't be mis-staged.
+        VER="$$(/root/go/bin/steemvmd version 2>/dev/null)"
+        if [ -n "$$VER" ]; then
+          mkdir -p "/root/.steemvm/cosmovisor/upgrades/v$$VER/bin"
+          cp /root/go/bin/steemvmd "/root/.steemvm/cosmovisor/upgrades/v$$VER/bin/steemvmd"
+        fi
+        exec /root/go/bin/cosmovisor run start \
           --home /root/.steemvm \
           --json-rpc.enable \
           --json-rpc.address "0.0.0.0:8545" \

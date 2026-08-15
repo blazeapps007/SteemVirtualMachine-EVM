@@ -13,6 +13,16 @@ const (
 	// It should be synced with the gov module's name if it is ever changed.
 	// See: https://github.com/cosmos/cosmos-sdk/blob/v0.52.0-beta.2/x/gov/types/keys.go#L9
 	GovModuleName = "gov"
+
+	// BlackHoleModuleName is the STEEMBLACKHOLE module account: the bridge mints
+	// deposits out of it and its whole balance is burned every EndBlock (the app's
+	// sole burn point). It must be registered in app maccPerms with Minter+Burner.
+	BlackHoleModuleName = "steemblackhole"
+
+	// BridgeRewardModuleName holds the 0.25% bridge fee until a BeginBlocker moves
+	// it into fee_collector for 100% distribution to stakers (kept out of the
+	// tx-fee 50/25/25 split). Registered in app maccPerms with no special perms.
+	BridgeRewardModuleName = "bridge_reward"
 )
 
 // ParamsKey is the prefix to retrieve all Params
@@ -37,6 +47,9 @@ var (
 	DepositByStatusKey = collections.NewPrefix("deposit/by_status/")
 	// WithdrawalByStatusKey indexes (status, withdrawalID) for efficient status-filtered queries.
 	WithdrawalByStatusKey = collections.NewPrefix("withdrawal/by_status/")
+	// WithdrawalConfirmedByKey records (withdrawalID, validator) payout attestations
+	// already recorded, so a duplicate-confirmation check is O(1).
+	WithdrawalConfirmedByKey = collections.NewPrefix("withdrawal/confirmed_by/")
 	// TotalsKey holds the cumulative bridge mint/burn statistics.
 	TotalsKey = collections.NewPrefix("stats/totals")
 	// FreeDepositCounterKey holds the per-validator, per-block free-tx counter

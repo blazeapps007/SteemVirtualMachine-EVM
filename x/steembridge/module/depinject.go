@@ -8,6 +8,7 @@ import (
 	"cosmossdk.io/depinject/appconfig"
 	"github.com/cosmos/cosmos-sdk/codec"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 
 	"steemvm/x/steembridge/keeper"
 	"steemvm/x/steembridge/types"
@@ -36,6 +37,7 @@ type ModuleInputs struct {
 	AuthKeeper    types.AuthKeeper
 	BankKeeper    types.BankKeeper
 	StakingKeeper types.StakingKeeper
+	DistrKeeper   distrkeeper.Keeper
 }
 
 type ModuleOutputs struct {
@@ -58,6 +60,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		authority,
 		in.BankKeeper,
 		in.StakingKeeper,
+		in.DistrKeeper,
 	)
 	m := NewAppModule(in.Cdc, k, in.AuthKeeper, in.BankKeeper)
 

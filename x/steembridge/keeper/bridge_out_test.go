@@ -16,6 +16,7 @@ func enableBridgeOut(t *testing.T, f *fixtureWithFakes) {
 	params, err := f.keeper.Params.Get(f.ctx)
 	require.NoError(t, err)
 	params.BridgeOutEnabled = true
+	params.BridgeFeeBps = 0
 	require.NoError(t, f.keeper.Params.Set(f.ctx, params))
 }
 

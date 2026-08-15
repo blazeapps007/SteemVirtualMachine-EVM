@@ -52,6 +52,9 @@ var DefaultNamePendingTimeoutBlocks uint64 = 100800
 // LIB in genesis so all validators share the same anchor.
 var DefaultRelayerStartBlock uint64 = 0
 
+// DefaultBridgeFeeBps is the default bridge fee: 25 basis points = 0.25%.
+var DefaultBridgeFeeBps uint32 = 25
+
 // NewParams creates a new Params instance.
 func NewParams(
 	bridgeEnabled bool,
@@ -83,7 +86,7 @@ func NewParams(
 
 // DefaultParams returns a default set of parameters.
 func DefaultParams() Params {
-	return NewParams(
+	p := NewParams(
 		DefaultBridgeEnabled,
 		DefaultBridgeOutEnabled,
 		DefaultGatewayAccount,
@@ -96,6 +99,8 @@ func DefaultParams() Params {
 		DefaultNamePendingTimeoutBlocks,
 		DefaultRelayerStartBlock,
 	)
+	p.BridgeFeeBps = DefaultBridgeFeeBps
+	return p
 }
 
 // Validate validates the set of params.
@@ -148,6 +153,10 @@ func (p Params) Validate() error {
 	}
 	if p.NameServiceEnabled && p.NamePendingTimeoutBlocks == 0 {
 		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "name pending timeout blocks must be positive while the name service is enabled")
+	}
+
+	if p.BridgeFeeBps > 10000 {
+		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "bridge fee bps cannot exceed 10000")
 	}
 
 	return nil

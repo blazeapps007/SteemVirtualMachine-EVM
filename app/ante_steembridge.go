@@ -105,7 +105,7 @@ func newSteembridgeCosmosAnteHandler(
 // every message is one of the module's three fee-exempt kinds, each
 // individually qualifying:
 //
-//   - MsgSubmitSteemDeposit: signed by a currently bonded validator, would be
+//   - MsgAttestDeposit: signed by a currently bonded validator, would be
 //     accepted by the keeper (Keeper.ValidateDepositAcceptance), and within
 //     the shared per-validator per-block attestation cap.
 //   - MsgSubmitNameRegistration: same rules, sharing the same attestation cap
@@ -166,9 +166,16 @@ func (d steembridgeFeeExemptionDecorator) qualifiesForFeeExemption(ctx sdk.Conte
 	seenConfirmIDs := make(map[uint64]bool)
 	for _, msg := range msgs {
 		switch m := msg.(type) {
-		case *steembridgetypes.MsgSubmitSteemDeposit:
+		case *steembridgetypes.MsgAttestDeposit:
 			if !d.qualifiesAsValidatorAttestation(ctx, m.Validator, func() error {
 				return d.bridgeKeeper.ValidateDepositAcceptance(ctx, m)
+			}) {
+				return false
+			}
+
+		case *steembridgetypes.MsgAttestWithdrawalPayout:
+			if !d.qualifiesAsValidatorAttestation(ctx, m.Validator, func() error {
+				return d.bridgeKeeper.ValidateWithdrawalProcessedAcceptance(ctx, m)
 			}) {
 				return false
 			}
@@ -207,7 +214,7 @@ func (d steembridgeFeeExemptionDecorator) qualifiesForFeeExemption(ctx sdk.Conte
 }
 
 // qualifiesAsValidatorAttestation applies the shared attestation rules for
-// MsgSubmitSteemDeposit and MsgSubmitNameRegistration: signer parses, is a
+// MsgAttestDeposit and MsgSubmitNameRegistration: signer parses, is a
 // currently bonded validator, the message would be accepted by the keeper,
 // and the validator's shared per-block free-attestation budget is not
 // exhausted.

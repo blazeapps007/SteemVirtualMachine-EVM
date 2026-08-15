@@ -49,7 +49,10 @@ genesis:
 
         distribution:
           params:
-            community_tax: "0.500000000000000000"
+            # 0: the 50/25/25 fee split is done by the steembridge fee-split
+            # BeginBlocker (25% community, 25% burn, 50% stakers); distribution
+            # must not further tax the 50% it receives.
+            community_tax: "0.000000000000000000"
 
         bank:
             denom_metadata:

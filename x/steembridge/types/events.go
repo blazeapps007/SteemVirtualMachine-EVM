@@ -10,6 +10,9 @@ const (
 	EventTypeDepositExpired              = "deposit_expired"
 	EventTypeWithdrawalCreated           = "withdrawal_created"
 	EventTypeWithdrawalBurned            = "withdrawal_burned"
+	EventTypeWithdrawalConfirmed         = "withdrawal_confirmed"
+	EventTypeWithdrawalPayoutMismatch    = "withdrawal_payout_mismatch"
+	EventTypeWithdrawalProcessed         = "withdrawal_processed"
 	EventTypeParametersUpdated           = "parameters_updated"
 
 	EventTypeNameRegistrationCreated     = "name_registration_created"
@@ -33,6 +36,9 @@ const (
 	AttributeKeyDestination     = "destination"
 	AttributeKeyDestinationType = "destination_type"
 	AttributeKeyAmount          = "amount"
+	AttributeKeySteemTxid       = "steem_txid"
+	AttributeKeyStoredTxid      = "stored_steem_txid"
+	AttributeKeySubmittedTxid   = "submitted_steem_txid"
 
 	AttributeKeyStoredSteemBlock    = "stored_steem_block"
 	AttributeKeySubmittedSteemBlock = "submitted_steem_block"

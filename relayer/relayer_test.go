@@ -100,7 +100,7 @@ func TestBuildMsg(t *testing.T) {
 	require.Equal(t, transfer.Memo, reg.Memo, "memo must pass through verbatim — the chain strips prefixes itself")
 
 	msg = BuildMsg(transfer, IntentDeposit, validator, "blaze.apps")
-	dep, ok := msg.(*types.MsgSubmitSteemDeposit)
+	dep, ok := msg.(*types.MsgAttestDeposit)
 	require.True(t, ok)
 	require.Equal(t, "upex", dep.SteemSender)
 	require.Equal(t, transfer.Memo, dep.Memo)

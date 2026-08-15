@@ -1,0 +1,20 @@
+syntax = "proto3";
+package steemvm.oracle.data.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "steemvm/oracle/data/v1/exchange_rate.proto";
+import "steemvm/oracle/data/v1/params.proto";
+
+option go_package = "steemvm/x/oracle/data/types";
+
+// GenesisState defines the x/oracle/data module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  // exchange_rates is the set of finalized rates carried over genesis.
+  repeated ExchangeRate exchange_rates = 2 [(gogoproto.nullable) = false];
+}

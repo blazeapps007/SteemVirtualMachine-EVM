@@ -198,7 +198,7 @@ func (k Keeper) resolveNameRegistration(ctx context.Context, registration *types
 	// this mint is backed 1:1 exactly like a deposit; it funds the destination
 	// so it can pay gas for the EVM/MetaMask confirmName call (the Cosmos-CLI
 	// confirm path is already fee-exempt, but the EVM path is not).
-	mintAmount, err := k.creditBridgedSteem(ctx, destAddr, registration.AmountMillisteem)
+	mintAmount, err := k.creditBridged(ctx, destAddr, types.BridgeAsset_BRIDGE_ASSET_STEEM, registration.AmountMillisteem, 0)
 	if err != nil {
 		return err
 	}

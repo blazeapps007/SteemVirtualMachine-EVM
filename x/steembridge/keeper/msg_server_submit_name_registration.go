@@ -13,7 +13,7 @@ import (
 )
 
 // SubmitNameRegistration implements the name-service attestation flow,
-// mirroring SubmitSteemDeposit: verify the signer is a bonded validator,
+// mirroring AttestDeposit: verify the signer is a bonded validator,
 // dedup on (txid, opIndex), record or match against the pending
 // registration, accumulate live bonded voting power, and — once the
 // confirmation threshold is first reached — park the registration as

@@ -56,6 +56,7 @@ import (
 	"github.com/spf13/cast"
 
 	"steemvm/docs"
+	oracledatakeeper "steemvm/x/oracle/data/keeper"
 	steembridgemodulekeeper "steemvm/x/steembridge/keeper"
 	steemvmmodulekeeper "steemvm/x/steemvm/keeper"
 )
@@ -127,6 +128,7 @@ type App struct {
 	// AppConfig returns the default app config.
 	EVMMempool        *evmmempool.ExperimentalEVMMempool
 	SteembridgeKeeper steembridgemodulekeeper.Keeper
+	OracleDataKeeper  oracledatakeeper.Keeper
 }
 
 func init() {
@@ -207,6 +209,7 @@ func New(
 		&app.ParamsKeeper,
 		&app.SteemvmKeeper, &app.FeeGrantKeeper,
 		&app.SteembridgeKeeper,
+		&app.OracleDataKeeper,
 	); err != nil {
 		panic(err)
 	}
@@ -249,7 +252,17 @@ func New(
 		if err := app.UpgradeKeeper.SetModuleVersionMap(ctx, app.ModuleManager.GetVersionMap()); err != nil {
 			return nil, err
 		}
-		return app.App.InitChainer(ctx, req)
+		res, err := app.App.InitChainer(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		// Register the native SBD coin (bank metadata + dynamic ERC20 precompile)
+		// on a fresh chain. The in-place upgrade path does the same via the
+		// v0.0.3 handler, using the shared registerSBD helper so they can't drift.
+		if err := app.registerSBD(ctx); err != nil {
+			return nil, err
+		}
+		return res, nil
 	})
 
 	app.RegisterUpgradeHandlers()
