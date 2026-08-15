@@ -173,6 +173,64 @@ func TestExtractGatewayTransfers_TxidFallbackAndNilBlock(t *testing.T) {
 	require.Equal(t, "aabbccddeeff00112233445566778899aabbccdd", transfers[0].Txid)
 }
 
+func TestParseWithdrawalMemo(t *testing.T) {
+	tests := []struct {
+		memo   string
+		want   uint64
+		wantOK bool
+	}{
+		{"svm-withdrawal 42", 42, true},
+		{"  svm-withdrawal 0  ", 0, true},
+		{"svm-withdrawal 18446744073709551615", 18446744073709551615, true},
+		{"svm-withdrawal", 0, false},       // missing id
+		{"svm-withdrawal 42 extra", 0, false},
+		{"svm-withdrawal -1", 0, false},
+		{"svm-withdrawal 4.2", 0, false},
+		{"svm-withdrawals 42", 0, false},   // prefix must be a whole token
+		{"withdrawal 42", 0, false},
+		{"", 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.memo, func(t *testing.T) {
+			got, ok := ParseWithdrawalMemo(tc.memo)
+			require.Equal(t, tc.wantOK, ok)
+			if ok {
+				require.Equal(t, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestExtractGatewayPayouts(t *testing.T) {
+	const raw = `{
+	  "timestamp": "2026-07-14T14:00:00",
+	  "transaction_ids": ["aaaa000000000000000000000000000000000000"],
+	  "transactions": [
+	    {
+	      "transaction_id": "bbbb111111111111111111111111111111111111",
+	      "operations": [
+	        ["vote", {"voter": "a"}],
+	        ["transfer", {"from": "blaze.apps", "to": "alice", "amount": "10.000 STEEM", "memo": "svm-withdrawal 7"}],
+	        ["transfer", {"from": "blaze.apps", "to": "bob", "amount": "1.000 STEEM", "memo": "just a gift"}],
+	        ["transfer", {"from": "someone", "to": "carol", "amount": "1.000 STEEM", "memo": "svm-withdrawal 8"}]
+	      ]
+	    }
+	  ]
+	}`
+	var block *steemBlock
+	require.NoError(t, json.Unmarshal([]byte(raw), &block))
+
+	payouts := ExtractGatewayPayouts(500, block, "blaze.apps")
+	require.Len(t, payouts, 1, "only gateway-sent transfers with a svm-withdrawal memo count")
+	require.Equal(t, uint64(7), payouts[0].WithdrawalID)
+	require.Equal(t, "bbbb111111111111111111111111111111111111", payouts[0].Txid)
+	require.Equal(t, uint32(1), payouts[0].OpIndex, "op index counts all ops in the tx")
+	require.Equal(t, uint64(500), payouts[0].SteemBlock)
+	require.Equal(t, "2026-07-14T14:00:00", payouts[0].SteemTimestamp)
+
+	require.Nil(t, ExtractGatewayPayouts(1, nil, "blaze.apps"))
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 

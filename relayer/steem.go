@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -221,6 +222,88 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, steemS
 		}
 	}
 	return transfers
+}
+
+// Payout is a gateway→user payout of a bridge-out on Steem, identified by its
+// "svm-withdrawal <id>" memo, that a validator attests to flip the withdrawal
+// REQUESTED→PROCESSED. Only the raw facts consensus needs are carried — the net
+// amount and destination live in the on-chain Withdrawal record, keyed by id.
+type Payout struct {
+	WithdrawalID   uint64
+	Txid           string
+	OpIndex        uint32
+	SteemBlock     uint64
+	SteemTimestamp string
+}
+
+// ExtractGatewayPayouts scans a block for transfer operations sent FROM the
+// gateway account whose memo is "svm-withdrawal <id>" — the gateway's on-Steem
+// payout of bridge-out #id. The amount/symbol is deliberately not checked here:
+// the chain already knows the withdrawal's net payout from its record, so
+// validators only report where the payout landed (txid, op_index). OpIndex
+// matches the module's (txid, op_index) dedup key; the block timestamp is used
+// verbatim so all validators submit byte-identical facts.
+func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway string) []Payout {
+	if block == nil {
+		return nil
+	}
+
+	var payouts []Payout
+	for txNum, tx := range block.Transactions {
+		txid := tx.TransactionId
+		if txid == "" && txNum < len(block.TransactionIds) {
+			txid = block.TransactionIds[txNum]
+		}
+		if txid == "" {
+			continue
+		}
+
+		for opIndex, rawOp := range tx.Operations {
+			var tuple []json.RawMessage
+			if err := json.Unmarshal(rawOp, &tuple); err != nil || len(tuple) != 2 {
+				continue
+			}
+			var opType string
+			if err := json.Unmarshal(tuple[0], &opType); err != nil || opType != "transfer" {
+				continue
+			}
+			var op transferOp
+			if err := json.Unmarshal(tuple[1], &op); err != nil {
+				continue
+			}
+			if op.From != gateway {
+				continue
+			}
+			id, ok := ParseWithdrawalMemo(op.Memo)
+			if !ok {
+				continue
+			}
+			payouts = append(payouts, Payout{
+				WithdrawalID:   id,
+				Txid:           txid,
+				OpIndex:        uint32(opIndex), //nolint:gosec // ops per tx are tiny
+				SteemBlock:     blockNum,
+				SteemTimestamp: block.Timestamp,
+			})
+		}
+	}
+	return payouts
+}
+
+// ParseWithdrawalMemo parses a gateway payout memo "svm-withdrawal <id>" into
+// the withdrawal id. The prefix must be a whole token and the id a plain base-10
+// uint64; anything else (a human note, a wrong format) returns ok=false so the
+// relayer ignores it.
+func ParseWithdrawalMemo(memo string) (uint64, bool) {
+	fields := strings.Fields(strings.TrimSpace(memo))
+	if len(fields) != 2 || fields[0] != "svm-withdrawal" {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }
 
 // ParseSteemAmount converts a Steem asset string like "70.561 STEEM" into

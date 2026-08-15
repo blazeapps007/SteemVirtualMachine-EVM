@@ -191,6 +191,23 @@ func runCycle(
 			}
 			blockMsgs = append(blockMsgs, BuildMsg(transfer, intent, signerAddr, gateway))
 		}
+		// Withdrawal payouts: gateway→user transfers memoed "svm-withdrawal <id>".
+		// Optimistic — every payout seen is attested once (the cursor scans each
+		// block exactly once); the chain benign-no-ops duplicates and finalizes the
+		// withdrawal REQUESTED→PROCESSED at 2/3, so no per-validator dedup query is
+		// needed here. Gated on bridge-out being enabled (the v0.0.3 payout path).
+		if params.Params.BridgeOutEnabled {
+			for _, payout := range ExtractGatewayPayouts(nb.Num, nb.Block, gateway) {
+				blockMsgs = append(blockMsgs, &types.MsgAttestWithdrawalPayout{
+					Validator:      signerAddr.String(),
+					WithdrawalId:   payout.WithdrawalID,
+					SteemTxid:      payout.Txid,
+					OpIndex:        payout.OpIndex,
+					SteemBlock:     payout.SteemBlock,
+					SteemTimestamp: payout.SteemTimestamp,
+				})
+			}
+		}
 		if len(msgs)+len(blockMsgs) > MaxMsgsPerTx {
 			break // stop at a block boundary; the rest is picked up next cycle
 		}
