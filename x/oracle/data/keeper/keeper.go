@@ -20,6 +20,9 @@ type Keeper struct {
 	authority []byte
 
 	stakingKeeper types.StakingKeeper
+	// oracleKeeper is the parent engine this module reports price participation
+	// to. It may be nil (standalone/tests); reporting is skipped when so.
+	oracleKeeper types.OracleKeeper
 
 	Schema collections.Schema
 	Params collections.Item[types.Params]
@@ -39,6 +42,7 @@ func NewKeeper(
 	authority []byte,
 
 	stakingKeeper types.StakingKeeper,
+	oracleKeeper types.OracleKeeper,
 ) Keeper {
 	if _, err := addressCodec.BytesToString(authority); err != nil {
 		panic(fmt.Sprintf("invalid authority address %s: %s", authority, err))
@@ -53,6 +57,7 @@ func NewKeeper(
 		authority:    authority,
 
 		stakingKeeper: stakingKeeper,
+		oracleKeeper:  oracleKeeper,
 
 		Params: collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
 		ExchangeRate: collections.NewMap(

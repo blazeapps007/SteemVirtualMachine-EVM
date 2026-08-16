@@ -28,16 +28,25 @@ func (k Keeper) EndBlocker(ctx context.Context) error {
 		return nil
 	}
 
-	_, err = k.TallyExchangeRates(ctx)
-	return err
+	inBandVoters, err := k.TallyExchangeRates(ctx)
+	if err != nil {
+		return err
+	}
+	// Feed the unified slashing counter: this period's in-band voters are the
+	// price-duty hits; the parent engine supplies the bonded opportunity set.
+	if k.oracleKeeper != nil {
+		return k.oracleKeeper.RecordPriceParticipation(ctx, inBandVoters)
+	}
+	return nil
 }
 
 // voterBallot holds a single validator's revealed vote, resolved to its live
 // bonded weight, ready for the per-pair tally.
 type voterBallot struct {
-	valStr string
-	power  math.Int
-	rates  map[string]math.LegacyDec
+	valStr  string
+	valoper []byte
+	power   math.Int
+	rates   map[string]math.LegacyDec
 }
 
 // TallyExchangeRates computes, for every whitelisted pair, the power-weighted
@@ -45,17 +54,17 @@ type voterBallot struct {
 // represent at least VoteThreshold of total bonded power — writes it to the
 // ExchangeRate store with the current epoch and block time.
 //
-// It returns per-validator in-band participation: for each validator that
-// submitted a revealed vote this period, true iff its submitted rate stayed
-// within RewardBand of the finalized median for every pair that finalized. This
-// is the signal the parent x/oracle slashing/reward module reads; storing it is
-// not this module's job, so the result is returned (and the ExchangeRates are
-// set as a side effect). Revealed votes are cleared after the tally, and stale
-// prevotes that were never revealed are expired.
+// It returns the in-band voters (validator operator address bytes): those that
+// submitted a revealed vote this period whose rate stayed within RewardBand of
+// the finalized median for every pair that finalized. This is the price-duty
+// HIT set the parent x/oracle slashing engine reads; storing it is not this
+// module's job, so the result is returned (and the ExchangeRates are set as a
+// side effect). Revealed votes are cleared after the tally, and stale prevotes
+// that were never revealed are expired.
 //
 // The weight of a vote is the validator's live bonded tokens (GetTokens),
 // matching the x/steembridge attestation-power convention.
-func (k Keeper) TallyExchangeRates(ctx context.Context) (map[string]bool, error) {
+func (k Keeper) TallyExchangeRates(ctx context.Context) ([][]byte, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	params, err := k.Params.Get(ctx)
@@ -82,10 +91,14 @@ func (k Keeper) TallyExchangeRates(ctx context.Context) (map[string]bool, error)
 		for _, t := range vote.ExchangeRates {
 			rates[t.Pair] = t.Rate
 		}
+		// Copy the key: the iterator reuses the buffer between iterations.
+		valoper := make([]byte, len(key))
+		copy(valoper, key)
 		ballots = append(ballots, voterBallot{
-			valStr: valAddr.String(),
-			power:  validator.GetTokens(),
-			rates:  rates,
+			valStr:  valAddr.String(),
+			valoper: valoper,
+			power:   validator.GetTokens(),
+			rates:   rates,
 		})
 		return false, nil
 	})
@@ -170,7 +183,15 @@ func (k Keeper) TallyExchangeRates(ctx context.Context) (map[string]bool, error)
 		return nil, err
 	}
 
-	return inBand, nil
+	// Collapse the in-band map into the operator-address hit set (in ballot
+	// order, deterministic) for the parent engine.
+	inBandVoters := make([][]byte, 0, len(ballots))
+	for _, b := range ballots {
+		if inBand[b.valStr] {
+			inBandVoters = append(inBandVoters, b.valoper)
+		}
+	}
+	return inBandVoters, nil
 }
 
 // rateWeight is a single (rate, bonded power) ballot for one pair.

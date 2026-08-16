@@ -34,6 +34,7 @@ type ModuleInputs struct {
 	AddressCodec address.Codec
 
 	StakingKeeper types.StakingKeeper
+	OracleKeeper  types.OracleKeeper
 }
 
 type ModuleOutputs struct {
@@ -55,6 +56,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.AddressCodec,
 		authority,
 		in.StakingKeeper,
+		in.OracleKeeper,
 	)
 	m := NewAppModule(in.Cdc, k)
 

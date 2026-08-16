@@ -24,3 +24,15 @@ type StakingKeeper interface {
 	// of the vote-threshold ratio.
 	TotalBondedTokens(ctx context.Context) (math.Int, error)
 }
+
+// OracleKeeper is the parent x/oracle engine's reporting entry point. The
+// interface is declared here (not imported from x/oracle) so the price module
+// never depends on the parent — the concrete oracle keeper satisfies it and is
+// injected. A nil OracleKeeper leaves the module fully functional standalone
+// (no participation is reported), so tests and a pre-wiring build still work.
+type OracleKeeper interface {
+	// RecordPriceParticipation reports this vote period's in-band voters (by
+	// validator operator address bytes) so the parent engine can accrue the
+	// price duty of its unified slashing counter.
+	RecordPriceParticipation(ctx context.Context, voters [][]byte) error
+}
