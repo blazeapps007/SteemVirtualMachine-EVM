@@ -56,9 +56,9 @@ import (
 	"github.com/spf13/cast"
 
 	"steemvm/docs"
+	steembridgemodulekeeper "steemvm/x/oracle/bridge/keeper"
 	oracledatakeeper "steemvm/x/oracle/data/keeper"
 	oraclekeeper "steemvm/x/oracle/keeper"
-	steembridgemodulekeeper "steemvm/x/steembridge/keeper"
 	steemvmmodulekeeper "steemvm/x/steemvm/keeper"
 )
 

@@ -1,7 +1,7 @@
 syntax = "proto3";
 package steemvm.steembridge.v1;
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // BridgeAsset identifies which native Steem asset a deposit/withdrawal moves.
 // The zero value is STEEM, so pre-existing records and messages default to STEEM.

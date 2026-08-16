@@ -46,7 +46,7 @@ import (
 
 	oracledataprecompile "steemvm/precompiles/oracledata"
 	steembridgeprecompile "steemvm/precompiles/steembridge"
-	steembridgekeeper "steemvm/x/steembridge/keeper"
+	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
 )
 
 func init() {

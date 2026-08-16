@@ -12,7 +12,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"steemvm/x/steembridge/types"
+	"steemvm/x/oracle/bridge/types"
 )
 
 // Run drives the Steem relayer loop until ctx is canceled. It is a pure

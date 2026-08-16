@@ -16,8 +16,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	steembridgekeeper "steemvm/x/steembridge/keeper"
-	steembridgetypes "steemvm/x/steembridge/types"
+	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
+	steembridgetypes "steemvm/x/oracle/bridge/types"
 )
 
 // PrecompileAddress is the fixed EVM address of the steembridge precompile.

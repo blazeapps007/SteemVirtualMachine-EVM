@@ -6,7 +6,7 @@ import (
 	erc20types "github.com/cosmos/evm/x/erc20/types"
 	"github.com/ethereum/go-ethereum/common"
 
-	steembridgetypes "steemvm/x/steembridge/types"
+	steembridgetypes "steemvm/x/oracle/bridge/types"
 )
 
 // SBDERC20Address is the fixed EVM address of the SBD dynamic ERC20 precompile.

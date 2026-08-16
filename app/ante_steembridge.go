@@ -14,8 +14,8 @@ import (
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	ibcante "github.com/cosmos/ibc-go/v10/modules/core/ante"
 
-	steembridgekeeper "steemvm/x/steembridge/keeper"
-	steembridgetypes "steemvm/x/steembridge/types"
+	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
+	steembridgetypes "steemvm/x/oracle/bridge/types"
 )
 
 // newSteembridgeAnteHandler builds the app's top-level ante dispatcher.

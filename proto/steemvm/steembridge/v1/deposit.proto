@@ -4,7 +4,7 @@ package steemvm.steembridge.v1;
 import "gogoproto/gogo.proto";
 import "steemvm/steembridge/v1/asset.proto";
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // DestinationType is the derived destination account type for a deposit.
 enum DestinationType {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	steembridgetypes "steemvm/x/steembridge/types"
+	steembridgetypes "steemvm/x/oracle/bridge/types"
 )
 
 // Transfer is one Steem transfer operation addressed to the gateway account,

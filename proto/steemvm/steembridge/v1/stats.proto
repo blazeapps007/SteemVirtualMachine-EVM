@@ -3,7 +3,7 @@ package steemvm.steembridge.v1;
 
 import "gogoproto/gogo.proto";
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // BridgeTotals holds the module's cumulative mint/burn statistics in
 // consensus state. net_outstanding is computed on read, not stored.

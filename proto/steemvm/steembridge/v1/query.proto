@@ -11,7 +11,7 @@ import "steemvm/steembridge/v1/name_registration.proto";
 import "steemvm/steembridge/v1/params.proto";
 import "steemvm/steembridge/v1/withdrawal.proto";
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // Query defines the gRPC querier service.
 service Query {

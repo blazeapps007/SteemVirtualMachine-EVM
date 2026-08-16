@@ -1,12 +1,12 @@
 package app
 
 import (
+	_ "steemvm/x/oracle/bridge/module"
+	steembridgemoduletypes "steemvm/x/oracle/bridge/types"
 	_ "steemvm/x/oracle/data/module"
 	oracledatamoduletypes "steemvm/x/oracle/data/types"
 	_ "steemvm/x/oracle/module"
 	oraclemoduletypes "steemvm/x/oracle/types"
-	_ "steemvm/x/steembridge/module"
-	steembridgemoduletypes "steemvm/x/steembridge/types"
 	_ "steemvm/x/steemvm/module"
 	steemvmmoduletypes "steemvm/x/steemvm/types"
 	"time"

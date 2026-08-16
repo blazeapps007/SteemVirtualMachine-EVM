@@ -40,7 +40,7 @@ docker run "${RUN_OPTS[@]}" "$IMAGE" bash -c '
   set -e
   make proto-gen
   go build ./...
-  go test ./x/steembridge/... ./relayer/... ./precompiles/...
+  go test ./x/oracle/... ./relayer/... ./precompiles/...
 '
 
 cat <<'EOF'
@@ -48,7 +48,7 @@ cat <<'EOF'
 ==> BUILD GREEN. The regenerated .pb.go are now in your working tree.
     Review the diff, then commit + tag on the host:
 
-      git diff --stat x/steembridge/types/*.pb.go     # should be only withdrawal/query renames
+      git diff --stat x/oracle/bridge/types/*.pb.go   # should be only withdrawal/query renames
       git add -A
       git commit -m "v0.0.2-Beta1: erc20 IBC middleware, no-fail attestations, relayer TESTS symbol, withdrawal REQUESTED rename, upgrade handler"
       git tag v0.0.2-Beta1

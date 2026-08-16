@@ -40,7 +40,7 @@ of the same 20 bytes. Bridged funds are visible in both without any ERC-20 wrapp
 
 ## Features
 
-**STEEM ↔ asteem bridge** (`x/steembridge`) — bonded validators attest to STEEM
+**STEEM ↔ asteem bridge** (`x/oracle/bridge`, on-chain store key `steembridge`) — bonded validators attest to STEEM
 transfers reaching the gateway account. Once attestations exceed the ⅔ threshold
 the chain mints `asteem` to the address named in the transfer memo. Bridging out
 burns `asteem` and records a withdrawal for validators to relay back to Steem.
@@ -131,7 +131,7 @@ generate and move the output into place (generated files land in a temporary
 
 ```sh
 go tool buf generate --template proto/buf.gen.gogo.yaml --path proto/steemvm/steembridge
-cp steemvm/x/steembridge/types/*.go x/steembridge/types/
+cp steemvm/x/oracle/bridge/types/*.go x/oracle/bridge/types/
 rm -rf steemvm
 ```
 
@@ -143,9 +143,12 @@ Never hand-edit `*.pb.go` — regenerate instead.
 |---|---|
 | `app/` | App wiring: depinject app config, plus manual EVM/IBC registration and the custom ante handler |
 | `cmd/steemvmd/` | Node + CLI binary |
-| `x/steembridge/` | The bridge, name service, and validator-identity module |
+| `x/oracle/bridge/` | The bridge, name service, and validator-identity module (store key `steembridge`) |
+| `x/oracle/data/` | Price-feed module (commit-reveal, weighted median) |
+| `x/oracle/` | Parent unified slashing engine |
 | `x/steemvm/` | Placeholder module |
-| `precompiles/steembridge/` | EVM precompile (`0x…0900`) and its Solidity interface |
+| `precompiles/steembridge/` | Bridge EVM precompile (`0x…0900`) and its Solidity interface |
+| `precompiles/oracledata/` | Price read precompile (`0x…0902`) and its Solidity interface |
 | `relayer/` | The in-binary Steem relayer |
 | `proto/` | Protobuf definitions (source of truth for `*.pb.go`) |
 | `Instructions/` | Canonical node config + the validator guide |

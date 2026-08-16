@@ -1,7 +1,7 @@
 syntax = "proto3";
 package steemvm.steembridge.v1;
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // FreeDepositCounter tracks, per validator, how many fee-exempt
 // MsgSubmitSteemDeposit transactions have been processed in the current

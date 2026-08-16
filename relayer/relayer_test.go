@@ -8,7 +8,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"steemvm/x/steembridge/types"
+	"steemvm/x/oracle/bridge/types"
 )
 
 func TestParseSteemAmount(t *testing.T) {
@@ -182,11 +182,11 @@ func TestParseWithdrawalMemo(t *testing.T) {
 		{"svm-withdrawal 42", 42, true},
 		{"  svm-withdrawal 0  ", 0, true},
 		{"svm-withdrawal 18446744073709551615", 18446744073709551615, true},
-		{"svm-withdrawal", 0, false},       // missing id
+		{"svm-withdrawal", 0, false}, // missing id
 		{"svm-withdrawal 42 extra", 0, false},
 		{"svm-withdrawal -1", 0, false},
 		{"svm-withdrawal 4.2", 0, false},
-		{"svm-withdrawals 42", 0, false},   // prefix must be a whole token
+		{"svm-withdrawals 42", 0, false}, // prefix must be a whole token
 		{"withdrawal 42", 0, false},
 		{"", 0, false},
 	}

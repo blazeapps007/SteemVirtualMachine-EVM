@@ -5,7 +5,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"steemvm/x/steembridge/types"
+	"steemvm/x/oracle/bridge/types"
 )
 
 // Intent is what a gateway transfer's memo asks the bridge to do.
