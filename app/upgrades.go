@@ -17,9 +17,11 @@ import (
 )
 
 // UpgradeName is the on-chain name of this software upgrade. It MUST match the
-// plan name used in the governance software-upgrade proposal (see
-// scripts/propose.sh), and is the key x/upgrade uses to look up the handler at
-// the upgrade height.
+// plan name used in a future governance software-upgrade proposal, and is the
+// key x/upgrade uses to look up the handler at the upgrade height. On a chain
+// launched fresh at this version the handler never fires (InitChainer + genesis
+// do the setup); it is retained so the same migration is available if an older
+// chain ever upgrades in-place.
 const UpgradeName = "v0.0.3"
 
 // RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On

@@ -5,10 +5,9 @@ This guide takes you from nothing to a running, staked validator using the
 config from the templates in this directory (`app.toml.example`,
 `config.toml.example`) and copies in `client.toml`/`genesis.json` on every start.
 
-> **New node? You MUST state-sync first.** The chain has already gone through an
-> on-chain upgrade, so a fresh node **cannot** replay from genesis — it will halt
-> mid-sync with an app-hash mismatch. Run `bash scripts/statesync.sh` **once
-> before** your first `docker compose up` (step 2 walks you through it).
+> **New node?** This is a freshly-launched chain — a new node simply replays
+> from the `genesis.json` in this directory (`docker compose up` handles it). No
+> state-sync step is required.
 
 > **Read this first — validators must have a Steem identity.** SteemVM does not
 > let anonymous validators join. To create a validator you must prove you own a
@@ -24,7 +23,7 @@ config from the templates in this directory (`app.toml.example`,
 
 | Step | What |
 |---|---|
-| 1–3 | Install Docker, **configure state-sync**, start the node, wait for sync |
+| 1–3 | Install Docker, start the node, wait for sync |
 | 4 | Create your key (your chain address) |
 | 5 | Send `0.001 STEEM` with memo `svm-register <address>` |
 | 6 | Confirm the name is yours → link goes ACTIVE |
@@ -52,26 +51,11 @@ If either command fails, install [Docker Desktop](https://docs.docker.com/get-do
 
 ## 2. Start the node
 
-Do two things **before** your first `docker compose up`:
+A new node replays from the `genesis.json` in this directory — no state-sync
+needed. Optionally set your moniker first (below), then start with
+`docker compose up -d` (step 3).
 
-### a) Configure state-sync — REQUIRED
-
-SteemVM has already completed an on-chain upgrade (v0.0.2-Beta1 at block 254133),
-so a brand-new node **cannot** replay from genesis — it halts with an app-hash
-mismatch at a pre-upgrade block. Bootstrap from a recent snapshot instead. Run
-this **once**, from your checkout:
-
-```sh
-bash scripts/statesync.sh
-```
-
-It fetches a recent trusted height + hash from the public provider nodes and
-writes the `[statesync]` block into [`Instructions/config.toml`](config.toml) for
-you (it also seeds `config.toml` from the template if you haven't yet). Use a
-different RPC with `SNAP_RPC=https://your.rpc bash scripts/statesync.sh`.
-**Skip this and your node will error out mid-sync.**
-
-### b) (Optional) set your node moniker
+### (Optional) set your node moniker
 
 Open [`Instructions/config.toml`](config.toml) and change the moniker from
 `your_username` to your Steem username:
@@ -98,11 +82,10 @@ docker compose up -d
 docker compose logs -f
 ```
 
-The first start compiles the chain binary inside the container, then state-sync
-kicks in: you'll see `Discovering snapshots…` → `Applying snapshot chunk…` and the
-node jumps to a recent height in **seconds** instead of replaying millions of
-blocks. It then switches to normal block sync, and the bridge oracle
-(section 10) starts alongside the node automatically.
+The first start compiles the chain binary inside the container, then the node
+replays from genesis and follows the chain via normal block sync. On a young
+chain this is quick. The bridge oracle (section 10) starts alongside the node
+automatically.
 
 ## 3. Wait for block sync
 
@@ -679,13 +662,13 @@ certificates with [certbot](https://certbot.eff.org/).
 **Node / staking**
 
 - **New node halts during sync with `wrong Block.Header.AppHash` / an app-hash
-  mismatch**: you skipped state-sync (step 2a). A fresh node can't replay across
-  the chain's upgrade. Wipe the node's (empty) chain volume — and *only* that
-  one — then bootstrap from a snapshot:
+  mismatch**: your `genesis.json` doesn't match the running network's (or your
+  node home has stale state from a different genesis). Make sure
+  `Instructions/genesis.json` is the network's genesis, then wipe the node's
+  chain volume — and *only* that one — and restart:
   ```sh
   docker compose down
   docker volume rm "$(docker volume ls -q | grep 'steemvm-home$')"
-  bash scripts/statesync.sh
   docker compose up -d
   ```
 - **Any tx fails with `Cannot encode unregistered concrete type ethsecp256k1.PubKey`**:

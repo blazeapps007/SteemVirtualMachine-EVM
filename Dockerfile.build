@@ -6,9 +6,7 @@
 #
 #   docker build -t steemvm-build - < Dockerfile.build
 #   docker run --rm -v "$PWD":/workspace -w /workspace steemvm-build \
-#     bash -c 'make proto-gen && go build ./... && go test ./x/steembridge/... ./relayer/...'
-#
-# Or just run scripts/build.sh, which wires up the mount and build caches.
+#     bash -c 'make proto-gen && go build ./... && go test ./x/oracle/... ./relayer/...'
 
 FROM golang:1.26.5-trixie
 

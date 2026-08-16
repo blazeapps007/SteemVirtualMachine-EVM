@@ -7,9 +7,9 @@ services:
     environment:
       GOPATH: /root/go
       CGO_ENABLED: "1"
-      # cosmovisor: run the node under cosmovisor so it auto-swaps to the staged
-      # upgrade binary exactly at the governance upgrade height (no manual action
-      # at the block, ~no downtime). See scripts/propose.sh + scripts/upgrade.sh.
+      # cosmovisor: run the node under cosmovisor so it auto-swaps to a staged
+      # upgrade binary exactly at a future governance upgrade height (no manual
+      # action at the block, ~no downtime).
       DAEMON_HOME: /root/.steemvm
       DAEMON_NAME: steemvmd
       DAEMON_RESTART_AFTER_UPGRADE: "true"
@@ -49,15 +49,14 @@ services:
         rm -f /root/.steemvm/config/app.toml /root/.steemvm/config/config.toml /root/.steemvm/config/client.toml /root/.steemvm/config/genesis.json
         cp /workspace/Instructions/app.toml /workspace/Instructions/config.toml /workspace/Instructions/client.toml /root/.steemvm/config/
         cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
-        # cosmovisor layout: the CURRENT binary lives in genesis/bin and keeps
-        # running until the upgrade height. IMPORTANT: adopt cosmovisor while still
-        # on the current release, so genesis/bin bootstraps to the OLD binary; then
-        # pull the new version — it is only STAGED below, never run early.
+        # cosmovisor layout: the launch binary lives in genesis/bin and runs from
+        # block 1. On a fresh chain this bootstraps to THIS build; on a later
+        # governance upgrade cosmovisor swaps to the staged binary at its height.
         mkdir -p /root/.steemvm/cosmovisor/genesis/bin
         [ -f /root/.steemvm/cosmovisor/genesis/bin/steemvmd ] || cp /root/go/bin/steemvmd /root/.steemvm/cosmovisor/genesis/bin/steemvmd
-        # Stage the freshly-built binary under its own stamped version name (e.g.
-        # v0.0.3). cosmovisor swaps to it only when an on-chain plan of that exact
-        # name reaches its height, so a mismatched build can't be mis-staged.
+        # Stage the freshly-built binary under its own stamped version name too.
+        # cosmovisor swaps to it only when an on-chain plan of that exact name
+        # reaches its height, so a mismatched build can't be mis-staged.
         VER="$$(/root/go/bin/steemvmd version 2>/dev/null)"
         if [ -n "$$VER" ]; then
           mkdir -p "/root/.steemvm/cosmovisor/upgrades/v$$VER/bin"
