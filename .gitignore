@@ -33,5 +33,6 @@ AGENTS.md
 .specstory/
 .github/copilot-instructions.md
 validator.json
-# exported operator private-key backup written by relaunch-validator.sh (transient, sensitive)
+# key backups written by relaunch-validator.sh (transient, sensitive)
 .svm-operator-key.hex
+.svm-priv_validator_key.json
