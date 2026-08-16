@@ -13,6 +13,7 @@ import (
 
 	oracledataprecompile "steemvm/precompiles/oracledata"
 	oracledatatypes "steemvm/x/oracle/data/types"
+	oracletypes "steemvm/x/oracle/types"
 )
 
 // UpgradeName is the on-chain name of this software upgrade. It MUST match the
@@ -74,7 +75,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	}
 	if upgradeInfo.Name == UpgradeName && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
 		storeUpgrades := storetypes.StoreUpgrades{
-			Added: []string{oracledatatypes.StoreKey},
+			Added: []string{oracledatatypes.StoreKey, oracletypes.StoreKey},
 		}
 		app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storeUpgrades))
 	}

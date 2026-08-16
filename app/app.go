@@ -57,6 +57,7 @@ import (
 
 	"steemvm/docs"
 	oracledatakeeper "steemvm/x/oracle/data/keeper"
+	oraclekeeper "steemvm/x/oracle/keeper"
 	steembridgemodulekeeper "steemvm/x/steembridge/keeper"
 	steemvmmodulekeeper "steemvm/x/steemvm/keeper"
 )
@@ -129,6 +130,7 @@ type App struct {
 	EVMMempool        *evmmempool.ExperimentalEVMMempool
 	SteembridgeKeeper steembridgemodulekeeper.Keeper
 	OracleDataKeeper  oracledatakeeper.Keeper
+	OracleKeeper      oraclekeeper.Keeper
 }
 
 func init() {
@@ -210,6 +212,7 @@ func New(
 		&app.SteemvmKeeper, &app.FeeGrantKeeper,
 		&app.SteembridgeKeeper,
 		&app.OracleDataKeeper,
+		&app.OracleKeeper,
 	); err != nil {
 		panic(err)
 	}

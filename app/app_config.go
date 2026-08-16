@@ -3,6 +3,8 @@ package app
 import (
 	_ "steemvm/x/oracle/data/module"
 	oracledatamoduletypes "steemvm/x/oracle/data/types"
+	_ "steemvm/x/oracle/module"
+	oraclemoduletypes "steemvm/x/oracle/types"
 	_ "steemvm/x/steembridge/module"
 	steembridgemoduletypes "steemvm/x/steembridge/types"
 	_ "steemvm/x/steemvm/module"
@@ -148,7 +150,12 @@ var (
 						feegrant.ModuleName,
 						group.ModuleName,
 						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName},
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName,
+						// The parent oracle engine evaluates the unified slashing window
+						// LAST, after the duty modules have reported this block's
+						// participation (x/oracle/data in its EndBlock, x/oracle/bridge
+						// during tx handling).
+						oraclemoduletypes.ModuleName},
 					// The following is mostly only needed when ModuleName != StoreKey name.
 					OverrideStoreKeys: []*runtimev1alpha1.StoreKeyConfig{
 						{
@@ -183,7 +190,7 @@ var (
 						ibctransfertypes.ModuleName,
 						icatypes.ModuleName,
 						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName},
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName, oraclemoduletypes.ModuleName},
 				}),
 			},
 			{
@@ -287,6 +294,9 @@ var (
 			}, {
 				Name:   oracledatamoduletypes.ModuleName,
 				Config: appconfig.WrapAny(&oracledatamoduletypes.Module{}),
+			}, {
+				Name:   oraclemoduletypes.ModuleName,
+				Config: appconfig.WrapAny(&oraclemoduletypes.Module{}),
 			}},
 	})
 )
