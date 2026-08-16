@@ -166,6 +166,15 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 		if err := k.resolveDeposit(ctx, &deposit, params); err != nil {
 			return nil, err
 		}
+		// A finalized deposit is a bridge-duty opportunity: report the attesters
+		// that carried it to the unified slashing engine.
+		attesterStrs := make([]string, 0, len(deposit.ValidatorConfirmations))
+		for _, c := range deposit.ValidatorConfirmations {
+			attesterStrs = append(attesterStrs, c.ValidatorAddress)
+		}
+		if err := k.reportBridgeEvent(ctx, attesterStrs); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := k.Deposit.Set(ctx, depositID, deposit); err != nil {

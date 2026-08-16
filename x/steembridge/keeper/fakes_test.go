@@ -94,6 +94,23 @@ func (fakeDistrKeeper) FundCommunityPool(_ context.Context, _ sdk.Coins, _ sdk.A
 	return nil
 }
 
+// fakeOracleKeeper records the attester sets reported at each bridge-event
+// finalization, so tests can assert the unified-slashing reporting fires.
+type fakeOracleKeeper struct {
+	reported [][][]byte
+}
+
+func (f *fakeOracleKeeper) RecordBridgeEvent(_ context.Context, attesters [][]byte) error {
+	cp := make([][]byte, len(attesters))
+	for i, a := range attesters {
+		b := make([]byte, len(a))
+		copy(b, a)
+		cp[i] = b
+	}
+	f.reported = append(f.reported, cp)
+	return nil
+}
+
 // fakeStakingKeeper is a minimal, in-memory implementation of
 // types.StakingKeeper letting tests directly control bonded status and
 // voting power per validator, including changing them between confirmations
@@ -176,6 +193,7 @@ type fixtureWithFakes struct {
 	addressCodec  address.Codec
 	bankKeeper    *fakeBankKeeper
 	stakingKeeper *fakeStakingKeeper
+	oracleKeeper  *fakeOracleKeeper
 }
 
 // sdkContextAt returns the fixture's context at a given block height.
@@ -202,6 +220,7 @@ func initFixtureWithFakes(t *testing.T) *fixtureWithFakes {
 
 	bankKeeper := newFakeBankKeeper()
 	stakingKeeper := newFakeStakingKeeper()
+	oracleKeeper := &fakeOracleKeeper{}
 
 	k := keeper.NewKeeper(
 		storeService,
@@ -211,6 +230,7 @@ func initFixtureWithFakes(t *testing.T) *fixtureWithFakes {
 		bankKeeper,
 		stakingKeeper,
 		&fakeDistrKeeper{},
+		oracleKeeper,
 	)
 
 	if err := k.Params.Set(ctx, types.DefaultParams()); err != nil {
@@ -229,5 +249,6 @@ func initFixtureWithFakes(t *testing.T) *fixtureWithFakes {
 		addressCodec:  addressCodec,
 		bankKeeper:    bankKeeper,
 		stakingKeeper: stakingKeeper,
+		oracleKeeper:  oracleKeeper,
 	}
 }

@@ -53,6 +53,18 @@ type DistrKeeper interface {
 	FundCommunityPool(ctx context.Context, amount sdk.Coins, sender sdk.AccAddress) error
 }
 
+// OracleKeeper is the parent x/oracle engine's reporting entry point. The
+// interface is declared here (not imported from x/oracle) so the bridge never
+// depends on the parent — the concrete oracle keeper satisfies it and is
+// injected. A nil OracleKeeper leaves the bridge fully functional standalone
+// (no participation is reported), so the keeper tests still work.
+type OracleKeeper interface {
+	// RecordBridgeEvent reports a finalized bridge event's attesters (by
+	// validator operator address bytes) so the parent engine can accrue the
+	// bridge duty of its unified slashing counter.
+	RecordBridgeEvent(ctx context.Context, attesters [][]byte) error
+}
+
 // ParamSubspace defines the expected Subspace interface for parameters.
 type ParamSubspace interface {
 	Get(context.Context, []byte, interface{})

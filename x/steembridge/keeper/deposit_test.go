@@ -161,6 +161,55 @@ func TestAttestDeposit_ThresholdMintsToDerivedDestination(t *testing.T) {
 	require.Equal(t, sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, wantMinted)), f.bankKeeper.balances[dest.String()])
 }
 
+// TestAttestDeposit_FinalizationReportsToOracle verifies the unified-slashing
+// reporting: a deposit reports its attester set to the parent oracle engine
+// exactly once, the moment it finalizes — and not before.
+func TestAttestDeposit_FinalizationReportsToOracle(t *testing.T) {
+	f := initFixtureWithFakes(t)
+	enableBridge(t, f)
+	ms := keeper.NewMsgServerImpl(f.keeper)
+
+	v1 := newTestValidator(t, 1)
+	v2 := newTestValidator(t, 2)
+	// total bonded = 250; v1 alone (40%) is under 2/3, v1+v2 (100%) is over.
+	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
+	f.stakingKeeper.setValidator(v2.ValAddr, 150, true)
+
+	dest := sdk.AccAddress([]byte("destination_20_bytes")[:20])
+	txid := "eeee000000000000000000000000000000000000"
+
+	msg1 := baseDepositMsg(v1, txid, 0)
+	msg1.Memo = dest.String()
+	_, err := ms.AttestDeposit(f.ctx, msg1)
+	require.NoError(t, err)
+	require.Empty(t, f.oracleKeeper.reported, "not finalized yet -> nothing reported")
+
+	msg2 := baseDepositMsg(v2, txid, 0)
+	msg2.Memo = dest.String()
+	_, err = ms.AttestDeposit(f.ctx, msg2)
+	require.NoError(t, err)
+
+	require.Len(t, f.oracleKeeper.reported, 1, "finalization reports exactly one bridge event")
+	got := f.oracleKeeper.reported[0]
+	require.Len(t, got, 2, "both confirming validators are reported as attesters")
+	want := map[string]bool{
+		string(v1.ValAddr.Bytes()): true,
+		string(v2.ValAddr.Bytes()): true,
+	}
+	for _, a := range got {
+		require.True(t, want[string(a)], "reported attester must be one of the confirmers")
+	}
+
+	// A later attestation against the already-finalized deposit does not re-report.
+	v3 := newTestValidator(t, 3)
+	f.stakingKeeper.setValidator(v3.ValAddr, 50, true)
+	msg3 := baseDepositMsg(v3, txid, 0)
+	msg3.Memo = dest.String()
+	_, err = ms.AttestDeposit(f.ctx, msg3)
+	require.NoError(t, err)
+	require.Len(t, f.oracleKeeper.reported, 1, "post-finalization attestation must not re-report")
+}
+
 // lastConfirmedRatio returns the confirmed_ratio attribute of the most
 // recently emitted DepositConfirmed event.
 func lastConfirmedRatio(t *testing.T, ctx sdk.Context) string {

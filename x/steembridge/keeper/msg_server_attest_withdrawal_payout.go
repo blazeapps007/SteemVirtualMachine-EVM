@@ -109,6 +109,15 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(msg.WithdrawalId, 10)),
 			sdk.NewAttribute(types.AttributeKeySteemTxid, msg.SteemTxid),
 		))
+		// A finalized payout is a bridge-duty opportunity: report the attesters
+		// that carried it to the unified slashing engine.
+		attesterStrs := make([]string, 0, len(withdrawal.ValidatorConfirmations))
+		for _, c := range withdrawal.ValidatorConfirmations {
+			attesterStrs = append(attesterStrs, c.ValidatorAddress)
+		}
+		if err := k.reportBridgeEvent(ctx, attesterStrs); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := k.Withdrawal.Set(ctx, msg.WithdrawalId, withdrawal); err != nil {

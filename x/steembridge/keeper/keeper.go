@@ -25,6 +25,9 @@ type Keeper struct {
 	bankKeeper    types.BankKeeper
 	stakingKeeper types.StakingKeeper
 	distrKeeper   types.DistrKeeper
+	// oracleKeeper is the parent slashing engine this module reports bridge-event
+	// participation to. It may be nil (standalone/tests); reporting is skipped when so.
+	oracleKeeper  types.OracleKeeper
 	DepositSeq    collections.Sequence
 	Deposit       collections.Map[uint64, types.Deposit]
 	WithdrawalSeq collections.Sequence
@@ -87,6 +90,7 @@ func NewKeeper(
 	bankKeeper types.BankKeeper,
 	stakingKeeper types.StakingKeeper,
 	distrKeeper types.DistrKeeper,
+	oracleKeeper types.OracleKeeper,
 ) Keeper {
 	if _, err := addressCodec.BytesToString(authority); err != nil {
 		panic(fmt.Sprintf("invalid authority address %s: %s", authority, err))
@@ -103,6 +107,7 @@ func NewKeeper(
 		bankKeeper:    bankKeeper,
 		stakingKeeper: stakingKeeper,
 		distrKeeper:   distrKeeper,
+		oracleKeeper:  oracleKeeper,
 		Params:        collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
 		Deposit:       collections.NewMap(sb, types.DepositKey, "deposit", collections.Uint64Key, codec.CollValue[types.Deposit](cdc)),
 		DepositSeq:    collections.NewSequence(sb, types.DepositCountKey, "depositSequence"),
