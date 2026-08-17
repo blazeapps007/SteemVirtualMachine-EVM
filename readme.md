@@ -19,7 +19,7 @@ Two things make SteemVM more than a generic bridge:
   join: every validator must prove ownership of a Steem account and publish that
   account's public keys on-chain (see [Validator identity](#validator-identity)).
 
-Built on **Cosmos SDK v0.53** + **CometBFT**, with **[cosmos/evm](https://github.com/cosmos/evm)**
+Built on **Cosmos SDK v0.54** + **CometBFT**, with **[cosmos/evm](https://github.com/cosmos/evm)**
 providing a full Ethereum execution layer (JSON-RPC, ERC-20, EIP-1559 fee market).
 
 ## Chain facts

@@ -1,18 +1,21 @@
 package steembridge
 
 import (
-	"embed"
+	"bytes"
+	"encoding/json"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/vm"
 
+	_ "embed"
+
 	cmn "github.com/cosmos/evm/precompiles/common"
 
 	"cosmossdk.io/core/address"
-	"cosmossdk.io/log"
-	storetypes "cosmossdk.io/store/types"
+	"cosmossdk.io/log/v2"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -31,13 +34,26 @@ var (
 	// Embed abi json file to the executable binary. Needed when importing as dependency.
 	//
 	//go:embed abi.json
-	f   embed.FS
+	f   []byte
 	ABI abi.ABI
 )
 
 func init() {
+	// abi.json is a standard Hardhat-artifact JSON object (contractName,
+	// sourceName, abi, bytecode, ...), not a bare ABI array — extract the
+	// "abi" field before handing it to go-ethereum's abi.JSON, which only
+	// accepts the bare array form. cosmos/evm's own cmn.LoadABI helper did
+	// this transparently pre-v0.7.0; it was removed upstream, so this repo
+	// now does the unwrap itself.
+	var artifact struct {
+		ABI json.RawMessage `json:"abi"`
+	}
+	if err := json.Unmarshal(f, &artifact); err != nil {
+		panic(err)
+	}
+
 	var err error
-	ABI, err = cmn.LoadABI(f, "abi.json")
+	ABI, err = abi.JSON(bytes.NewReader(artifact.ABI))
 	if err != nil {
 		panic(err)
 	}
@@ -75,6 +91,11 @@ func NewPrecompile(
 		msgServer: msgServer,
 		addrCodec: addrCodec,
 	}
+}
+
+// Name returns the precompile's name, used to identify it in the EVM.
+func (p Precompile) Name() string {
+	return "steembridge"
 }
 
 // RequiredGas calculates the precompiled contract's base gas rate.

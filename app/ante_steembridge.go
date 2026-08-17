@@ -12,7 +12,7 @@ import (
 	cosmosante "github.com/cosmos/evm/ante/cosmos"
 	vmante "github.com/cosmos/evm/ante/evm"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
-	ibcante "github.com/cosmos/ibc-go/v10/modules/core/ante"
+	ibcante "github.com/cosmos/ibc-go/v11/modules/core/ante"
 
 	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
 	steembridgetypes "steemvm/x/oracle/bridge/types"
@@ -20,7 +20,7 @@ import (
 
 // newSteembridgeAnteHandler builds the app's top-level ante dispatcher.
 //
-// cosmos/evm@v0.6.0's ante.HandlerOptions/NewAnteHandler exposes no
+// cosmos/evm@v0.7.0's ante.HandlerOptions/NewAnteHandler still exposes no
 // extension point for adding a custom decorator to its Cosmos-tx decorator
 // chain (the chain is hardcoded inside the unexported newCosmosAnteHandler
 // in cosmos/evm's ante/cosmos.go). This function reproduces that same
@@ -36,6 +36,15 @@ import (
 // Ethereum and dynamic-fee-extension txs are untouched and delegate to
 // cosmos/evm's own handler unchanged, since neither tx type can ever carry
 // steembridge messages.
+//
+// Re-diffed against cosmos/evm v0.7.0's ante/cosmos.go: the chain is
+// otherwise decorator-for-decorator identical to the v0.6.0 fork this was
+// built from, with one upstream removal — the trailing
+// vmante.NewGasWantedDecorator(...) is gone (cosmos/evm v0.7.0 dropped the
+// feemarket transient store it accumulated gas-wanted into; see
+// x/feemarket's TransientKey removal). That decorator carried no
+// steembridge-specific logic, so its removal doesn't touch the
+// fee-exemption or identity-gate behavior below.
 func newSteembridgeAnteHandler(
 	options evmante.HandlerOptions,
 	bridgeKeeper steembridgekeeper.Keeper,
@@ -96,7 +105,6 @@ func newSteembridgeCosmosAnteHandler(
 		stdante.NewSigVerificationDecorator(options.AccountKeeper, options.SignModeHandler),
 		stdante.NewIncrementSequenceDecorator(options.AccountKeeper),
 		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
-		vmante.NewGasWantedDecorator(options.EvmKeeper, options.FeeMarketKeeper, &feemarketParams),
 	)
 }
 

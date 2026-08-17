@@ -1,20 +1,21 @@
 package app
 
 import (
-	"io"
+	"fmt"
 
 	clienthelpers "cosmossdk.io/client/v2/helpers"
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/depinject"
-	"cosmossdk.io/log"
-	storetypes "cosmossdk.io/store/types"
-	circuitkeeper "cosmossdk.io/x/circuit/keeper"
-	feegrantkeeper "cosmossdk.io/x/feegrant/keeper"
-	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
+	"cosmossdk.io/log/v2"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	feegrantkeeper "github.com/cosmos/cosmos-sdk/x/feegrant/keeper"
+	upgradekeeper "github.com/cosmos/cosmos-sdk/x/upgrade/keeper"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/baseapp/txnrunner"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -24,6 +25,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkmempool "github.com/cosmos/cosmos-sdk/types/mempool"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
@@ -42,15 +44,16 @@ import (
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	evmante "github.com/cosmos/evm/ante"
-	evmmempool "github.com/cosmos/evm/mempool"
 	evmsrvflags "github.com/cosmos/evm/server/flags"
 	erc20keeper "github.com/cosmos/evm/x/erc20/keeper"
 	feemarketkeeper "github.com/cosmos/evm/x/feemarket/keeper"
+	"github.com/cosmos/evm/x/vm"
 	evmkeeper "github.com/cosmos/evm/x/vm/keeper"
-	icacontrollerkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/keeper"
-	icahostkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/host/keeper"
-	ibctransferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
-	ibckeeper "github.com/cosmos/ibc-go/v10/modules/core/keeper"
+	vmrunner "github.com/cosmos/evm/x/vm/runner"
+	icacontrollerkeeper "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/controller/keeper"
+	icahostkeeper "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/host/keeper"
+	ibctransferkeeper "github.com/cosmos/ibc-go/v11/modules/apps/transfer/keeper"
+	ibckeeper "github.com/cosmos/ibc-go/v11/modules/core/keeper"
 	_ "github.com/ethereum/go-ethereum/eth/tracers/js"
 	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 	"github.com/spf13/cast"
@@ -107,19 +110,17 @@ type App struct {
 	UpgradeKeeper         *upgradekeeper.Keeper
 	AuthzKeeper           authzkeeper.Keeper
 	ConsensusParamsKeeper consensuskeeper.Keeper
-	CircuitBreakerKeeper  circuitkeeper.Keeper
 	ParamsKeeper          paramskeeper.Keeper
 
 	// ibc keepers
 	IBCKeeper           *ibckeeper.Keeper
-	ICAControllerKeeper icacontrollerkeeper.Keeper
-	ICAHostKeeper       icahostkeeper.Keeper
-	TransferKeeper      ibctransferkeeper.Keeper
+	ICAControllerKeeper *icacontrollerkeeper.Keeper
+	ICAHostKeeper       *icahostkeeper.Keeper
+	TransferKeeper      *ibctransferkeeper.Keeper
 
 	// simulation manager
 	sm                 *module.SimulationManager
 	SteemvmKeeper      steemvmmodulekeeper.Keeper
-	clientCtx          client.Context
 	pendingTxListeners []evmante.PendingTxListener
 	FeeGrantKeeper     feegrantkeeper.Keeper
 	FeeMarketKeeper    feemarketkeeper.Keeper
@@ -127,7 +128,15 @@ type App struct {
 	Erc20Keeper        erc20keeper.Keeper
 
 	// AppConfig returns the default app config.
-	EVMMempool        *evmmempool.ExperimentalEVMMempool
+	// EVMMempool is widened to the ExtMempool interface (cosmos/evm v0.7.0):
+	// the concrete v0.6 ExperimentalEVMMempool type is gone, replaced by the
+	// Krakatoa app-side mempool (*evmmempool.Mempool, wired in
+	// configureEVMMempool in evm.go) or any future custom subpool.
+	EVMMempool sdkmempool.ExtMempool
+	// vmModule is the EVM AppModule value bound once in registerEVMModules
+	// and reused after Load() to call HydrateGlobals (see New()) — required
+	// so evmCoinInfo is populated before any RPC handler runs on restart.
+	vmModule          vm.AppModule
 	SteembridgeKeeper steembridgemodulekeeper.Keeper
 	OracleDataKeeper  oracledatakeeper.Keeper
 	OracleKeeper      oraclekeeper.Keeper
@@ -158,7 +167,6 @@ func AppConfig() depinject.Config {
 func New(
 	logger log.Logger,
 	db dbm.DB,
-	traceStore io.Writer,
 	loadLatest bool,
 	appOpts servertypes.AppOptions,
 	baseAppOptions ...func(*baseapp.BaseApp),
@@ -207,7 +215,6 @@ func New(
 		&app.UpgradeKeeper,
 		&app.AuthzKeeper,
 		&app.ConsensusParamsKeeper,
-		&app.CircuitBreakerKeeper,
 		&app.ParamsKeeper,
 		&app.SteemvmKeeper, &app.FeeGrantKeeper,
 		&app.SteembridgeKeeper,
@@ -222,7 +229,7 @@ func New(
 	baseAppOptions = append(baseAppOptions, baseapp.SetOptimisticExecution())
 
 	// build app
-	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
+	app.App = appBuilder.Build(db, baseAppOptions...)
 
 	// register legacy modules
 	if err := app.registerIBCModules(appOpts); err != nil {
@@ -241,9 +248,15 @@ func New(
 
 	app.sm = module.NewSimulationManagerFromAppModules(app.ModuleManager.Modules, overrideModules)
 	maxGasWanted := cast.ToUint64(appOpts.Get(evmsrvflags.EVMMaxTxGasWanted))
+	// setAnteHandler MUST run before configureEVMMempool: the latter calls
+	// app.GetAnteHandler() to seed the mempool's tx rechecker closures, and
+	// that returns nil (leading to a first-RecheckTx panic) if the ante
+	// handler hasn't been set yet.
 	app.setAnteHandler(app.txConfig, maxGasWanted)
 
-	app.setEVMMempool()
+	if err := app.configureEVMMempool(appOpts, logger); err != nil {
+		panic(fmt.Sprintf("failed to configure EVM mempool: %s", err.Error()))
+	}
 
 	app.sm.RegisterStoreDecoders()
 
@@ -273,6 +286,26 @@ func New(
 	if err := app.Load(loadLatest); err != nil {
 		panic(err)
 	}
+
+	// Hydrate EVM globals (evmCoinInfo etc.) from the KV store on restart
+	// (cosmos/evm v0.7.0 #1126). Without this, an RPC call that arrives
+	// before the first PreBlock panics on a nil evmCoinInfo. Only meaningful
+	// once state has actually been loaded.
+	if loadLatest {
+		ctx := app.NewContextLegacy(true, cmtproto.Header{
+			Height:  app.LastBlockHeight(),
+			ChainID: app.ChainID(),
+		})
+		app.vmModule.HydrateGlobals(ctx)
+	}
+
+	// Wire the EVM tx runner (cosmos/evm v0.7.0 #1132): vmrunner.SetRunner
+	// installs the baseapp tx runner wrapped with PatchTxResponses, which
+	// fixes up log.Index/transactionIndex after execution. Deliberately
+	// using the sequential txnrunner.NewDefaultRunner, NOT
+	// txnrunner.NewSTMRunner (BlockSTM) — adopting parallel execution is a
+	// separate, state-breaking decision this migration does not make.
+	vmrunner.SetRunner(app.BaseApp, txnrunner.NewDefaultRunner(app.txConfig.TxDecoder()))
 
 	return app
 }
@@ -358,14 +391,13 @@ func BlockedAddresses() map[string]bool {
 
 	return result
 }
-func (app *App) GetStoreKeysMap() map[string]*storetypes.KVStoreKey {
-	storeKeysMap := make(map[string]*storetypes.KVStoreKey)
-	for _, storeKey := range app.GetStoreKeys() {
-		kvStoreKey, ok := app.UnsafeFindStoreKey(storeKey.Name()).(*storetypes.KVStoreKey)
-		if ok {
-			storeKeysMap[storeKey.Name()] = kvStoreKey
-		}
-	}
-
-	return storeKeysMap
+// GetStoreKeysMap returns every registered store key (KV, object, etc.) as
+// the []storetypes.StoreKey slice the EVM keeper's constructor expects for
+// cross-module store access (cosmos/evm v0.7.0 evmkeeper.NewKeeper's 4th
+// arg). Prior to the v0.7.0 migration this filtered down to only
+// *storetypes.KVStoreKey and returned a map; the new keeper builds its own
+// name-keyed map internally from the raw slice, so this is now a thin
+// wrapper around GetStoreKeys kept for API compatibility.
+func (app *App) GetStoreKeysMap() []storetypes.StoreKey {
+	return app.GetStoreKeys()
 }

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 
 	"cosmossdk.io/core/appmodule"
-	storetypes "cosmossdk.io/store/types"
-	"cosmossdk.io/x/tx/signing"
+	"cosmossdk.io/log/v2"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 	"github.com/cosmos/cosmos-sdk/baseapp"
-	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -28,6 +28,7 @@ import (
 	"github.com/cosmos/evm/ethereum/eip712"
 	evmmempool "github.com/cosmos/evm/mempool"
 	precompiletypes "github.com/cosmos/evm/precompiles/types"
+	evmserver "github.com/cosmos/evm/server"
 	srvflags "github.com/cosmos/evm/server/flags"
 	"github.com/cosmos/evm/utils"
 	erc20 "github.com/cosmos/evm/x/erc20"
@@ -92,13 +93,19 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 	// chain config
 	chainID := GetEVMChainID(appOpts)
 
-	// set up non depinject support modules store keys
+	// set up non depinject support modules store keys. The transient stores
+	// evmtypes.TransientKey/feemarkettypes.TransientKey are gone as of
+	// cosmos/evm v0.7.0 (cosmos-sdk v0.54 store/v2); the EVM keeper's per-tx
+	// scratch store (tx bloom, gas accounting) is now an object store
+	// (evmtypes.ObjectKey) instead. RegisterStores forwards to baseapp's
+	// generic MountStores, which type-switches on *storetypes.ObjectStoreKey,
+	// so the object key can be registered in the same call as the KV keys.
+	evmObjectKey := storetypes.NewObjectStoreKey(evmtypes.ObjectKey)
 	if err := app.RegisterStores(
 		storetypes.NewKVStoreKey(evmtypes.StoreKey),
 		storetypes.NewKVStoreKey(feemarkettypes.StoreKey),
 		storetypes.NewKVStoreKey(erc20types.StoreKey),
-		storetypes.NewTransientStoreKey(evmtypes.TransientKey),
-		storetypes.NewTransientStoreKey(feemarkettypes.TransientKey),
+		evmObjectKey,
 	); err != nil {
 		return err
 	}
@@ -110,14 +117,13 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		app.appCodec,
 		authtypes.NewModuleAddress(govtypes.ModuleName),
 		app.GetKey(feemarkettypes.StoreKey),
-		app.UnsafeFindStoreKey(feemarkettypes.TransientKey),
 	)
 
 	app.EVMKeeper = evmkeeper.NewKeeper(
 		app.appCodec,
 		app.GetKey(evmtypes.StoreKey),
-		app.UnsafeFindStoreKey(evmtypes.TransientKey),
-		app.GetStoreKeysMap(),
+		evmObjectKey,
+		app.GetStoreKeys(),
 		authtypes.NewModuleAddress(govtypes.ModuleName),
 		app.AuthKeeper,
 		app.BankKeeper,
@@ -133,18 +139,21 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 			app.DistrKeeper,
 			app.BankKeeper,
 			&app.Erc20Keeper,
-			&app.TransferKeeper,
+			app.TransferKeeper,
 			app.IBCKeeper.ChannelKeeper,
+			app.IBCKeeper.ClientKeeper,
 			*app.GovKeeper,
 			app.SlashingKeeper,
 			app.appCodec,
 		),
-	).WithDefaultEvmCoinInfo(evmtypes.EvmCoinInfo{
-		Denom:         sdk.DefaultBondDenom,
-		ExtendedDenom: sdk.DefaultBondDenom,
-		DisplayDenom:  sdk.DefaultBondDenom,
-		Decimals:      evmtypes.EighteenDecimals.Uint32(),
-	})
+	)
+
+	// NOTE: virtual fee collection (EnableVirtualFeeCollection) is deliberately
+	// NOT wired here. It is part of the BlockSTM parallel-execution bundle
+	// (cosmos/evm v0.7.0 migration guide, Step 5b) and this migration
+	// intentionally keeps sequential execution (see setEVMTxRunner in this
+	// file) — do not enable it without also adopting BlockSTM as a coordinated,
+	// separate decision.
 
 	app.Erc20Keeper = erc20keeper.NewKeeper(
 		app.GetKey(erc20types.StoreKey),
@@ -154,7 +163,7 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		app.BankKeeper,
 		app.EVMKeeper,
 		app.StakingKeeper,
-		&app.TransferKeeper,
+		app.TransferKeeper,
 	)
 
 	// Register the custom steembridge precompile (0x...0900) on top of the
@@ -178,9 +187,12 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 	oracledataPrecompile := oracledataprecompile.NewPrecompile(app.OracleDataKeeper)
 	app.EVMKeeper.RegisterStaticPrecompile(oracledataPrecompile.Address(), oracledataPrecompile)
 
-	// register evm modules
+	// register evm modules. vmModule is bound to a field (not passed inline)
+	// so New() in app.go can call HydrateGlobals on it after Load() — see the
+	// field doc comment on App.vmModule.
+	app.vmModule = vm.NewAppModule(app.EVMKeeper, app.AuthKeeper, app.BankKeeper, app.AuthKeeper.AddressCodec())
 	if err := app.RegisterModules(
-		vm.NewAppModule(app.EVMKeeper, app.AuthKeeper, app.BankKeeper, app.AuthKeeper.AddressCodec()),
+		app.vmModule,
 		feemarket.NewAppModule(app.FeeMarketKeeper),
 		erc20.NewAppModule(app.Erc20Keeper, app.AuthKeeper),
 	); err != nil {
@@ -190,36 +202,84 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 	return nil
 }
 
-// setEVMMempool sets the EVM priority nonce mempool
-// it is required for the ethereum json rpc server to work
-func (app *App) setEVMMempool() {
-	if evmtypes.GetChainConfig() != nil {
-		mempoolConfig := &evmmempool.EVMMempoolConfig{
-			AnteHandler:   app.BaseApp.AnteHandler(),
-			BlockGasLimit: 100_000_000,
-		}
-
-		evmMempool := evmmempool.NewExperimentalEVMMempool(app.CreateQueryContext, app.Logger(), app.EVMKeeper, app.FeeMarketKeeper, app.txConfig, app.clientCtx, mempoolConfig, 4096)
-		app.EVMMempool = evmMempool
-
-		app.SetMempool(evmMempool)
-		checkTxHandler := evmmempool.NewCheckTxHandler(evmMempool)
-		app.SetCheckTxHandler(checkTxHandler)
-
-		abciProposalHandler := baseapp.NewDefaultProposalHandler(evmMempool, app)
-		abciProposalHandler.SetSignerExtractionAdapter(evmmempool.NewEthSignerExtractionAdapter(sdkmempool.NewDefaultSignerExtractionAdapter()))
-		app.SetPrepareProposal(abciProposalHandler.PrepareProposalHandler())
+// configureEVMMempool sets up the EVM application-layer mempool ("Krakatoa").
+// cosmos/evm v0.7.0 removed the v0.6 ExperimentalEVMMempool type entirely —
+// Krakatoa is its mandatory replacement for any fork (like this one) that
+// already wired an app-side EVM mempool; forks that ran on CometBFT's stock
+// mempool could skip this, but that's not our starting point. Mirrors
+// cosmos/evm's reference evmd/mempool.go configureEVMMempool almost exactly.
+//
+// IMPORTANT: app.setAnteHandler(...) MUST run before this is called —
+// server.ResolveMempoolConfig reads app.GetAnteHandler() and stashes it for
+// the rechecker closures; if the ante handler isn't set yet this panics on
+// the first RecheckTx with no compile-time signal. app.go's New() already
+// calls setAnteHandler before setEVMMempool, preserve that order.
+func (app *App) configureEVMMempool(appOpts servertypes.AppOptions, logger log.Logger) error {
+	if evmtypes.GetChainConfig() == nil {
+		logger.Debug("evm chain config is not set, skipping mempool configuration")
+		return nil
 	}
+
+	var (
+		mpConfig = evmserver.ResolveMempoolConfig(app.AnteHandler(), appOpts, logger)
+
+		txEncoder       = evmmempool.NewTxEncoder(app.txConfig)
+		evmRechecker    = evmmempool.NewTxRechecker(mpConfig.AnteHandler, txEncoder)
+		cosmosRechecker = evmmempool.NewTxRechecker(mpConfig.AnteHandler, txEncoder)
+		cosmosPoolMaxTx = evmserver.GetCosmosPoolMaxTx(appOpts, logger)
+		checkTxTimeout  = evmserver.GetMempoolCheckTxTimeout(appOpts, logger)
+	)
+
+	if cosmosPoolMaxTx < 0 {
+		logger.Debug("evm mempool is disabled, skipping configuration")
+		return nil
+	}
+
+	if err := evmserver.ValidateReapBounds(appOpts, mpConfig.BlockGasLimit); err != nil {
+		return err
+	}
+
+	mempool := evmmempool.NewMempool(
+		app.CreateQueryContext,
+		logger,
+		app.EVMKeeper,
+		app.FeeMarketKeeper,
+		app.txConfig,
+		evmRechecker,
+		cosmosRechecker,
+		mpConfig,
+		cosmosPoolMaxTx,
+	)
+
+	app.EVMMempool = mempool
+
+	prepareProposalHandler := baseapp.
+		NewDefaultProposalHandler(mempool, NewNoCheckProposalTxVerifier(app.BaseApp)).
+		PrepareProposalHandler()
+
+	insertTxHandler := mempool.NewInsertTxHandler(app.TxDecode)
+	reapTxsHandler := mempool.NewReapTxsHandler()
+	checkTxHandler := mempool.NewCheckTxHandler(app.TxDecode, checkTxTimeout)
+
+	app.SetPrepareProposal(prepareProposalHandler)
+	app.SetInsertTxHandler(insertTxHandler)
+	app.SetReapTxsHandler(reapTxsHandler)
+	app.SetCheckTxHandler(checkTxHandler)
+
+	app.SetMempool(mempool)
+
+	app.SetPrepareCheckStater(func(_ sdk.Context) {
+		if !mempool.HasEventBus() {
+			mempool.NotifyNewBlock()
+		}
+	})
+
+	return nil
 }
 
 // RegisterPendingTxListener a function that registers a listener for pending transactions.
 func (app *App) RegisterPendingTxListener(listener func(common.Hash)) {
 	app.pendingTxListeners = append(app.pendingTxListeners, listener)
-}
-
-// SetClientCtx a function that sets the client context on the app, required by EVM module implementation.
-func (app *App) SetClientCtx(ctx client.Context) {
-	app.clientCtx = ctx
 }
 
 // GetMempool returns the mempool of the app.
