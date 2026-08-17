@@ -257,3 +257,43 @@ This closes out the "live-broadcast confirmation still outstanding" gap for at l
 language; **JS (Milestone 2) and Go should still re-run their own live-broadcast half of the spike**
 once the Part A dependency migration lands on the main checkout, since their vectors above are
 offline-only.
+
+### JS client (Milestone 2): live-broadcast confirmation
+
+Re-run after the cosmos/evm v0.6.0→v0.7.0 migration landed on the main checkout (commits `7c378a2`,
+`c439eb6`), so this spike built the current post-migration `steemvmd` directly — no worktree/old-commit
+workaround needed. Devnet: fresh `steemvmd init` (not the tracked `Instructions/genesis.json`, which is
+real production validator data and not bootable standalone — see the top of this file's history), with
+`app_state.steembridge.params.bridge_enabled = true` and `gateway_account = "steemvm-gateway"` patched
+in, `name_service_enabled` left `false` (so the validator-identity ante gate — `app/ante_steembridge.go`
+— stays waived and a plain `MsgCreateValidator` gentx works), and `app_state.bank.denom_metadata`
+populated with the standard `asteem`/`steem` entry (a fresh `steemvmd init` genesis omits this, and
+`cosmos/evm`'s `x/vm` `InitGenesis` panics without it: `"error initializing evm coin info: denom
+metadata asteem could not be found"` — unrelated to the bridge, needed for any fresh non-production
+genesis on this chain). Also needed: `config.toml`'s `[mempool] type = "app"` (this app always wires its
+own EVM-aware mempool as of cosmos/evm v0.7.0; the CometBFT default `"flood"` fails startup with `"EVM
+mempool enabled, but comet-bft has invalid config.toml:mempool.type"`), `api.enable = true` and
+`api.address = "tcp://0.0.0.0:1317"` in `app.toml` (both default off/loopback-only). One `eth_secp256k1`
+key (`steemvmd keys add --key-type eth_secp256k1`) as the sole gentx validator, exported via `steemvmd
+keys unsafe-export-eth-key` for use as `SPIKE_PRIVATE_KEY_HEX`.
+
+Using `oracle/js/src/signer.ts` and `src/broadcast.ts` completely unmodified — no hand-rolled
+signing/broadcast path — via a throwaway `oracle/js/scripts/spike.ts` that builds a real
+`MsgAttestDeposit` and calls `broadcastAttestations()`. Result: **`tx_response.code == 0`** at height 25
+(`gas_used=168015` of `gas_wanted=600000`), with `deposit_created` → `deposit_confirmed`
+(`confirmed_ratio=1.000000000000000000`, single validator = 100% of voting power) → `deposit_minted`
+crediting `997500000000000000000asteem` to the destination (`1,000,000` millisteem × `10^15` =
+`1e21` gross, minus the `25`bps bridge fee = `2.5e18`, net `9.975e20` — arithmetic matches
+`x/oracle/bridge/types/amounts.go` and the `BridgeFeeBps` default exactly). `GET
+/cosmos/auth/v1beta1/accounts/{address}` confirmed a plain `BaseAccount` with `account_number`/
+`sequence` as JSON strings, per §4 — `broadcast.ts`'s `fetchAccount()` doc comment is updated to cite
+this run directly instead of the earlier, not-yet-backed "empirically verified" claim. Signature format
+is confirmed 65 bytes `R‖S‖V` low-S by construction (`signer.ts`'s `signDirect()` always emits that
+shape, asserted offline in `test/signingVectors.test.ts`) and confirmed *sufficient* by this run, since
+a malformed signature would have failed `SigVerificationDecorator` and never reached deposit resolution.
+
+This closes the JS live-broadcast gap alongside Python's. The throwaway devnet (its container and the
+`steemvm-js-devnet-home` volume) was torn down after this spike; nothing under `oracle/js/` depends on
+it existing. The shared `steemvm-build-gopath`/`steemvm-build-cache` build-cache volumes were reused
+(not created by this spike) and were left in place. **Go (`oracle/go`) is the one client that still
+hasn't re-run its own live-broadcast half of the spike** against the post-migration build.

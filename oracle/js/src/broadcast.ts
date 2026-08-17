@@ -65,12 +65,15 @@ export interface AccountInfo {
 
 /**
  * Fetches account_number/sequence via the REST gRPC-gateway. Empirically
- * verified (Milestone 2 spike, see test/signingVectors.test.ts and the
- * oracle/js report) that a funded or unfunded account on this chain returns
- * a plain `BaseAccount` at `account`, i.e.
+ * verified live: this function itself, called unmodified from
+ * scripts/spike.ts against a throwaway single-validator devnet (see the JS
+ * live-broadcast subsection of oracle/PROTOCOL.md §9), returned a plain
+ * `BaseAccount` at `account`, i.e.
  * `{ account: { "@type": "/cosmos.auth.v1beta1.BaseAccount", address,
  * pub_key, account_number, sequence } }` — account_number/sequence arrive as
- * decimal STRINGS (standard proto3 JSON uint64 mapping), not numbers.
+ * decimal STRINGS (standard proto3 JSON uint64 mapping), not numbers. The
+ * same spike run went on to sign and broadcast a real MsgAttestDeposit with
+ * this module's signAndBroadcastTx, which came back `tx_response.code == 0`.
  */
 export async function fetchAccount(restUrl: string, address: string): Promise<AccountInfo> {
   const url = `${trimSlash(restUrl)}/cosmos/auth/v1beta1/accounts/${address}`;
