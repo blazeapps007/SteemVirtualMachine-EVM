@@ -22,6 +22,10 @@ const (
 	// MaxMsgsPerTx caps attestations per transaction, comfortably under the
 	// module's 100-per-validator-per-block free-tx budget.
 	MaxMsgsPerTx = 50
+	// priceFeedGasPerMsg is the flat gas budget per price-feed message
+	// (prevote or vote). Unlike bridge attestations these are NOT fee-exempt
+	// (see oracle/PROTOCOL.md §3), so this directly determines the fee paid.
+	priceFeedGasPerMsg = 250_000
 )
 
 // BroadcastAttestations signs the messages with the relayer key and
@@ -35,14 +39,38 @@ func BroadcastAttestations(ctx context.Context, clientCtx client.Context, keyNam
 	if len(msgs) > MaxMsgsPerTx {
 		return "", fmt.Errorf("too many messages in one tx: %d > %d", len(msgs), MaxMsgsPerTx)
 	}
+	return broadcastTx(ctx, clientCtx, keyName, msgs, gasBase+gasPerMsg*uint64(len(msgs)), "") //nolint:gosec // bounded by MaxMsgsPerTx
+}
 
+// BroadcastPriceFeedMsgs signs and broadcasts price-feed messages (a reveal,
+// a fresh prevote, or both). Unlike bridge attestations these are NOT
+// fee-exempt: the signer's account must hold real asteem and gasPrices must
+// be a non-empty Cosmos SDK DecCoins string (e.g. "1000000000asteem") — see
+// oracle/PROTOCOL.md §3.
+func BroadcastPriceFeedMsgs(ctx context.Context, clientCtx client.Context, keyName string, msgs []sdk.Msg, gasPrices string) (string, error) {
+	if len(msgs) == 0 {
+		return "", nil
+	}
+	if gasPrices == "" {
+		return "", fmt.Errorf("price feed txs are not fee-exempt: ORACLE_GAS_PRICES must be set")
+	}
+	return broadcastTx(ctx, clientCtx, keyName, msgs, priceFeedGasPerMsg*uint64(len(msgs)), gasPrices) //nolint:gosec // len(msgs) is always 1-2
+}
+
+// broadcastTx signs and broadcasts msgs, optionally paying gasPrices (empty
+// means zero-fee, valid only for fee-exempt attestation messages — see
+// BroadcastAttestations vs. BroadcastPriceFeedMsgs above).
+func broadcastTx(ctx context.Context, clientCtx client.Context, keyName string, msgs []sdk.Msg, gas uint64, gasPrices string) (string, error) {
 	txf := clienttx.Factory{}.
 		WithTxConfig(clientCtx.TxConfig).
 		WithKeybase(clientCtx.Keyring).
 		WithAccountRetriever(clientCtx.AccountRetriever).
 		WithChainID(clientCtx.ChainID).
 		WithSignMode(signing.SignMode_SIGN_MODE_DIRECT).
-		WithGas(gasBase + gasPerMsg*uint64(len(msgs))) //nolint:gosec // bounded by MaxMsgsPerTx
+		WithGas(gas)
+	if gasPrices != "" {
+		txf = txf.WithGasPrices(gasPrices)
+	}
 
 	// Fetch account number + sequence for the signer.
 	txf, err := txf.Prepare(clientCtx)

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"cosmossdk.io/math"
+
 	steembridgetypes "steemvm/x/oracle/bridge/types"
 )
 
@@ -288,6 +290,64 @@ func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway string) [
 		}
 	}
 	return payouts
+}
+
+// GetTicker returns Steem's internal-market last-trade price — SBD per
+// STEEM, i.e. the STEEM/SBD pair (see oracle/PROTOCOL.md §7) — via
+// condenser_api.get_ticker's "latest" field.
+func (c *SteemClient) GetTicker() (math.LegacyDec, error) {
+	var resp struct {
+		Latest string `json:"latest"`
+	}
+	if err := c.call("condenser_api.get_ticker", []any{}, &resp); err != nil {
+		return math.LegacyDec{}, err
+	}
+	price, err := math.LegacyNewDecFromStr(strings.TrimSpace(resp.Latest))
+	if err != nil {
+		return math.LegacyDec{}, fmt.Errorf("steem rpc: invalid ticker latest price %q: %w", resp.Latest, err)
+	}
+	return price, nil
+}
+
+// GetFeedHistory returns Steem's current witness-median feed price — SBD per
+// STEEM, i.e. the STEEM/FEED pair (see oracle/PROTOCOL.md §7) — via
+// condenser_api.get_feed_history's current_median_history base/quote pair
+// (e.g. base "0.250 SBD", quote "1.000 STEEM" → price 0.25).
+func (c *SteemClient) GetFeedHistory() (math.LegacyDec, error) {
+	var resp struct {
+		CurrentMedianHistory struct {
+			Base  string `json:"base"`
+			Quote string `json:"quote"`
+		} `json:"current_median_history"`
+	}
+	if err := c.call("condenser_api.get_feed_history", []any{}, &resp); err != nil {
+		return math.LegacyDec{}, err
+	}
+	base, err := parseAssetAmountDec(resp.CurrentMedianHistory.Base, "SBD")
+	if err != nil {
+		return math.LegacyDec{}, fmt.Errorf("steem rpc: invalid feed history base %q: %w", resp.CurrentMedianHistory.Base, err)
+	}
+	quote, err := parseAssetAmountDec(resp.CurrentMedianHistory.Quote, "STEEM")
+	if err != nil {
+		return math.LegacyDec{}, fmt.Errorf("steem rpc: invalid feed history quote %q: %w", resp.CurrentMedianHistory.Quote, err)
+	}
+	if quote.IsZero() {
+		return math.LegacyDec{}, fmt.Errorf("steem rpc: feed history quote is zero")
+	}
+	return base.Quo(quote), nil
+}
+
+// parseAssetAmountDec parses a Steem asset amount string like "0.250 SBD"
+// into a decimal, requiring the given symbol. Unlike ParseSteemAmount (used
+// for bridge transfer amounts, integer millisteem only), this preserves full
+// decimal precision — price ratios aren't on-chain consensus data, so there's
+// no fixed-scale requirement.
+func parseAssetAmountDec(amount, symbol string) (math.LegacyDec, error) {
+	parts := strings.Fields(strings.TrimSpace(amount))
+	if len(parts) != 2 || parts[1] != symbol {
+		return math.LegacyDec{}, fmt.Errorf("expected a %q amount, got %q", symbol, amount)
+	}
+	return math.LegacyNewDecFromStr(parts[0])
 }
 
 // ParseWithdrawalMemo parses a gateway payout memo "svm-withdrawal <id>" into

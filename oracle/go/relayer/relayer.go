@@ -12,6 +12,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
+	oracledatatypes "steemvm/x/oracle/data/types"
 	"steemvm/x/oracle/bridge/types"
 )
 
@@ -21,7 +22,12 @@ import (
 // RPC endpoint to broadcast/query against, the relayer Config, and a directory
 // for the scan-cursor state file. Every cycle failure is logged and retried;
 // Run only returns on ctx cancellation or a fatal setup error.
-func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, nodeRPC string, cfg Config, stateDir string) error {
+//
+// priceSource, if non-nil, activates the price feeder (x/oracle/data) on the
+// same poll loop: gasPrices must be set too (price-feed txs are NOT
+// fee-exempt — see oracle/PROTOCOL.md §3). A nil priceSource idles the
+// feeder entirely, same as today's default.
+func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, nodeRPC string, cfg Config, stateDir string, priceSource PriceSource, gasPrices string) error {
 	// Resolve the signing key from the supplied keyring.
 	if clientCtx.Keyring == nil {
 		return fmt.Errorf("no keyring available on client context")
@@ -57,16 +63,25 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 	steem := NewSteemClient(cfg.SteemRPCURL)
 	bridgeQuery := types.NewQueryClient(clientCtx)
 	stakingQuery := stakingtypes.NewQueryClient(clientCtx)
+	oracledataQuery := oracledatatypes.NewQueryClient(clientCtx)
 
 	state, err := LoadState(stateDir)
 	if err != nil {
 		return fmt.Errorf("cannot load state from %q: %w", stateDir, err)
 	}
 
+	feeder := Feeder{Validator: signerAddr.String(), Source: priceSource}
+	// lastHandledPeriod guards against re-firing Step (and re-paying gas) more
+	// than once per vote period across ticks; 0 is a safe "never handled"
+	// sentinel in practice (a chain's genesis-era period 0 sees at most a
+	// handful of redundant prevotes, harmless).
+	var lastHandledPeriod uint64
+
 	logger.Info("steem oracle started",
 		"steem_rpc", cfg.SteemRPCURL, "node_rpc", nodeRPC, "chain_id", chainID,
 		"signer", signerAddr.String(), "valoper", valoperAddr,
-		"poll_interval", cfg.PollInterval.String(), "last_scanned_block", state.LastScannedBlock)
+		"poll_interval", cfg.PollInterval.String(), "last_scanned_block", state.LastScannedBlock,
+		"price_feeder_enabled", priceSource != nil)
 
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
@@ -83,7 +98,77 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 		if err := runCycle(ctx, logger, cfg, clientCtx, steem, bridgeQuery, stakingQuery, signerAddr, valoperAddr, stateDir, &state, &notBondedLogged); err != nil {
 			logger.Error("steem oracle cycle failed", "err", err)
 		}
+
+		if priceSource != nil {
+			if err := runPriceFeederCycle(ctx, logger, clientCtx, oracledataQuery, feeder, gasPrices, stateDir, &lastHandledPeriod); err != nil {
+				logger.Error("price feeder cycle failed", "err", err)
+			}
+		}
 	}
+}
+
+// runPriceFeederCycle checks whether the chain has entered a new vote period
+// since the last handled one and, if so, runs one Feeder.Step: reveals the
+// prior period's commit (if still in the reveal window) and/or commits a
+// fresh prevote, broadcasting whatever messages result and persisting the
+// new commit state. A no-op (same period as last time) costs nothing.
+func runPriceFeederCycle(
+	ctx context.Context,
+	logger cycleLogger,
+	clientCtx client.Context,
+	oracledataQuery oracledatatypes.QueryClient,
+	feeder Feeder,
+	gasPrices string,
+	stateDir string,
+	lastHandledPeriod *uint64,
+) error {
+	paramsResp, err := oracledataQuery.Params(ctx, &oracledatatypes.QueryParamsRequest{})
+	if err != nil {
+		return fmt.Errorf("querying oracledata params: %w", err)
+	}
+	votePeriod := paramsResp.Params.VotePeriod
+	if votePeriod == 0 {
+		return fmt.Errorf("oracledata vote period is zero")
+	}
+
+	status, err := clientCtx.Client.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("querying node status: %w", err)
+	}
+	height := uint64(status.SyncInfo.LatestBlockHeight) //nolint:gosec // block heights never approach int64 overflow
+	period := height / votePeriod
+
+	if period == *lastHandledPeriod {
+		return nil // already acted this period; wait for the next boundary
+	}
+
+	prevState, err := LoadFeederState(stateDir)
+	if err != nil {
+		return fmt.Errorf("cannot load price feeder state from %q: %w", stateDir, err)
+	}
+
+	msgs, newState, err := feeder.Step(period, paramsResp.Params.Whitelist, prevState)
+	if err != nil {
+		// A price-fetch error still lets msgs (a pending reveal, if any)
+		// through — only the fresh-prevote half of Step failed.
+		logger.Error("price feeder: fetching prices failed", "err", err)
+	}
+	if len(msgs) == 0 {
+		*lastHandledPeriod = period
+		return nil
+	}
+
+	txHash, err := BroadcastPriceFeedMsgs(ctx, clientCtx, clientCtx.FromName, msgs, gasPrices)
+	if err != nil {
+		return fmt.Errorf("broadcasting price feed messages: %w", err)
+	}
+	logger.Info("price feeder broadcast", "period", period, "count", len(msgs), "tx", txHash)
+
+	if err := SaveFeederState(stateDir, newState); err != nil {
+		return fmt.Errorf("saving price feeder state: %w", err)
+	}
+	*lastHandledPeriod = period
+	return nil
 }
 
 type cycleLogger interface {

@@ -380,10 +380,12 @@ have submitted **identical** facts, the chain acts on them.
 
 ### The bridge oracle (recommended)
 
-Attesting is handled by a **separate `steem-oracle` container**, not the node
+Attesting is handled by a **separate oracle container**, not the node
 binary — so your validator's signing key lives only in the oracle's environment,
-never in the chain config. It's wired into `docker-compose.yml` and starts by
-default alongside the node.
+never in the chain config. Three interchangeable implementations are wired into
+`docker-compose.yml` (Go, Python, JS — pick whichever you're comfortable
+operating; see [`oracle/README.md`](../oracle/README.md)). None starts by
+default — you bring up exactly one with its Compose profile.
 
 Your validator key already lives in the node's keyring (you created it in
 step 4). The oracle just needs that key exported into its own environment.
@@ -418,10 +420,11 @@ step 4). The oracle just needs that key exported into its own environment.
    > Prefer not to export a raw key? Set `ORACLE_MNEMONIC="word1 … word24"` (the
    > mnemonic from step 4) instead of `ORACLE_PRIVATE_KEY`.
 
-3. **Start (or restart) the stack** — the oracle comes up with the node:
+3. **Start (or restart) the stack**, bringing up ONE oracle client alongside
+   the node (never more than one at a time against the same key):
 
    ```sh
-   docker compose up -d
+   docker compose --profile go up -d       # or: --profile python / --profile js
    ```
 
 The oracle reaches your node at `http://steemvm:26657` over the compose network,
@@ -429,19 +432,21 @@ polls Steem's **last irreversible block** every minute, scans transfers to
 the gateway account, and broadcasts the matching deposit / name-registration
 attestations automatically (fee-exempt for bonded validators). Its scan cursor
 persists in the `oracle-data` volume; it idles harmlessly while your key is not
-a bonded validator, and catches up automatically after downtime.
+a bonded validator, and catches up automatically after downtime. Set
+`ORACLE_GAS_PRICES` (and, optionally, `ORACLE_CMC_API_KEY`) in `oracle/.env` to
+also activate its price feed — see [`oracle/PROTOCOL.md`](../oracle/PROTOCOL.md).
 
 Follow it:
 
 ```sh
-docker compose logs -f oracle
+docker compose logs -f oracle-go     # or oracle-python / oracle-js
 ```
 
 ### Manual attestation (fallback)
 
 ```sh
-docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge submit-steem-deposit \
-  <txid> <op-index> <steem-block> <steem-timestamp> <steem-sender> <gateway-account> <amount-millisteem> <memo> \
+docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
+  <txid> <op-index> <steem-block> <steem-timestamp> <steem-sender> <gateway-account> <amount-millisteem> <memo> <asset> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
   --chain-id steemvm --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
@@ -451,8 +456,8 @@ Example — Steem tx `bce1dd3184e39bcd9bdd7886b22681268a708e03` where `alice`
 sent `1000.000 STEEM` to the gateway with an EVM address as the memo:
 
 ```sh
-docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge submit-steem-deposit \
-  bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a \
+docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
+  bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a BRIDGE_ASSET_STEEM \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
   --chain-id steemvm --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
@@ -470,9 +475,14 @@ Field-by-field:
 | `gateway-account` | The gateway account the transfer was sent to — must match the on-chain param (`svm.bank`) or the tx is rejected |
 | `amount-millisteem` | Amount in millisteem: STEEM × 1000, so `1000.000 STEEM` = `1000000` |
 | `memo` | The transfer's memo, verbatim — a `steem...` bech32 address or a `0x...` EVM address; this decides who receives the minted `asteem` |
+| `asset` | Which Steem asset was transferred: `BRIDGE_ASSET_STEEM` or `BRIDGE_ASSET_SBD` |
 
-(For a name registration, the same fields go to
+(For a name registration, the same fields minus `asset` go to
 `tx steembridge submit-name-registration` instead.)
+
+For the full command reference — every bridge and price-feed duty, plus query
+commands for verification — see
+[`Instructions/ORACLE_COMMANDS.md`](ORACLE_COMMANDS.md).
 
 Rules that matter:
 

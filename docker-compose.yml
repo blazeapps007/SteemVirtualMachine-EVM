@@ -35,7 +35,11 @@ services:
         # Run under cosmovisor so the node auto-swaps to the staged upgrade binary
         # at the governance upgrade height. cosmovisor + steemvmd both build from
         # this checkout via `make install`.
-        [ -x /root/go/bin/cosmovisor ] || go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.0
+        # GOTOOLCHAIN pinned to this repo's own `go` directive for JUST this install:
+        # cosmovisor v1.7.0's own dependency graph pulls in an old bytedance/sonic
+        # whose assembly doesn't link under the image's Go 1.26 toolchain (unrelated
+        # to this app's own build, which isn't affected — see go.mod's sonic replace).
+        [ -x /root/go/bin/cosmovisor ] || GOTOOLCHAIN=go1.25.10 go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.0
         make install
         if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
           /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm
@@ -69,40 +73,64 @@ services:
           --json-rpc.api "eth,net,web3,txpool,debug" \
           --json-rpc.enable-indexer
 
-  # Standalone Steem bridge oracle. Starts by default alongside the node:
-  #     cp oracle/.env.example oracle/.env    # then edit oracle/.env (your key)
-  #     docker compose up -d
+  # Standalone Steem bridge oracle — pick ONE language and bring it up with its
+  # profile (never more than one at a time; they'd race on the same signing key
+  # and scan cursor):
   #
-  # All oracle config (incl. your validator key) comes from oracle/.env — see
-  # oracle/.env.example. That file is gitignored; NEVER commit it. Only a bonded
-  # validator's attestations count and are fee-exempt. If oracle/.env has no key,
-  # the oracle just restart-loops harmlessly ("provide the signing key") until you
-  # add one — the node is unaffected.
-  oracle:
-    image: golang:1.26.5-trixie
-    container_name: steemvm-oracle
-    working_dir: /workspace
+  #     cp oracle/.env.example oracle/.env    # then edit oracle/.env (your key)
+  #     docker compose --profile go up -d       # or --profile python / --profile js
+  #
+  # All oracle config (incl. your validator key, CoinMarketCap key, and the
+  # Steem RPC used for both bridge scanning and price feeds) comes from
+  # oracle/.env — see oracle/.env.example. That file is gitignored; NEVER
+  # commit it. Bridge-attestation txs are fee-exempt for bonded validators;
+  # price-feed txs are NOT (see oracle/PROTOCOL.md) and need a funded account.
+  # If oracle/.env has no key, the client just restart-loops harmlessly
+  # ("provide the signing key") until you add one — the node is unaffected.
+  oracle-go:
+    build:
+      context: .
+      dockerfile: oracle/go/Dockerfile
+    container_name: steemvm-oracle-go
     depends_on:
       - steemvm
     restart: unless-stopped
     env_file:
       - path: oracle/.env
         required: false
-    environment:
-      GOPATH: /root/go
-      CGO_ENABLED: "1"
     volumes:
-      - .:/workspace
       - oracle-data:/oracle-data
-      - gopath:/root/go
-      - go-build-cache:/root/.cache/go-build
-    command:
-      - sh
-      - -ec
-      - |
-        git config --global --add safe.directory /workspace
-        go build -o /usr/local/bin/steem-oracle ./oracle
-        exec steem-oracle
+    profiles: ["go"]
+
+  oracle-python:
+    build:
+      context: ./oracle/python
+      dockerfile: Dockerfile
+    container_name: steemvm-oracle-python
+    depends_on:
+      - steemvm
+    restart: unless-stopped
+    env_file:
+      - path: oracle/.env
+        required: false
+    volumes:
+      - oracle-data:/oracle-data
+    profiles: ["python"]
+
+  oracle-js:
+    build:
+      context: ./oracle/js
+      dockerfile: Dockerfile
+    container_name: steemvm-oracle-js
+    depends_on:
+      - steemvm
+    restart: unless-stopped
+    env_file:
+      - path: oracle/.env
+        required: false
+    volumes:
+      - oracle-data:/oracle-data
+    profiles: ["js"]
 
 volumes:
   steemvm-home:
