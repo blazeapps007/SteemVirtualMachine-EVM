@@ -60,10 +60,13 @@ validator's own account**, and its `details` field must carry the account's
 `create-validator` and `edit-validator` are rejected otherwise, and the identity
 cannot be stripped after the fact.
 
-**Built-in Steem relayer** — the node binary itself watches Steem. Point it at a
-Steem RPC endpoint and give it a key; when the node's validator is bonded it
-scans Steem's last irreversible block (no fork risk) and broadcasts attestations
-automatically. Attestations from bonded validators are fee-exempt.
+**Choice of oracle client** — a separate container (never the chain binary
+itself) watches Steem and feeds both the bridge and the price feed. Point it at
+a Steem RPC endpoint and give it a key; when the validator is bonded it scans
+Steem's last irreversible block (no fork risk) and broadcasts attestations
+automatically. Attestations from bonded validators are fee-exempt. Pick
+whichever language you're comfortable operating — Go, Python, or JS, all
+functionally identical (see [`oracle/README.md`](oracle/README.md)).
 
 **EVM + precompile** — full Ethereum JSON-RPC (HTTP + WebSocket) for MetaMask,
 `cast`, ethers.js, and friends. A native precompile at
@@ -86,8 +89,12 @@ The fastest way to get a node running is from the repository root:
 
 ```sh
 docker compose up -d
-docker compose logs -f
+docker compose logs -f steemvm
 ```
+
+Bring up an oracle client alongside it — pick one language, never more than
+one at once — with `docker compose --profile {go,python,js} up -d` (see
+[`oracle/README.md`](oracle/README.md)).
 
 ## Building from source
 
@@ -149,9 +156,9 @@ Never hand-edit `*.pb.go` — regenerate instead.
 | `x/steemvm/` | Placeholder module |
 | `precompiles/steembridge/` | Bridge EVM precompile (`0x…0900`) and its Solidity interface |
 | `precompiles/oracledata/` | Price read precompile (`0x…0902`) and its Solidity interface |
-| `relayer/` | The in-binary Steem relayer |
+| `oracle/` | Off-chain validator oracle clients (Go/Python/JS — pick one) and their shared protocol spec |
 | `proto/` | Protobuf definitions (source of truth for `*.pb.go`) |
-| `Instructions/` | Canonical node config + the validator guide |
+| `Instructions/` | Canonical node config, the validator guide, and the oracle CLI command reference |
 | `docs/` | OpenAPI spec served by the node's API |
 
 CI runs unit tests and golangci-lint on every push, and lints PR titles.
