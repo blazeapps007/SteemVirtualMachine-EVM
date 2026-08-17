@@ -1,0 +1,32 @@
+{
+  "name": "steemvm-oracle-js",
+  "version": "0.1.0",
+  "description": "SteemVM validator oracle client (JS/TypeScript) — bridge attestation relay + price feed",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "test": "node --import tsx --test test/*.test.ts",
+    "proto:gen": "buf generate --template buf.gen.yaml ../../proto --type steemvm.steembridge.v1.MsgAttestDeposit --type steemvm.steembridge.v1.MsgAttestWithdrawalPayout --type steemvm.steembridge.v1.MsgSubmitNameRegistration --type steemvm.oracle.data.v1.MsgAggregateExchangeRatePrevote --type steemvm.oracle.data.v1.MsgAggregateExchangeRateVote"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.14.0",
+    "@cosmjs/encoding": "^0.33.1",
+    "@cosmjs/proto-signing": "^0.33.1",
+    "@noble/curves": "^1.9.1",
+    "@noble/hashes": "^1.8.0",
+    "@scure/bip32": "^1.7.0",
+    "@scure/bip39": "^1.6.0",
+    "cosmjs-types": "^0.9.0",
+    "long": "^5.2.4"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.55.1",
+    "@types/node": "^22.15.0",
+    "ts-proto": "^2.7.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}

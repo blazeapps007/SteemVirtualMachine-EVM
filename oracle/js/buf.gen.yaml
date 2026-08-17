@@ -1,0 +1,19 @@
+# ts-proto codegen for the two SteemVM-custom modules (steembridge, oracledata)
+# plus cosmos/evm's ethsecp256k1 key type — the only proto packages not already
+# covered by cosmjs-types's pre-built standard Cosmos types. Invoked from
+# oracle/js/ (see package.json's "proto:gen" script) so `out` is relative to
+# that directory. Uses a LOCAL protoc-gen-ts_proto plugin (installed via the
+# `ts-proto` npm devDependency) rather than a remote BSR plugin, so codegen
+# has no dependency on a third-party plugin registry beyond buf.build's module
+# resolution (already required for buf.yaml/buf.lock's dependency graph).
+version: v2
+plugins:
+  - local: protoc-gen-ts_proto
+    out: src/proto
+    opt:
+      - esModuleInterop=true
+      - outputClientImpl=false
+      - env=node
+      - unrecognizedEnum=false
+      - useExactTypes=false
+      - forceLong=long
