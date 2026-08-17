@@ -72,7 +72,7 @@ func (k Keeper) TallyExchangeRates(ctx context.Context) ([][]byte, error) {
 		return nil, err
 	}
 
-	totalBonded, err := k.stakingKeeper.TotalBondedTokens(ctx)
+	totalBonded, err := k.stakingKeeper.TotalValidatorPower(ctx)
 	if err != nil {
 		return nil, err
 	}

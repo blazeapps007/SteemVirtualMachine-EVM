@@ -20,9 +20,11 @@ type StakingKeeper interface {
 	// whether a vote/prevote signer is a currently bonded validator and to read
 	// its bonded weight.
 	GetValidator(ctx context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error)
-	// TotalBondedTokens returns the current total bonded stake, the denominator
-	// of the vote-threshold ratio.
-	TotalBondedTokens(ctx context.Context) (math.Int, error)
+	// TotalValidatorPower returns the current total bonded stake, the
+	// denominator of the vote-threshold ratio. Renamed from TotalBondedTokens
+	// upstream (cosmos-sdk v0.54); same computation (bonded pool's
+	// bond-denom balance).
+	TotalValidatorPower(ctx context.Context) (math.Int, error)
 }
 
 // OracleKeeper is the parent x/oracle engine's reporting entry point. The

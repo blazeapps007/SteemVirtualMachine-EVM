@@ -20,7 +20,7 @@ import (
 // Shared by the deposit and name-registration attestation flows so the two
 // can never drift on how the threshold is measured.
 func (k Keeper) confirmedPowerRatio(ctx context.Context, confirmations []*types.Confirmation) (math.LegacyDec, error) {
-	totalBonded, err := k.stakingKeeper.TotalBondedTokens(ctx)
+	totalBonded, err := k.stakingKeeper.TotalValidatorPower(ctx)
 	if err != nil {
 		return math.LegacyDec{}, err
 	}

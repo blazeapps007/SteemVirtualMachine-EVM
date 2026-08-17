@@ -132,6 +132,9 @@ var (
 						// chain modules
 						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName},
 					EndBlockers: []string{
+						// bank's EndBlock (CreditVirtualAccounts) is new as of
+						// cosmos-sdk v0.54; upstream evmd places it first.
+						banktypes.ModuleName,
 						govtypes.ModuleName,
 						stakingtypes.ModuleName,
 						feegrant.ModuleName,
@@ -152,6 +155,24 @@ var (
 					// NOTE: The genutils module must occur after staking so that pools are
 					// properly initialized with tokens from genesis accounts.
 					// NOTE: The genutils module must also occur after auth so that it can access the params from auth.
+					// NOTE: genutils delivers gentxs through the full ante handler chain,
+					// which (as of cosmos/evm v0.7.0, since WithDefaultEvmCoinInfo is gone)
+					// needs the evm module's own InitGenesis to have already hydrated the
+					// process-global evmCoinInfo — evmtypes.ModuleName (and feemarket/erc20,
+					// which it depends on) MUST run before genutiltypes.ModuleName, or a
+					// fresh-chain gentx delivery panics with "global evmCoinInfo is not set
+					// yet!". Matches upstream evmd's SetOrderInitGenesis ordering.
+					//
+					// steembridgemoduletypes/oracledatamoduletypes/oraclemoduletypes
+					// deliberately stay AFTER genutiltypes, unlike evm/feemarket/erc20: the
+					// steembridge validator-identity ante gate (ValidateValidatorCreationEligibility)
+					// relies on steembridge's own Params not being set yet when genesis
+					// gentxs are delivered — that ErrNotFound is its documented signal to
+					// trust genesis validators unconditionally (see
+					// x/oracle/bridge/keeper/validator_identity.go). Reordering steembridge
+					// ahead of genutil here would make Params visible during gentx delivery
+					// and start enforcing the identity gate against genesis validators,
+					// which is not how this app is designed to boot.
 					InitGenesis: []string{
 						consensustypes.ModuleName,
 						authtypes.ModuleName,
@@ -161,19 +182,21 @@ var (
 						slashingtypes.ModuleName,
 						govtypes.ModuleName,
 						minttypes.ModuleName,
+						// ibc modules
+						ibcexported.ModuleName,
+						ibctransfertypes.ModuleName,
+						icatypes.ModuleName,
+						// evm stack: must precede genutil (see note above)
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName,
 						genutiltypes.ModuleName,
+						// oracle/bridge stack: must follow genutil (see note above)
+						steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName, oraclemoduletypes.ModuleName,
 						evidencetypes.ModuleName,
 						authz.ModuleName,
 						feegrant.ModuleName,
 						vestingtypes.ModuleName,
 						upgradetypes.ModuleName,
-						epochstypes.ModuleName,
-						// ibc modules
-						ibcexported.ModuleName,
-						ibctransfertypes.ModuleName,
-						icatypes.ModuleName,
-						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName, oraclemoduletypes.ModuleName},
+						epochstypes.ModuleName},
 				}),
 			},
 			{

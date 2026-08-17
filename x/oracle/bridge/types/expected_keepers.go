@@ -17,9 +17,11 @@ type StakingKeeper interface {
 	// GetValidator looks up a validator by operator address; used to check
 	// whether a MsgAttestDeposit signer is a currently bonded validator.
 	GetValidator(ctx context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error)
-	// TotalBondedTokens returns the current total bonded stake, used as the
-	// denominator of the confirmation voting-power ratio.
-	TotalBondedTokens(ctx context.Context) (math.Int, error)
+	// TotalValidatorPower returns the current total bonded stake, used as the
+	// denominator of the confirmation voting-power ratio. Renamed from
+	// TotalBondedTokens upstream (cosmos-sdk v0.54); same computation (bonded
+	// pool's bond-denom balance).
+	TotalValidatorPower(ctx context.Context) (math.Int, error)
 }
 
 // AuthKeeper defines the expected interface for the Auth module.

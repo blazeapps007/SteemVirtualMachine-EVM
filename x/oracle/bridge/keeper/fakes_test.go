@@ -159,7 +159,7 @@ func (f *fakeStakingKeeper) GetValidator(_ context.Context, addr sdk.ValAddress)
 	return v, nil
 }
 
-func (f *fakeStakingKeeper) TotalBondedTokens(context.Context) (math.Int, error) {
+func (f *fakeStakingKeeper) TotalValidatorPower(context.Context) (math.Int, error) {
 	total := math.ZeroInt()
 	for _, v := range f.validators {
 		if v.IsBonded() {
