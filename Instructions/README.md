@@ -498,7 +498,7 @@ Rules that matter:
   are fee-exempt (up to 100 per validator per block), so the tx succeeds even
   with a zero fee. Submissions that would be rejected pay normal fees.
 - A pending deposit that doesn't reach the threshold within
-  `deposit_timeout_blocks` (~7 days) expires and can be submitted fresh.
+  `deposit_timeout_blocks` (~3.5 days) expires and can be submitted fresh.
 
 Track deposit status:
 

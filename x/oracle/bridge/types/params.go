@@ -30,8 +30,8 @@ var DefaultMinimumBridgeAmount uint64 = 0
 var DefaultMaximumBridgeAmount uint64 = 0
 
 // DefaultDepositTimeoutBlocks represents the DepositTimeoutBlocks default value:
-// roughly 7 days at a 6s block time, giving validators ample time to confirm.
-var DefaultDepositTimeoutBlocks uint64 = 100800
+// roughly 3.5 days at a 6s block time, giving validators ample time to confirm.
+var DefaultDepositTimeoutBlocks uint64 = 50400
 
 // DefaultNameServiceEnabled represents the NameServiceEnabled default value.
 // Like the bridge, the name service starts disabled and is enabled via governance.
@@ -42,9 +42,9 @@ var DefaultNameServiceEnabled bool = false
 var DefaultNameRegistrationMinMillisteem uint64 = 1
 
 // DefaultNamePendingTimeoutBlocks represents the NamePendingTimeoutBlocks default
-// value: roughly 7 days at a 6s block time, applied separately to the attestation
+// value: roughly 3.5 days at a 6s block time, applied separately to the attestation
 // phase and the user-confirmation phase.
-var DefaultNamePendingTimeoutBlocks uint64 = 100800
+var DefaultNamePendingTimeoutBlocks uint64 = 50400
 
 // DefaultRelayerStartBlock represents the RelayerStartBlock default value.
 // 0 means each validator's relayer anchors to Steem's last irreversible
