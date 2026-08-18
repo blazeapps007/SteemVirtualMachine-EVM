@@ -16,7 +16,6 @@ func enableNameService(t *testing.T, f *fixtureWithFakes) {
 	t.Helper()
 	params := types.DefaultParams()
 	params.NameServiceEnabled = true
-	params.GatewayAccount = "gateway-account"
 	params.BridgeConfirmationThreshold = math.LegacyMustNewDecFromStr("0.666666666666666667")
 	require.NoError(t, f.keeper.Params.Set(f.ctx, params))
 }
@@ -29,7 +28,7 @@ func baseNameRegistrationMsg(validator testValidator, txid string, opIndex uint3
 		SteemBlock:       100,
 		SteemTimestamp:   "2024-01-01T00:00:00",
 		SteemAccount:     "alice",
-		GatewayAccount:   "gateway-account",
+		GatewayAccount:   types.GatewayAccount,
 		AmountMillisteem: 1, // 0.001 STEEM, the default minimum
 		Memo:             sdk.AccAddress(make([]byte, 20)).String(),
 	}

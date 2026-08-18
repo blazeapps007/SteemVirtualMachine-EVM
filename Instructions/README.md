@@ -472,7 +472,7 @@ Field-by-field:
 | `steem-block` | Steem block number the transaction was included in |
 | `steem-timestamp` | The Steem block timestamp, exactly as Steem reports it |
 | `steem-sender` | Steem account that sent the transfer |
-| `gateway-account` | The gateway account the transfer was sent to — must match the on-chain param (`svm.bank`) or the tx is rejected |
+| `gateway-account` | The gateway account the transfer was sent to — must match the hardcoded chain constant (`svm.bank`) or the tx is rejected |
 | `amount-millisteem` | Amount in millisteem: STEEM × 1000, so `1000.000 STEEM` = `1000000` |
 | `memo` | The transfer's memo, verbatim — a `steem...` bech32 address or a `0x...` EVM address; this decides who receives the minted `asteem` |
 | `asset` | Which Steem asset was transferred: `BRIDGE_ASSET_STEEM` or `BRIDGE_ASSET_SBD` |

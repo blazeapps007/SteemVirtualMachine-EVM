@@ -10,7 +10,7 @@ import type { Registry } from "@cosmjs/proto-signing";
 import type { Config } from "./config";
 import type { EthSecp256k1DirectSigner } from "./signer";
 import { SteemClient, extractGatewayTransfers, extractGatewayPayouts } from "./steemClient";
-import { routeMemo, buildMsg, Intent } from "./router";
+import { routeMemo, buildMsg, Intent, GATEWAY_ACCOUNT } from "./router";
 import { broadcastAttestations, broadcastPriceFeedMsgs, type EncodeObject } from "./broadcast";
 import { loadState, saveState, loadFeederState, saveFeederState } from "./state";
 import { Feeder, type PriceSource } from "./priceFeeder";
@@ -268,9 +268,11 @@ async function runCycle(
   notBondedLogged: boolean,
 ): Promise<{ state: RelayerCycleState; notBondedLogged: boolean }> {
   const params = await queryBridgeParams(cfg.nodeRestUrl);
-  const gateway = params.gateway_account;
-  if (!gateway || (!params.bridge_enabled && !params.name_service_enabled)) {
-    logger.debug("steem relayer idle: bridge and name service disabled or no gateway configured");
+  // GatewayAccount is a hardcoded chain constant, never read from params —
+  // see router.GATEWAY_ACCOUNT's doc comment.
+  const gateway = GATEWAY_ACCOUNT;
+  if (!params.bridge_enabled && !params.name_service_enabled) {
+    logger.debug("steem relayer idle: bridge and name service disabled");
     return { state, notBondedLogged };
   }
 

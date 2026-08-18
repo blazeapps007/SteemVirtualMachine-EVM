@@ -63,7 +63,7 @@ func (k Keeper) ValidateDepositAcceptance(ctx context.Context, msg *types.MsgAtt
 	if !params.BridgeEnabled {
 		return types.ErrBridgeDisabled
 	}
-	if msg.GatewayAccount != params.GatewayAccount {
+	if msg.GatewayAccount != types.GatewayAccount {
 		return types.ErrInvalidGatewayAccount
 	}
 

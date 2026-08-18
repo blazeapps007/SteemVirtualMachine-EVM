@@ -23,6 +23,16 @@ const (
 	// it into fee_collector for 100% distribution to stakers (kept out of the
 	// tx-fee 50/25/25 split). Registered in app maccPerms with no special perms.
 	BridgeRewardModuleName = "bridge_reward"
+
+	// GatewayAccount is the Steem account users send bridge deposits and name
+	// registrations to. Hardcoded (NOT governance-settable): every deposit,
+	// name-registration, and bridge-out payout check against this exact
+	// constant, never against Params.GatewayAccount (which still exists on
+	// the wire for backward-compat display but is no longer read by
+	// consensus logic — see Params.Validate). Hardcoding this closes off an
+	// entire class of mistake: a wrong or stale value silently baked into
+	// genesis/governance state that consensus logic would otherwise trust.
+	GatewayAccount = "svm.bank"
 )
 
 // ParamsKey is the prefix to retrieve all Params

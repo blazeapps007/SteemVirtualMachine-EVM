@@ -7,15 +7,20 @@ import (
 )
 
 // DefaultBridgeEnabled represents the BridgeEnabled default value.
-// Bridging starts disabled: it must be enabled (with a gateway_account configured) via governance.
+// Bridging starts disabled: it must be enabled via governance.
 var DefaultBridgeEnabled bool = false
 
 // DefaultBridgeOutEnabled represents the BridgeOutEnabled default value.
 var DefaultBridgeOutEnabled bool = false
 
 // DefaultGatewayAccount represents the GatewayAccount default value.
-// Empty until governance configures the real Steem gateway account.
-var DefaultGatewayAccount string = ""
+//
+// Deprecated: this param field is no longer read by consensus logic — the
+// gateway account is the hardcoded GatewayAccount constant (keys.go), never
+// governance-settable. The field/default are kept only so genesis/query
+// output stays informative rather than blank; set to match the constant so
+// it never silently disagrees with what's actually enforced.
+var DefaultGatewayAccount string = GatewayAccount
 
 // DefaultBridgeConfirmationThreshold represents the BridgeConfirmationThreshold default value:
 // two-thirds of bonded voting power, matching Cosmos SDK's own supermajority convention.
@@ -141,16 +146,6 @@ func (p Params) Validate() error {
 		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "maximum bridge amount cannot be less than minimum bridge amount")
 	}
 
-	if p.BridgeEnabled && p.GatewayAccount == "" {
-		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "gateway account must be set while the bridge is enabled")
-	}
-
-	// The name service shares the gateway account with the bridge but is
-	// otherwise independent: bridge disabled + name service enabled is a
-	// valid configuration.
-	if p.NameServiceEnabled && p.GatewayAccount == "" {
-		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "gateway account must be set while the name service is enabled")
-	}
 	if p.NameServiceEnabled && p.NamePendingTimeoutBlocks == 0 {
 		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "name pending timeout blocks must be positive while the name service is enabled")
 	}

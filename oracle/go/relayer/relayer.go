@@ -197,9 +197,13 @@ func runCycle(
 	if err != nil {
 		return err
 	}
-	gateway := params.Params.GatewayAccount
-	if gateway == "" || (!params.Params.BridgeEnabled && !params.Params.NameServiceEnabled) {
-		logger.Debug("steem relayer idle: bridge and name service disabled or no gateway configured")
+	// GatewayAccount is a hardcoded chain constant, never read from params
+	// (see x/oracle/bridge/types.GatewayAccount) — this closes off the class
+	// of mistake where a stale/wrong configured value silently diverges from
+	// what the chain actually enforces.
+	gateway := types.GatewayAccount
+	if !params.Params.BridgeEnabled && !params.Params.NameServiceEnabled {
+		logger.Debug("steem relayer idle: bridge and name service disabled")
 		return nil
 	}
 

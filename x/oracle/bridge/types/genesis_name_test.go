@@ -103,20 +103,22 @@ func TestGenesisState_ValidateNameService(t *testing.T) {
 }
 
 func TestParams_ValidateNameService(t *testing.T) {
-	t.Run("name service enabled requires gateway", func(t *testing.T) {
+	// GatewayAccount is a vestigial, unused-by-consensus param field (the
+	// gateway account is the hardcoded types.GatewayAccount constant) — its
+	// value, including empty, must never affect Validate().
+	t.Run("gateway account param value never affects validation", func(t *testing.T) {
 		p := types.DefaultParams()
 		p.NameServiceEnabled = true
 		p.GatewayAccount = ""
-		require.Error(t, p.Validate())
+		require.NoError(t, p.Validate())
 
-		p.GatewayAccount = "gateway"
+		p.GatewayAccount = "anything"
 		require.NoError(t, p.Validate())
 	})
 
 	t.Run("name service enabled requires positive timeout", func(t *testing.T) {
 		p := types.DefaultParams()
 		p.NameServiceEnabled = true
-		p.GatewayAccount = "gateway"
 		p.NamePendingTimeoutBlocks = 0
 		require.Error(t, p.Validate())
 	})
@@ -131,7 +133,6 @@ func TestParams_ValidateNameService(t *testing.T) {
 		p := types.DefaultParams()
 		p.BridgeEnabled = false
 		p.NameServiceEnabled = true
-		p.GatewayAccount = "gateway"
 		require.NoError(t, p.Validate())
 	})
 }

@@ -28,7 +28,7 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 	if !params.BridgeEnabled {
 		return nil, types.ErrBridgeDisabled
 	}
-	if msg.GatewayAccount != params.GatewayAccount {
+	if msg.GatewayAccount != types.GatewayAccount {
 		return nil, types.ErrInvalidGatewayAccount
 	}
 

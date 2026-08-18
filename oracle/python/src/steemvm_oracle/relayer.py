@@ -21,7 +21,7 @@ from .broadcast import MAX_MSGS_PER_TX, NotFoundError, RestClient, broadcast_att
 from .config import Config
 from .keys import Keypair
 from .pricefeeder import CompositePriceSource, Feeder
-from .router import Intent, build_payout_any, build_transfer_any, derive_destination, route_memo
+from .router import GATEWAY_ACCOUNT, Intent, build_payout_any, build_transfer_any, derive_destination, route_memo
 from .state import FeederState, State, load_feeder_state, load_state, save_feeder_state, save_state
 from .steem_client import SteemClient, extract_gateway_payouts, extract_gateway_transfers
 
@@ -143,13 +143,15 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
     irreversible Steem blocks, attest gateway transfers, advance cursor.
     Mirrors oracle/go/relayer/relayer.go's runCycle."""
     params = query_bridge_params(cycle.rest)
-    gateway = params.get("gateway_account", "")
+    # GatewayAccount is a hardcoded chain constant, never read from params --
+    # see router.GATEWAY_ACCOUNT's doc comment.
+    gateway = GATEWAY_ACCOUNT
     bridge_enabled = bool(params.get("bridge_enabled"))
     name_service_enabled = bool(params.get("name_service_enabled"))
     bridge_out_enabled = bool(params.get("bridge_out_enabled"))
 
-    if not gateway or not (bridge_enabled or name_service_enabled):
-        logger.debug("steem relayer idle: bridge and name service disabled or no gateway configured")
+    if not (bridge_enabled or name_service_enabled):
+        logger.debug("steem relayer idle: bridge and name service disabled")
         return state
 
     # Only bonded validators' attestations count (and only theirs are

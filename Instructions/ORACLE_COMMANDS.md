@@ -37,7 +37,7 @@ tx steembridge attest-deposit [txid] [op-index] [steem-block] [steem-timestamp] 
 | `steem-block` | Steem block number the transaction was included in |
 | `steem-timestamp` | The Steem block timestamp, exactly as Steem reports it |
 | `steem-sender` | Steem account that sent the transfer |
-| `gateway-account` | The gateway account the transfer was sent to (must match the on-chain param) |
+| `gateway-account` | The gateway account the transfer was sent to (must match the hardcoded chain constant, `svm.bank`) |
 | `amount-millisteem` | Amount in millisteem: STEEM × 1000 (`1000.000 STEEM` → `1000000`) |
 | `memo` | The transfer's memo, verbatim — decides who receives the minted `asteem` |
 | `asset` | `BRIDGE_ASSET_STEEM` or `BRIDGE_ASSET_SBD` |

@@ -65,7 +65,7 @@ func (k Keeper) ValidateNameRegistrationAcceptance(ctx context.Context, msg *typ
 	if !params.NameServiceEnabled {
 		return types.ErrNameServiceDisabled
 	}
-	if msg.GatewayAccount != params.GatewayAccount {
+	if msg.GatewayAccount != types.GatewayAccount {
 		return types.ErrInvalidGatewayAccount
 	}
 	if msg.AmountMillisteem < params.NameRegistrationMinMillisteem {

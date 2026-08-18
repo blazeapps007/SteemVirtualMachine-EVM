@@ -15,7 +15,6 @@ func enableBridge(t *testing.T, f *fixtureWithFakes) {
 	t.Helper()
 	params := types.DefaultParams()
 	params.BridgeEnabled = true
-	params.GatewayAccount = "gateway-account"
 	params.BridgeConfirmationThreshold = math.LegacyMustNewDecFromStr("0.666666666666666667")
 	// Core deposit/bridge-out tests assert gross amounts; the 0.25% fee is
 	// covered by dedicated fee tests, so disable it in the shared helper.
@@ -31,7 +30,7 @@ func baseDepositMsg(validator testValidator, txid string, opIndex uint32) *types
 		SteemBlock:       100,
 		SteemTimestamp:   "2024-01-01T00:00:00",
 		SteemSender:      "alice",
-		GatewayAccount:   "gateway-account",
+		GatewayAccount:   types.GatewayAccount,
 		AmountMillisteem: 1000, // 1 STEEM
 		Memo:             sdk.AccAddress(make([]byte, 20)).String(),
 	}

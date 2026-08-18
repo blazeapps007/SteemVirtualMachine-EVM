@@ -25,6 +25,13 @@ from .steem_client import ASSET_SBD, Payout, Transfer
 from steemvm.steembridge.v1 import asset_pb2  # noqa: E402
 from steemvm.steembridge.v1 import tx_pb2 as steembridge_tx_pb2  # noqa: E402
 
+# GATEWAY_ACCOUNT is a hardcoded chain constant, never read from the chain's
+# params query -- mirrors x/oracle/bridge/types.GatewayAccount ("svm.bank"),
+# which is NOT governance-settable. Params.gateway_account still exists on
+# the wire for backward-compat display but consensus logic ignores it, so
+# this client must never trust that field either.
+GATEWAY_ACCOUNT = "svm.bank"
+
 # 0x-prefixed 20-byte EVM address, any case -- mirrors x/oracle/bridge/types/memo.go's hexAddressRegex.
 _HEX_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 

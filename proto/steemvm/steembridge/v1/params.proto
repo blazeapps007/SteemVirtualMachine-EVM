@@ -13,6 +13,10 @@ message Params {
 
   bool bridge_enabled = 1;
   bool bridge_out_enabled = 2;
+  // gateway_account is DEPRECATED and no longer read by consensus logic —
+  // the gateway account is a hardcoded Go constant (x/oracle/bridge/types.
+  // GatewayAccount = "svm.bank"), never governance-settable. Kept on the
+  // wire only so existing genesis/query output stays informative.
   string gateway_account = 3;
   string bridge_confirmation_threshold = 4 [
     (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",

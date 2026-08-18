@@ -98,6 +98,12 @@ RPC/gRPC, but REST is simpler and sufficient):
 
 ## 5. Steem memo routing
 
+**The gateway account is `svm.bank`, hardcoded in every implementation** (`x/oracle/bridge/types.
+GatewayAccount` on-chain; `router.GATEWAY_ACCOUNT` / `GATEWAY_ACCOUNT` in each client) — never read
+from the chain's `Params.gateway_account`, which still exists on the wire for backward-compat
+display only and is ignored by consensus logic. A client that read this from params instead of
+hardcoding it would silently trust a stale or wrong configured value; hardcoding closes that off.
+
 From the reference relayer (`oracle/go/relayer/router.go`):
 
 - Inbound transfer to the gateway account, memo starting with `svm-register` → name-registration
