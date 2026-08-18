@@ -9,10 +9,16 @@ option go_package = "steemvm/x/oracle/bridge/types";
 
 // WithdrawalStatus is the lifecycle status of a withdrawal. REQUESTED is the
 // bridge-out request (funds already burned); PROCESSED means bonded validators
-// have attested (2/3) that the gateway paid the user on Steem.
+// have attested (2/3) that the gateway paid the user on Steem; REFUNDED means
+// no attestation reached threshold within Params.WithdrawalTimeoutBlocks, so
+// the net amount was automatically re-minted and returned to sender (no
+// validator attestation required for the refund itself — see
+// Keeper.RefundExpiredWithdrawals). Both PROCESSED and REFUNDED are terminal:
+// once set, the other can never also occur for the same withdrawal.
 enum WithdrawalStatus {
   WITHDRAWAL_STATUS_REQUESTED = 0;
   WITHDRAWAL_STATUS_PROCESSED = 1;
+  WITHDRAWAL_STATUS_REFUNDED = 2;
 }
 
 // Withdrawal defines the Withdrawal message.
@@ -43,4 +49,7 @@ message Withdrawal {
   uint64 processed_at = 14;
   // validator_confirmations records the bonded validators that attested the payout.
   repeated Confirmation validator_confirmations = 15;
+  // refunded_at is the SteemVM block height the automatic timeout refund ran,
+  // set only when status becomes REFUNDED.
+  uint64 refunded_at = 16;
 }

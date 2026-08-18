@@ -60,6 +60,12 @@ var DefaultRelayerStartBlock uint64 = 0
 // DefaultBridgeFeeBps is the default bridge fee: 25 basis points = 0.25%.
 var DefaultBridgeFeeBps uint32 = 25
 
+// DefaultWithdrawalTimeoutBlocks represents the WithdrawalTimeoutBlocks
+// default value: roughly 3.5 days at a 6s block time — how long a bridge-out
+// withdrawal may sit REQUESTED before Keeper.RefundExpiredWithdrawals
+// automatically refunds it (no validator attestation required).
+var DefaultWithdrawalTimeoutBlocks uint64 = 50400
+
 // NewParams creates a new Params instance.
 func NewParams(
 	bridgeEnabled bool,
@@ -105,6 +111,7 @@ func DefaultParams() Params {
 		DefaultRelayerStartBlock,
 	)
 	p.BridgeFeeBps = DefaultBridgeFeeBps
+	p.WithdrawalTimeoutBlocks = DefaultWithdrawalTimeoutBlocks
 	return p
 }
 
@@ -152,6 +159,10 @@ func (p Params) Validate() error {
 
 	if p.BridgeFeeBps > 10000 {
 		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "bridge fee bps cannot exceed 10000")
+	}
+
+	if p.BridgeOutEnabled && p.WithdrawalTimeoutBlocks == 0 {
+		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "withdrawal timeout blocks must be positive while bridge out is enabled")
 	}
 
 	return nil

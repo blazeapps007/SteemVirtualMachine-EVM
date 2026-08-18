@@ -48,6 +48,21 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 	if withdrawal.Status == types.WithdrawalStatus_WITHDRAWAL_STATUS_PROCESSED {
 		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
 	}
+	// Already auto-refunded (WithdrawalTimeoutBlocks elapsed, see
+	// RefundExpiredWithdrawals): still a benign no-op for the tx (never
+	// re-processed, never paid twice from this side), but a loud audit event
+	// — the payout apparently DID land on Steem after all, just after the
+	// refund already fired. This is the double-spend risk the timeout-refund
+	// design deliberately accepts; logging it is the only follow-up, by design.
+	if withdrawal.Status == types.WithdrawalStatus_WITHDRAWAL_STATUS_REFUNDED {
+		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeWithdrawalPayoutAttestedAfterRefund,
+			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(msg.WithdrawalId, 10)),
+			sdk.NewAttribute(types.AttributeKeyValidator, msg.Validator),
+			sdk.NewAttribute(types.AttributeKeySteemTxid, msg.SteemTxid),
+		))
+		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
+	}
 
 	confirmedKey := collections.Join(msg.WithdrawalId, validatorAddr)
 	already, err := k.WithdrawalConfirmedBy.Has(ctx, confirmedKey)
@@ -153,6 +168,9 @@ func (k Keeper) ValidateWithdrawalProcessedAcceptance(ctx context.Context, msg *
 	}
 	if withdrawal.Status == types.WithdrawalStatus_WITHDRAWAL_STATUS_PROCESSED {
 		return types.ErrWithdrawalAlreadyProcessed
+	}
+	if withdrawal.Status == types.WithdrawalStatus_WITHDRAWAL_STATUS_REFUNDED {
+		return types.ErrWithdrawalAlreadyRefunded
 	}
 	already, err := k.WithdrawalConfirmedBy.Has(ctx, collections.Join(msg.WithdrawalId, validatorAddr))
 	if err != nil {

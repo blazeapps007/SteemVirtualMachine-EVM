@@ -463,6 +463,7 @@
       "params": {
         "bridge_confirmation_threshold": "0.666666666666666667",
         "bridge_enabled": true,
+        "bridge_fee_bps": 25,
         "bridge_out_enabled": true,
         "deposit_timeout_blocks": "50400",
         "gateway_account": "svm.bank",
@@ -471,7 +472,8 @@
         "name_pending_timeout_blocks": "50400",
         "name_registration_min_millisteem": "1",
         "name_service_enabled": true,
-        "relayer_start_block": "107796345"
+        "relayer_start_block": "107796345",
+        "withdrawal_timeout_blocks": "50400"
       },
       "total_burned_asteem": "0",
       "total_minted_asteem": "0",

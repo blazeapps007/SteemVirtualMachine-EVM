@@ -148,6 +148,9 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	if err := am.keeper.ExpireNameRegistrations(ctx); err != nil {
 		return err
 	}
+	if err := am.keeper.RefundExpiredWithdrawals(ctx); err != nil {
+		return err
+	}
 	// STEEMBLACKHOLE sweep: destroy everything that landed in the black hole this
 	// block (bridge-out net, fee-split 25% burn, stray sends). The app's sole burn.
 	return am.keeper.SweepBlackHole(ctx)

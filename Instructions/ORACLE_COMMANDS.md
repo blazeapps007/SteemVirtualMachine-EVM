@@ -70,6 +70,17 @@ tx steembridge attest-withdrawal-payout [withdrawal-id] [steem-txid] [op-index] 
 | `steem-block` | Steem block number the payout was included in |
 | `steem-timestamp` | The Steem block timestamp |
 
+**Deadline — pay this out within `withdrawal_timeout_blocks` (default: 3.5 days) or the chain
+auto-refunds it.** If no payout attestation reaches 2/3 within that window, `Keeper.
+RefundExpiredWithdrawals` automatically re-mints the net amount and returns it to the sender —
+**no validator attestation, gateway operator action, or governance vote required.** This is a
+deliberate design choice: it puts the burden on validators/gateway operators to relay withdrawals
+promptly rather than leaving user funds stuck indefinitely. It also means a very late payout (one
+that lands on Steem just after the refund already fired) risks a double payout — the late
+`attest-withdrawal-payout` still succeeds as a no-op, but does **not** undo the refund. Once
+`WITHDRAWAL_STATUS_REFUNDED`, a withdrawal can never become `PROCESSED`. Check
+`query steembridge get-withdrawal <id>` before relaying a payout you're unsure is still pending.
+
 ### `submit-name-registration` — name-service attestation
 
 ```sh
@@ -128,6 +139,7 @@ steemvmd query steembridge pending-deposits
 steemvmd query steembridge minted-deposits
 steemvmd query steembridge requested-withdrawals
 steemvmd query steembridge processed-withdrawals
+steemvmd query steembridge get-withdrawal <id>          # check REQUESTED/PROCESSED/REFUNDED status
 steemvmd query steembridge name-registration-by-txid <txid> <op-index>
 steemvmd query steembridge resolve-name <steem-account>
 steemvmd query steembridge bridge-statistics

@@ -47,4 +47,10 @@ message Params {
   // both deposits and bridge-outs, for both assets. The fee is routed to the
   // staking reward pool. Must be <= 10000.
   uint32 bridge_fee_bps = 12;
+  // withdrawal_timeout_blocks bounds how long a bridge-out withdrawal may sit
+  // REQUESTED before it is automatically refunded (net amount re-minted and
+  // returned to sender) with no validator attestation required — see
+  // Keeper.RefundExpiredWithdrawals. Must be positive while bridge_out is
+  // enabled.
+  uint64 withdrawal_timeout_blocks = 13;
 }

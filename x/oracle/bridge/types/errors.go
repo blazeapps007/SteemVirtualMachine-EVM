@@ -34,6 +34,7 @@ var (
 	ErrWithdrawalAlreadyProcessed      = errors.Register(ModuleName, 1120, "withdrawal already processed")
 	ErrDuplicateWithdrawalConfirmation = errors.Register(ModuleName, 1121, "validator has already attested this withdrawal payout")
 	ErrWithdrawalPayoutMismatch        = errors.Register(ModuleName, 1122, "withdrawal payout attestation does not match the recorded payout facts")
+	ErrWithdrawalAlreadyRefunded       = errors.Register(ModuleName, 1123, "withdrawal already refunded (timeout expired before payout was attested)")
 )
 
 // IsBenignAttestationError reports whether an acceptance error represents a
@@ -56,5 +57,6 @@ func IsBenignAttestationError(err error) bool {
 		goerrors.Is(err, ErrRegistrationAlreadyResolved) ||
 		goerrors.Is(err, ErrDuplicateConfirmation) ||
 		goerrors.Is(err, ErrWithdrawalAlreadyProcessed) ||
+		goerrors.Is(err, ErrWithdrawalAlreadyRefunded) ||
 		goerrors.Is(err, ErrDuplicateWithdrawalConfirmation)
 }

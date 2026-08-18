@@ -13,7 +13,17 @@ const (
 	EventTypeWithdrawalConfirmed         = "withdrawal_confirmed"
 	EventTypeWithdrawalPayoutMismatch    = "withdrawal_payout_mismatch"
 	EventTypeWithdrawalProcessed         = "withdrawal_processed"
-	EventTypeParametersUpdated           = "parameters_updated"
+	// EventTypeWithdrawalRefunded is emitted by the EndBlock timeout sweep
+	// (Keeper.RefundExpiredWithdrawals) — no validator attestation involved.
+	EventTypeWithdrawalRefunded = "withdrawal_refunded"
+	// EventTypeWithdrawalPayoutAttestedAfterRefund fires when a
+	// MsgAttestWithdrawalPayout arrives for a withdrawal already REFUNDED —
+	// a benign no-op for the tx, but a loud audit signal that the payout
+	// apparently did land on Steem after all, just after the timeout refund
+	// already fired (the double-spend risk the timeout-refund design
+	// deliberately accepts).
+	EventTypeWithdrawalPayoutAttestedAfterRefund = "withdrawal_payout_attested_after_refund"
+	EventTypeParametersUpdated                   = "parameters_updated"
 
 	EventTypeNameRegistrationCreated     = "name_registration_created"
 	EventTypeNameRegistrationConfirmed   = "name_registration_confirmed"

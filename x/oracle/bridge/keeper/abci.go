@@ -83,6 +83,114 @@ func (k Keeper) ExpireDeposits(ctx context.Context) error {
 	return nil
 }
 
+// RefundExpiredWithdrawals sweeps REQUESTED withdrawals whose confirmation
+// window (Params.WithdrawalTimeoutBlocks) has elapsed without reaching the
+// payout-attestation threshold, and automatically refunds them: the net
+// amount is re-minted into STEEMBLACKHOLE and sent to the original sender,
+// exactly reversing the "net -> STEEMBLACKHOLE" step BridgeOut performed
+// (see msg_server_bridge_out.go). No validator attestation is required for
+// the refund itself — this is a deliberate operational choice (validators
+// are expected to relay payouts promptly; 3.5 days is ample), accepted
+// alongside the risk it implies: a payout that still lands on Steem after
+// the refund fires produces a benign, silently-accepted-but-audit-logged
+// late MsgAttestWithdrawalPayout (see that handler's REFUNDED branch)
+// rather than a chain error or a double payment from this side. The bridge
+// fee already routed to bridge_reward at BridgeOut time is NOT refunded —
+// only the net amount that actually entered STEEMBLACKHOLE is reversed.
+func (k Keeper) RefundExpiredWithdrawals(ctx context.Context) error {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	height := uint64(sdkCtx.BlockHeight())
+
+	params, err := k.Params.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if params.WithdrawalTimeoutBlocks == 0 {
+		return nil
+	}
+
+	// Collect candidates first: mutating the REQUESTED status index bucket
+	// while walking it would be unsafe.
+	var expiredIDs []uint64
+	err = k.WithdrawalByStatus.Walk(
+		ctx,
+		collections.NewPrefixedPairRange[int32, uint64](int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED)),
+		func(key collections.Pair[int32, uint64]) (bool, error) {
+			withdrawal, err := k.Withdrawal.Get(ctx, key.K2())
+			if err != nil {
+				return false, err
+			}
+			if withdrawal.CreatedAt+params.WithdrawalTimeoutBlocks < height {
+				expiredIDs = append(expiredIDs, key.K2())
+			}
+			return false, nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, id := range expiredIDs {
+		withdrawal, err := k.Withdrawal.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		senderAddr, err := k.addressCodec.StringToBytes(withdrawal.Sender)
+		if err != nil {
+			return err
+		}
+		denom := types.DenomForAsset(withdrawal.Asset)
+		netAmt := types.MillisteemToAsteem(withdrawal.AmountMillisteem)
+
+		if netAmt.IsPositive() {
+			if err := k.bankKeeper.MintCoins(ctx, types.BlackHoleModuleName, sdk.NewCoins(sdk.NewCoin(denom, netAmt))); err != nil {
+				return err
+			}
+			if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.BlackHoleModuleName, senderAddr, sdk.NewCoins(sdk.NewCoin(denom, netAmt))); err != nil {
+				return err
+			}
+		}
+
+		// A refund is economically a mint (new supply re-enters circulation),
+		// so it is tracked in the same TotalMinted* counters as a real bridge-in
+		// — there is no separate "refunded" stat.
+		totals, err := k.Totals.Get(ctx)
+		if err != nil {
+			return err
+		}
+		if withdrawal.Asset == types.BridgeAsset_BRIDGE_ASSET_SBD {
+			totals.TotalMintedAsbd = totals.TotalMintedAsbd.Add(netAmt)
+		} else {
+			totals.TotalMintedAsteem = totals.TotalMintedAsteem.Add(netAmt)
+		}
+		if err := k.Totals.Set(ctx, totals); err != nil {
+			return err
+		}
+
+		if err := k.WithdrawalByStatus.Remove(ctx, collections.Join(int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED), id)); err != nil {
+			return err
+		}
+		withdrawal.Status = types.WithdrawalStatus_WITHDRAWAL_STATUS_REFUNDED
+		withdrawal.RefundedAt = height
+		if err := k.WithdrawalByStatus.Set(ctx, collections.Join(int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REFUNDED), id)); err != nil {
+			return err
+		}
+		if err := k.Withdrawal.Set(ctx, id, withdrawal); err != nil {
+			return err
+		}
+
+		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeWithdrawalRefunded,
+			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(id, 10)),
+			sdk.NewAttribute(types.AttributeKeyDestination, withdrawal.Sender),
+			sdk.NewAttribute(types.AttributeKeyAmount, netAmt.String()),
+		))
+	}
+
+	return nil
+}
+
 // ExpireNameRegistrations sweeps name registrations whose current phase has
 // outlived Params.NamePendingTimeoutBlocks. The window applies to each phase
 // separately: PENDING registrations are measured from CreatedAt, and
