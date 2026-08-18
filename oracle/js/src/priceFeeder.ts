@@ -24,9 +24,10 @@ export interface PriceSource {
 }
 
 /** Dispatches each whitelisted pair to the source that actually prices it:
- * CoinMarketCap for STEEM/USD and SBD/USD, the Steem RPC node for STEEM/SBD
- * and STEEM/FEED — see oracle/PROTOCOL.md §7's price source → pair mapping.
- * Mirrors oracle/go/relayer/pricesource.go's CompositePriceSource. */
+ * CoinMarketCap for STEEM/USD_External and SBD/USD_External, the Steem RPC
+ * node for STEEM/SBD_Internal and Price_Feed — see oracle/PROTOCOL.md §7's
+ * price source → pair mapping. Mirrors oracle/go/relayer/pricesource.go's
+ * CompositePriceSource. */
 export class CompositePriceSource implements PriceSource {
   constructor(
     private readonly cmc: CMCClient | undefined,
@@ -37,21 +38,23 @@ export class CompositePriceSource implements PriceSource {
     const want = new Set(pairs);
     const out: Record<string, string> = {};
 
-    if (this.cmc && (want.has("STEEM/USD") || want.has("SBD/USD"))) {
+    if (this.cmc && (want.has("STEEM/USD_External") || want.has("SBD/USD_External"))) {
       const symbols: string[] = [];
-      if (want.has("STEEM/USD")) symbols.push("STEEM");
-      if (want.has("SBD/USD")) symbols.push("SBD");
+      if (want.has("STEEM/USD_External")) symbols.push("STEEM");
+      if (want.has("SBD/USD_External")) symbols.push("SBD");
       try {
         const prices = await this.cmc.fetchUsdPrices(symbols);
-        if (want.has("STEEM/USD") && prices.STEEM !== undefined) out["STEEM/USD"] = prices.STEEM;
-        if (want.has("SBD/USD") && prices.SBD !== undefined) out["SBD/USD"] = prices.SBD;
+        if (want.has("STEEM/USD_External") && prices.STEEM !== undefined) out["STEEM/USD_External"] = prices.STEEM;
+        if (want.has("SBD/USD_External") && prices.SBD !== undefined) out["SBD/USD_External"] = prices.SBD;
       } catch {
         // omit both — one flaky upstream should never block Steem-sourced pairs
       }
     }
 
     if (this.steem) {
-      const steemPrices = await this.steem.fetchPrices([...want].filter((p) => p === "STEEM/SBD" || p === "STEEM/FEED"));
+      const steemPrices = await this.steem.fetchPrices(
+        [...want].filter((p) => p === "STEEM/SBD_Internal" || p === "Price_Feed"),
+      );
       Object.assign(out, steemPrices);
     }
 

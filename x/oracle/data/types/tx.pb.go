@@ -133,7 +133,7 @@ type MsgAggregateExchangeRateVote struct {
 	// salt is the reveal salt used to compute the prevote hash.
 	Salt string `protobuf:"bytes,2,opt,name=salt,proto3" json:"salt,omitempty"`
 	// exchange_rates is a comma-separated list of "PAIR:rate" entries,
-	// e.g. "STEEM/USD:1.23,STEEM/SBD:0.98".
+	// e.g. "STEEM/USD_External:1.23,STEEM/SBD_Internal:0.98".
 	ExchangeRates string `protobuf:"bytes,3,opt,name=exchange_rates,json=exchangeRates,proto3" json:"exchange_rates,omitempty"`
 }
 

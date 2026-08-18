@@ -24,7 +24,7 @@ func GetAggregateVoteHash(salt, exchangeRates, validator string) string {
 }
 
 // ParseExchangeRateTuples parses a "PAIR:rate,PAIR:rate" string into tuples.
-// A pair itself may contain a "/" (e.g. "STEEM/USD") but never a ":", so each
+// A pair itself may contain a "/" (e.g. "STEEM/USD_External") but never a ":", so each
 // entry is split on its final ":" — everything before is the pair, everything
 // after is the decimal rate. An empty input yields an empty slice.
 func ParseExchangeRateTuples(exchangeRates string) ([]ExchangeRateTuple, error) {

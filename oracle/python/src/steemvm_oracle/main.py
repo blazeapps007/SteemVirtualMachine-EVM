@@ -16,7 +16,7 @@ Configuration is entirely from environment variables (see ``oracle/.env.example`
                            (default 0 = use the chain's relayer_start_block anchor)
     ORACLE_SBD_SYMBOL     Steem symbol that counts as bridgeable SBD (e.g. "SBD");
                            empty (default) disables SBD bridging -- the v0.0.3 feature-gate
-    ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD + SBD/USD.
+    ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD_External + SBD/USD_External.
                            Empty skips those two pairs (see oracle/PROTOCOL.md SS7).
     ORACLE_CMC_BASE_URL   CoinMarketCap API base URL (default the production API)
     ORACLE_GAS_PRICES     required to activate the price feeder at all -- price-feed
@@ -122,7 +122,7 @@ def build_price_source(env: dict, steem_rpc: str) -> tuple[Optional[CompositePri
     if cmc_key:
         cmc = CMCClient(cmc_key, _env(env, "ORACLE_CMC_BASE_URL"))
     else:
-        logger.info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD and SBD/USD will be skipped")
+        logger.info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD_External and SBD/USD_External will be skipped")
 
     steem_source = SteemPriceSource(SteemClient(steem_rpc))
     logger.info("price feeder enabled: gas_prices=%s", gas_prices)

@@ -21,9 +21,9 @@ IOracleData constant ORACLEDATA_CONTRACT = IOracleData(ORACLEDATA_PRECOMPILE_ADD
 interface IOracleData {
     /**
      * @dev getPrice returns the latest finalized rate for a currency pair
-     * (e.g. "STEEM/USD"). An unknown or not-yet-finalized pair returns all zeros
+     * (e.g. "STEEM/USD_External"). An unknown or not-yet-finalized pair returns all zeros
      * rather than reverting — probe with `rate != 0` (no real rate is 0).
-     * @param pair The currency pair, e.g. "STEEM/USD".
+     * @param pair The currency pair, e.g. "STEEM/USD_External".
      * @return rate The 18-decimal fixed-point rate.
      * @return updateEpoch The vote epoch (height / vote period) the rate was set.
      * @return updateTime The block time (unix seconds) the rate was set.

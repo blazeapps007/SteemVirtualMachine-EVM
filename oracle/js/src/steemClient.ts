@@ -113,7 +113,7 @@ export class SteemClient {
   }
 
   /** Steem's internal-market last-trade price — SBD per STEEM, i.e. the
-   * STEEM/SBD pair (see oracle/PROTOCOL.md §7) — via
+   * STEEM/SBD_Internal pair (see oracle/PROTOCOL.md §7) — via
    * condenser_api.get_ticker's "latest" field. */
   async getTicker(): Promise<string> {
     const resp = await this.call<{ latest: string }>("condenser_api.get_ticker", []);
@@ -121,7 +121,7 @@ export class SteemClient {
   }
 
   /** Steem's current witness-median feed price — SBD per STEEM, i.e. the
-   * STEEM/FEED pair — via condenser_api.get_feed_history's
+   * Price_Feed pair — via condenser_api.get_feed_history's
    * current_median_history base/quote pair. */
   async getFeedHistory(): Promise<string> {
     const resp = await this.call<{

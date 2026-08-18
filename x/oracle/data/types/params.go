@@ -19,8 +19,13 @@ var DefaultRewardBand math.LegacyDec = math.LegacyMustNewDecFromStr("0.02")
 // DefaultMissBand is the default ± band outside which a vote is a price-duty miss.
 var DefaultMissBand math.LegacyDec = math.LegacyMustNewDecFromStr("0.03")
 
-// DefaultWhitelist is the default set of voted pairs.
-var DefaultWhitelist = []string{"STEEM/USD", "STEEM/SBD", "SBD/USD", "STEEM/FEED"}
+// DefaultWhitelist is the default set of voted pairs. STEEM/USD_External,
+// STEEM/SBD_Internal, and SBD/USD_External are market pairs (external CMC
+// price or Steem's own internal market, per the _External/_Internal suffix);
+// Price_Feed is deliberately NOT pair-shaped — it's Steem's own witness-median
+// feed price (via get_feed_history), a single blockchain-native value, not a
+// tradeable market rate. See oracle/PROTOCOL.md §7 for the full mapping.
+var DefaultWhitelist = []string{"STEEM/USD_External", "STEEM/SBD_Internal", "SBD/USD_External", "Price_Feed"}
 
 // NewParams creates a new Params instance.
 func NewParams(

@@ -29,7 +29,7 @@ export interface MsgAggregateExchangeRateVote {
   salt: string;
   /**
    * exchange_rates is a comma-separated list of "PAIR:rate" entries,
-   * e.g. "STEEM/USD:1.23,STEEM/SBD:0.98".
+   * e.g. "STEEM/USD_External:1.23,STEEM/SBD_Internal:0.98".
    */
   exchangeRates: string;
 }

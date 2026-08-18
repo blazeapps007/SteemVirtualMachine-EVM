@@ -96,7 +96,7 @@ tx oracledata aggregate-exchange-rate-prevote [validator] [hash] --gas-prices 10
 `oracle/PROTOCOL.md` §7). Compute it by hand for a one-off manual vote, e.g. in a shell:
 
 ```sh
-python3 -c "import hashlib; print(hashlib.sha256(b'MYSALT123:STEEM/USD:0.250000000000000000:steem1...').hexdigest()[:40])"
+python3 -c "import hashlib; print(hashlib.sha256(b'MYSALT123:STEEM/USD_External:0.250000000000000000:steem1...').hexdigest()[:40])"
 ```
 
 ### `aggregate-exchange-rate-vote` — reveal
@@ -111,10 +111,13 @@ missing the one-period reveal window, is rejected. `exchange-rates` is a sorted 
 CSV, e.g.:
 
 ```
-SBD/USD:1.010000000000000000,STEEM/FEED:0.245000000000000000,STEEM/SBD:0.248000000000000000,STEEM/USD:0.250000000000000000
+Price_Feed:0.245000000000000000,SBD/USD_External:1.010000000000000000,STEEM/SBD_Internal:0.248000000000000000,STEEM/USD_External:0.250000000000000000
 ```
 
-Whitelist: `STEEM/USD`, `STEEM/SBD`, `SBD/USD`, `STEEM/FEED`.
+Whitelist: `STEEM/USD_External`, `STEEM/SBD_Internal`, `SBD/USD_External`, `Price_Feed`. The
+`_External`/`_Internal` suffixes mark market pairs by source (external CoinMarketCap price vs.
+Steem's own internal market); `Price_Feed` isn't pair-shaped at all — it's Steem's own
+witness-median feed price (a single blockchain-native value, not a tradeable rate).
 
 ## 3. Query commands (verification)
 
@@ -131,7 +134,7 @@ steemvmd query steembridge bridge-statistics
 
 # Price feed
 steemvmd query oracledata params
-steemvmd query oracledata exchange-rate <pair>          # e.g. STEEM/USD
+steemvmd query oracledata exchange-rate <pair>          # e.g. STEEM/USD_External
 steemvmd query oracledata exchange-rates
 steemvmd query oracledata aggregate-prevote <validator>
 steemvmd query oracledata aggregate-vote <validator>

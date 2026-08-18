@@ -85,8 +85,14 @@ class TestParseLegacyDec:
 
 class TestExchangeRatesStringOrdering:
     """PROTOCOL.md SS7: pairs sorted lexicographically ascending -- plain
-    byte/codepoint sort: SBD/USD < STEEM/FEED < STEEM/SBD < STEEM/USD."""
+    byte/codepoint sort. Price_Feed sorts FIRST ('P' < 'S'):
+    Price_Feed < SBD/USD_External < STEEM/SBD_Internal < STEEM/USD_External."""
 
     def test_whitelist_sort_order(self):
-        pairs = ["STEEM/USD", "STEEM/SBD", "SBD/USD", "STEEM/FEED"]
-        assert sorted(pairs) == ["SBD/USD", "STEEM/FEED", "STEEM/SBD", "STEEM/USD"]
+        pairs = ["STEEM/USD_External", "STEEM/SBD_Internal", "SBD/USD_External", "Price_Feed"]
+        assert sorted(pairs) == [
+            "Price_Feed",
+            "SBD/USD_External",
+            "STEEM/SBD_Internal",
+            "STEEM/USD_External",
+        ]

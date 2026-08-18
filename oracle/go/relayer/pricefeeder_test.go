@@ -23,13 +23,15 @@ func dec(s string) math.LegacyDec { return math.LegacyMustNewDecFromStr(s) }
 
 func TestBuildExchangeRatesString(t *testing.T) {
 	// Pairs must come out sorted regardless of map order, so every honest feeder
-	// produces the identical string (and thus commit hash).
+	// produces the identical string (and thus commit hash). Price_Feed sorts
+	// before the market pairs ('P' < 'S') — this test exercises that too.
 	got := BuildExchangeRatesString(map[string]math.LegacyDec{
-		"STEEM/USD": dec("0.25"),
-		"SBD/USD":   dec("1.02"),
-		"STEEM/SBD": dec("0.245098"),
+		"STEEM/USD_External": dec("0.25"),
+		"SBD/USD_External":   dec("1.02"),
+		"STEEM/SBD_Internal": dec("0.245098"),
+		"Price_Feed":         dec("0.248"),
 	})
-	require.Equal(t, "SBD/USD:1.020000000000000000,STEEM/SBD:0.245098000000000000,STEEM/USD:0.250000000000000000", got)
+	require.Equal(t, "Price_Feed:0.248000000000000000,SBD/USD_External:1.020000000000000000,STEEM/SBD_Internal:0.245098000000000000,STEEM/USD_External:0.250000000000000000", got)
 
 	require.Equal(t, "", BuildExchangeRatesString(map[string]math.LegacyDec{}))
 }
@@ -39,7 +41,7 @@ func TestBuildExchangeRatesString(t *testing.T) {
 // (types.GetAggregateVoteHash) — otherwise every vote is rejected on-chain.
 func TestFeederHashRoundTrip(t *testing.T) {
 	const validator = "steemvaloper1abc"
-	rates := map[string]math.LegacyDec{"STEEM/USD": dec("0.25"), "SBD/USD": dec("1.00")}
+	rates := map[string]math.LegacyDec{"STEEM/USD_External": dec("0.25"), "SBD/USD_External": dec("1.00")}
 	exchangeRates := BuildExchangeRatesString(rates)
 	salt, err := NewSalt()
 	require.NoError(t, err)
@@ -59,10 +61,10 @@ func TestFeederHashRoundTrip(t *testing.T) {
 }
 
 func TestFeederStepCommitReveal(t *testing.T) {
-	whitelist := []string{"STEEM/USD", "SBD/USD"}
+	whitelist := []string{"STEEM/USD_External", "SBD/USD_External"}
 	feeder := Feeder{
 		Validator: "steemvaloper1abc",
-		Source:    stubSource{rates: map[string]math.LegacyDec{"STEEM/USD": dec("0.25"), "SBD/USD": dec("1.00")}},
+		Source:    stubSource{rates: map[string]math.LegacyDec{"STEEM/USD_External": dec("0.25"), "SBD/USD_External": dec("1.00")}},
 	}
 
 	// Period 10: nothing to reveal (empty prior state), one fresh prevote.
@@ -88,10 +90,10 @@ func TestFeederStepCommitReveal(t *testing.T) {
 }
 
 func TestFeederStepStaleCommitNotRevealed(t *testing.T) {
-	feeder := Feeder{Validator: "v", Source: stubSource{rates: map[string]math.LegacyDec{"STEEM/USD": dec("0.25")}}}
+	feeder := Feeder{Validator: "v", Source: stubSource{rates: map[string]math.LegacyDec{"STEEM/USD_External": dec("0.25")}}}
 	// A commit from period 8 is stale at period 11 (missed the period-9 window):
 	// only a fresh prevote is emitted, the stale commit is dropped.
-	msgs, _, err := feeder.Step(11, []string{"STEEM/USD"}, FeederState{PrevotePeriod: 8, Salt: "x", ExchangeRates: "STEEM/USD:0.25"})
+	msgs, _, err := feeder.Step(11, []string{"STEEM/USD_External"}, FeederState{PrevotePeriod: 8, Salt: "x", ExchangeRates: "STEEM/USD_External:0.25"})
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	_, isPrevote := msgs[0].(*oracledatatypes.MsgAggregateExchangeRatePrevote)
@@ -102,8 +104,8 @@ func TestFeederStepIdleWithoutSource(t *testing.T) {
 	// No source configured (the shipped default while sources are deferred): the
 	// feeder still reveals a pending commit but never prevotes.
 	feeder := Feeder{Validator: "v", Source: nil}
-	prev := FeederState{PrevotePeriod: 4, Salt: "s", ExchangeRates: "STEEM/USD:0.25"}
-	msgs, state, err := feeder.Step(5, []string{"STEEM/USD"}, prev)
+	prev := FeederState{PrevotePeriod: 4, Salt: "s", ExchangeRates: "STEEM/USD_External:0.25"}
+	msgs, state, err := feeder.Step(5, []string{"STEEM/USD_External"}, prev)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	_, isVote := msgs[0].(*oracledatatypes.MsgAggregateExchangeRateVote)
@@ -112,7 +114,7 @@ func TestFeederStepIdleWithoutSource(t *testing.T) {
 
 	// A source that returns no prices also idles (a miss period).
 	feeder.Source = stubSource{rates: map[string]math.LegacyDec{}}
-	msgs, _, err = feeder.Step(10, []string{"STEEM/USD"}, FeederState{})
+	msgs, _, err = feeder.Step(10, []string{"STEEM/USD_External"}, FeederState{})
 	require.NoError(t, err)
 	require.Empty(t, msgs)
 }

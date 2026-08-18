@@ -8,7 +8,7 @@ option go_package = "steemvm/x/oracle/data/types";
 // ExchangeRate is the finalized on-chain price for a whitelisted pair, set each
 // vote period from the power-weighted median of validator votes.
 message ExchangeRate {
-  // pair is the currency pair, e.g. "STEEM/USD".
+  // pair is the currency pair, e.g. "STEEM/USD_External".
   string pair = 1;
   // rate is the power-weighted median price.
   string rate = 2 [

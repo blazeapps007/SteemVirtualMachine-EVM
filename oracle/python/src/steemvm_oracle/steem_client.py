@@ -95,7 +95,7 @@ class SteemClient:
         return blocks
 
     def get_ticker(self) -> Decimal:
-        """STEEM/SBD (Steem's internal-market last-trade price) via
+        """STEEM/SBD_Internal (Steem's internal-market last-trade price) via
         condenser_api.get_ticker's "latest" field."""
         resp = self._call("condenser_api.get_ticker")
         latest = (resp or {}).get("latest", "")
@@ -105,7 +105,7 @@ class SteemClient:
             raise SteemRpcError(f"steem rpc: invalid ticker latest price {latest!r}: {exc}") from exc
 
     def get_feed_history(self) -> Decimal:
-        """STEEM/FEED (Steem's witness-median feed price) via
+        """Price_Feed (Steem's witness-median feed price) via
         condenser_api.get_feed_history's current_median_history base/quote
         pair (e.g. base "0.250 SBD", quote "1.000 STEEM" -> price 0.25)."""
         resp = self._call("condenser_api.get_feed_history")

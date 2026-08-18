@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   if (cfg.gasPrices) {
     const cmc = cfg.cmcApiKey ? new CMCClient(cfg.cmcApiKey, cfg.cmcBaseUrl || undefined) : undefined;
     if (!cmc) {
-      logger.info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD and SBD/USD will be skipped");
+      logger.info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD_External and SBD/USD_External will be skipped");
     }
     const steemPriceSource = new SteemPriceSource(new SteemClient(cfg.steemRpcUrl));
     priceSource = new CompositePriceSource(cmc, steemPriceSource);

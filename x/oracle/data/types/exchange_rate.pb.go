@@ -27,7 +27,7 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 // ExchangeRate is the finalized on-chain price for a whitelisted pair, set each
 // vote period from the power-weighted median of validator votes.
 type ExchangeRate struct {
-	// pair is the currency pair, e.g. "STEEM/USD".
+	// pair is the currency pair, e.g. "STEEM/USD_External".
 	Pair string `protobuf:"bytes,1,opt,name=pair,proto3" json:"pair,omitempty"`
 	// rate is the power-weighted median price.
 	Rate cosmossdk_io_math.LegacyDec `protobuf:"bytes,2,opt,name=rate,proto3,customtype=cosmossdk.io/math.LegacyDec" json:"rate"`

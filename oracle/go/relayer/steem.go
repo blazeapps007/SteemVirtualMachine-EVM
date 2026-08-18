@@ -293,7 +293,7 @@ func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway string) [
 }
 
 // GetTicker returns Steem's internal-market last-trade price — SBD per
-// STEEM, i.e. the STEEM/SBD pair (see oracle/PROTOCOL.md §7) — via
+// STEEM, i.e. the STEEM/SBD_Internal pair (see oracle/PROTOCOL.md §7) — via
 // condenser_api.get_ticker's "latest" field.
 func (c *SteemClient) GetTicker() (math.LegacyDec, error) {
 	var resp struct {
@@ -310,7 +310,7 @@ func (c *SteemClient) GetTicker() (math.LegacyDec, error) {
 }
 
 // GetFeedHistory returns Steem's current witness-median feed price — SBD per
-// STEEM, i.e. the STEEM/FEED pair (see oracle/PROTOCOL.md §7) — via
+// STEEM, i.e. the Price_Feed pair (see oracle/PROTOCOL.md §7) — via
 // condenser_api.get_feed_history's current_median_history base/quote pair
 // (e.g. base "0.250 SBD", quote "1.000 STEEM" → price 0.25).
 func (c *SteemClient) GetFeedHistory() (math.LegacyDec, error) {

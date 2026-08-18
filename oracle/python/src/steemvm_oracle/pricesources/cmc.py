@@ -1,5 +1,6 @@
-"""CoinMarketCap client, used only to price STEEM/USD and SBD/USD (Steem
-has no native USD market). Ports ``oracle/go/relayer/pricesource.go``'s
+"""CoinMarketCap client, used only to price STEEM/USD_External and
+SBD/USD_External (Steem has no native USD market). Ports
+``oracle/go/relayer/pricesource.go``'s
 ``CMCClient``. Configured via ``ORACLE_CMC_API_KEY``/``ORACLE_CMC_BASE_URL``
 -- see ``oracle/.env.example``.
 """

@@ -21,7 +21,7 @@ from typing import Optional, Sequence
 from . import _protopath  # noqa: F401
 from .decimal_fmt import legacy_dec_string
 from .pricesources.cmc import CMCClient
-from .pricesources.steem_prices import PAIR_STEEM_FEED, PAIR_STEEM_SBD, SteemPriceSource
+from .pricesources.steem_prices import PAIR_PRICE_FEED, PAIR_STEEM_SBD_INTERNAL, SteemPriceSource
 from .signing import (
     TYPE_URL_AGGREGATE_EXCHANGE_RATE_PREVOTE,
     TYPE_URL_AGGREGATE_EXCHANGE_RATE_VOTE,
@@ -31,8 +31,8 @@ from .state import FeederState
 
 from steemvm.oracle.data.v1 import tx_pb2 as oracledata_tx_pb2  # noqa: E402
 
-PAIR_STEEM_USD = "STEEM/USD"
-PAIR_SBD_USD = "SBD/USD"
+PAIR_STEEM_USD = "STEEM/USD_External"
+PAIR_SBD_USD = "SBD/USD_External"
 
 # Aggregate vote hash hex length (20 bytes) -- matches
 # x/oracle/data/types/vote.go's aggregateVoteHashLen.
@@ -41,9 +41,9 @@ AGGREGATE_VOTE_HASH_LEN = 40
 
 class CompositePriceSource:
     """Dispatches each whitelisted pair to the source that actually prices
-    it: CoinMarketCap for STEEM/USD and SBD/USD, the Steem RPC node for
-    STEEM/SBD and STEEM/FEED. Never raises: a source being ``None`` (not
-    configured) or failing for a given pair just omits that pair from the
+    it: CoinMarketCap for STEEM/USD_External and SBD/USD_External, the Steem
+    RPC node for STEEM/SBD_Internal and Price_Feed. Never raises: a source
+    being ``None`` (not configured) or failing for a given pair just omits that pair from the
     result -- one flaky upstream should never block the others, and a
     whole-cycle miss is already meaningful on its own (the unified slashing
     engine counts it as a price-duty miss)."""
@@ -72,7 +72,7 @@ class CompositePriceSource:
                 out[PAIR_SBD_USD] = prices["SBD"]
 
         if self.steem is not None:
-            steem_pairs = [p for p in (PAIR_STEEM_SBD, PAIR_STEEM_FEED) if p in want]
+            steem_pairs = [p for p in (PAIR_STEEM_SBD_INTERNAL, PAIR_PRICE_FEED) if p in want]
             if steem_pairs:
                 out.update(self.steem.fetch_prices(steem_pairs))
 

@@ -16,7 +16,8 @@ Each client performs the full validator oracle duty set:
 
 1. **Bridge attestation** — scans Steem for gateway transfers and payouts, submits
    `MsgAttestDeposit` / `MsgAttestWithdrawalPayout` / `MsgSubmitNameRegistration` to SteemVM.
-2. **Price feed** — sources STEEM/USD + SBD/USD from CoinMarketCap and STEEM/SBD + STEEM/FEED from
+2. **Price feed** — sources STEEM/USD_External + SBD/USD_External from CoinMarketCap and
+   STEEM/SBD_Internal + Price_Feed (Steem's own witness-median feed price) from
    the same Steem RPC node, and runs the commit-reveal `MsgAggregateExchangeRatePrevote` /
    `MsgAggregateExchangeRateVote` cycle.
 

@@ -11,10 +11,12 @@ import (
 )
 
 // CompositePriceSource implements PriceSource by dispatching each whitelisted
-// pair to the source that actually prices it: CoinMarketCap for STEEM/USD and
-// SBD/USD (Steem has no native USD market), and the SAME Steem RPC node used
-// for bridge scanning for STEEM/SBD (internal market) and STEEM/FEED (witness
-// feed) — see oracle/PROTOCOL.md §7 for the exact mapping.
+// pair to the source that actually prices it: CoinMarketCap for
+// STEEM/USD_External and SBD/USD_External (Steem has no native USD market),
+// and the SAME Steem RPC node used for bridge scanning for
+// STEEM/SBD_Internal (internal market) and Price_Feed (Steem's own
+// witness-median feed price — deliberately not pair-shaped, since it isn't a
+// tradeable market rate) — see oracle/PROTOCOL.md §7 for the exact mapping.
 //
 // FetchPrices never returns an error: a source being nil (not configured) or
 // failing for a given pair just omits that pair from the result, matching
@@ -24,8 +26,8 @@ import (
 // own (the unified slashing engine counts it as a price-duty miss) without
 // needing a distinct error path.
 type CompositePriceSource struct {
-	CMC   *CMCClient   // nil disables STEEM/USD and SBD/USD
-	Steem *SteemClient // nil disables STEEM/SBD and STEEM/FEED
+	CMC   *CMCClient   // nil disables STEEM/USD_External and SBD/USD_External
+	Steem *SteemClient // nil disables STEEM/SBD_Internal and Price_Feed
 }
 
 func (s CompositePriceSource) FetchPrices(pairs []string) (map[string]math.LegacyDec, error) {
@@ -35,40 +37,41 @@ func (s CompositePriceSource) FetchPrices(pairs []string) (map[string]math.Legac
 	}
 	out := make(map[string]math.LegacyDec, len(pairs))
 
-	if s.CMC != nil && (want["STEEM/USD"] || want["SBD/USD"]) {
+	if s.CMC != nil && (want["STEEM/USD_External"] || want["SBD/USD_External"]) {
 		var symbols []string
-		if want["STEEM/USD"] {
+		if want["STEEM/USD_External"] {
 			symbols = append(symbols, "STEEM")
 		}
-		if want["SBD/USD"] {
+		if want["SBD/USD_External"] {
 			symbols = append(symbols, "SBD")
 		}
 		if prices, err := s.CMC.FetchUSDPrices(symbols); err == nil {
-			if p, ok := prices["STEEM"]; ok && want["STEEM/USD"] {
-				out["STEEM/USD"] = p
+			if p, ok := prices["STEEM"]; ok && want["STEEM/USD_External"] {
+				out["STEEM/USD_External"] = p
 			}
-			if p, ok := prices["SBD"]; ok && want["SBD/USD"] {
-				out["SBD/USD"] = p
+			if p, ok := prices["SBD"]; ok && want["SBD/USD_External"] {
+				out["SBD/USD_External"] = p
 			}
 		}
 	}
 
-	if s.Steem != nil && want["STEEM/SBD"] {
+	if s.Steem != nil && want["STEEM/SBD_Internal"] {
 		if p, err := s.Steem.GetTicker(); err == nil {
-			out["STEEM/SBD"] = p
+			out["STEEM/SBD_Internal"] = p
 		}
 	}
-	if s.Steem != nil && want["STEEM/FEED"] {
+	if s.Steem != nil && want["Price_Feed"] {
 		if p, err := s.Steem.GetFeedHistory(); err == nil {
-			out["STEEM/FEED"] = p
+			out["Price_Feed"] = p
 		}
 	}
 
 	return out, nil
 }
 
-// CMCClient is a minimal CoinMarketCap client, used only to price STEEM/USD
-// and SBD/USD. Configured via ORACLE_CMC_API_KEY / ORACLE_CMC_BASE_URL — see
+// CMCClient is a minimal CoinMarketCap client, used only to price
+// STEEM/USD_External and SBD/USD_External. Configured via
+// ORACLE_CMC_API_KEY / ORACLE_CMC_BASE_URL — see
 // oracle/.env.example. A nil/empty apiKey means "not configured"; callers
 // should not construct a CMCClient in that case (see main.go).
 type CMCClient struct {

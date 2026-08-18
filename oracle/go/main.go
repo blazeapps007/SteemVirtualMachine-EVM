@@ -20,7 +20,7 @@
 //	ORACLE_START_BLOCK    fresh-scan start: a block number, or "latest" to start
 //	                      at Steem's current tip (new validators skip all history)
 //	                      (default 0 = use the chain's relayer_start_block anchor)
-//	ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD + SBD/USD.
+//	ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD_External + SBD/USD_External.
 //	                      Empty skips those two pairs (see oracle/PROTOCOL.md §7).
 //	ORACLE_CMC_BASE_URL   CoinMarketCap API base URL (default the production API)
 //	ORACLE_GAS_PRICES     required to activate the price feeder at all — price-feed
@@ -153,7 +153,7 @@ func run(logger log.Logger) error {
 		if cmcKey := strings.TrimSpace(os.Getenv("ORACLE_CMC_API_KEY")); cmcKey != "" {
 			cmc = relayer.NewCMCClient(cmcKey, strings.TrimSpace(os.Getenv("ORACLE_CMC_BASE_URL")))
 		} else {
-			logger.Info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD and SBD/USD will be skipped")
+			logger.Info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD_External and SBD/USD_External will be skipped")
 		}
 		priceSource = relayer.CompositePriceSource{
 			CMC:   cmc,

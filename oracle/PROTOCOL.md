@@ -129,9 +129,10 @@ From the reference relayer (`oracle/go/relayer/router.go`):
   {exchangeRates}:{validator}")`, **hex-encoded and truncated to the first 40 characters (20
   bytes)**. `validator` is the bech32 account address (§1).
 - Salt: 16 random bytes, hex-encoded (32 hex characters) — fresh per prevote.
-- `exchangeRates` string: pairs sorted **lexicographically ascending** (plain byte/codepoint sort:
-  `SBD/USD` < `STEEM/FEED` < `STEEM/SBD` < `STEEM/USD`), rendered as `PAIR:rate` and joined with
-  `,` — **no spaces**.
+- `exchangeRates` string: pairs sorted **lexicographically ascending** (plain byte/codepoint sort —
+  note `Price_Feed` sorts FIRST, since `'P' < 'S'`: `Price_Feed` < `SBD/USD_External` <
+  `STEEM/SBD_Internal` < `STEEM/USD_External`), rendered as `PAIR:rate` and joined with `,` — **no
+  spaces**.
 - Rate formatting — **`LegacyDec.String()` canonical decimal, reproduced exactly**: fixed 18
   decimal places, trailing zeros are **never trimmed**. E.g. `1.23` → `"1.230000000000000000"`,
   `0.5` → `"0.500000000000000000"`. A default "format as decimal" call in any language (Python
@@ -141,17 +142,22 @@ From the reference relayer (`oracle/go/relayer/router.go`):
   `ParseExchangeRateTuples` outright (loud, visible) or — worse — produces a *different* string
   than was hashed, which the chain rejects via `ErrHashVerification` on reveal (also loud, but only
   visible one full vote period after the mistake was made).
-- Whitelist: `STEEM/USD`, `STEEM/SBD`, `SBD/USD`, `STEEM/FEED`. Reject/drop any pair outside the
-  whitelist before building the string — the chain rejects a vote carrying a non-whitelisted pair.
+- Whitelist: `STEEM/USD_External`, `STEEM/SBD_Internal`, `SBD/USD_External`, `Price_Feed`.
+  Reject/drop any pair outside the whitelist before building the string — the chain rejects a vote
+  carrying a non-whitelisted pair. Note `Price_Feed` is deliberately NOT pair-shaped (no `/`) — it's
+  a single blockchain-native value (Steem's own witness-median feed price), not a tradeable market
+  rate, so it doesn't get a `BASE/QUOTE` label like the other three. The chain itself doesn't
+  enforce any naming format — `Whitelist` is just an opaque list of strings — so this labeling is
+  purely a convention this deployment's oracle clients agree on.
 
 ### Price source → pair mapping
 
 | Pair | Source |
 |---|---|
-| `STEEM/USD` | CoinMarketCap |
-| `SBD/USD` | CoinMarketCap |
-| `STEEM/SBD` | Steem `condenser_api.get_ticker`, latest-trade field (internal market) |
-| `STEEM/FEED` | Steem `condenser_api.get_feed_history`, witness median (`current_median_history`) |
+| `STEEM/USD_External` | CoinMarketCap |
+| `SBD/USD_External` | CoinMarketCap |
+| `STEEM/SBD_Internal` | Steem `condenser_api.get_ticker`, latest-trade field (internal market) |
+| `Price_Feed` | Steem `condenser_api.get_feed_history`, witness median (`current_median_history`) |
 
 CoinMarketCap: batch `STEEM`+`SBD` into one `quotes/latest?symbol=STEEM,SBD&convert=USD` call
 rather than two separate calls. Missing/failed pairs are dropped, not fatal — a partial price map
@@ -173,7 +179,7 @@ write to a temp file, then rename):
 **Price feeder state** (`<ORACLE_STATE_DIR>/price_feeder_state.json`, kept separate from the
 cursor file so the two duties' failure domains stay independent):
 ```json
-{ "prevote_period": 4821, "salt": "a1b2c3...", "exchange_rates": "SBD/USD:1.010000000000000000,..." }
+{ "prevote_period": 4821, "salt": "a1b2c3...", "exchange_rates": "Price_Feed:0.520000000000000000,..." }
 ```
 Empty/absent file means "nothing pending to reveal."
 
@@ -223,13 +229,16 @@ CvcBCvQBCigvc3RlZW12bS5zdGVlbWJyaWRnZS52MS5Nc2dBdHRlc3REZXBvc2l0EscBCixzdGVlbTEw
 ### Price-feed vector
 
 Fixed salt `a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6` and rate map
-`{STEEM/USD: "0.523", SBD/USD: "1.01", STEEM/SBD: "0.518", STEEM/FEED: "0.52"}`:
+`{STEEM/USD_External: "0.523", SBD/USD_External: "1.01", STEEM/SBD_Internal: "0.518", Price_Feed: "0.52"}`:
 
 ```
-exchangeRates string: SBD/USD:1.010000000000000000,STEEM/FEED:0.520000000000000000,STEEM/SBD:0.518000000000000000,STEEM/USD:0.523000000000000000
+exchangeRates string: Price_Feed:0.520000000000000000,SBD/USD_External:1.010000000000000000,STEEM/SBD_Internal:0.518000000000000000,STEEM/USD_External:0.523000000000000000
 validator:             steem10e0525sfrf53yh2aljmm3sn9jq5njk7lj48rdt
-commit_hash (sha256, truncated 40 hex chars): c9c7edcdd06919d79282660da0bbe645e7c4153a
+commit_hash (sha256, truncated 40 hex chars): aa83a62ac7bebf100aa5d5690d2cbd6af8dbf679
 ```
+
+(Recomputed after the pair-name rename below §7 — `Price_Feed` now sorts first, changing both the
+string and the hash from the original vector.)
 
 **Status: offline vectors confirmed** (all key/address/signing-shape/price-hash values above were
 computed and independently re-verified, not assumed — see `oracle/js/test/signingVectors.test.ts`

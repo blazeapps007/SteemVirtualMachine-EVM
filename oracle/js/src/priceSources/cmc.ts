@@ -1,5 +1,5 @@
 // priceSources/cmc.ts — a minimal CoinMarketCap client, used only to price
-// STEEM/USD and SBD/USD. Mirrors oracle/go/relayer/pricesource.go's
+// STEEM/USD_External and SBD/USD_External. Mirrors oracle/go/relayer/pricesource.go's
 // CMCClient. Configured via ORACLE_CMC_API_KEY / ORACLE_CMC_BASE_URL.
 
 import { toLegacyDecString } from "../decimalFmt";
