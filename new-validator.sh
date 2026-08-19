@@ -40,6 +40,22 @@
 #   STAKE_AMOUNT, COMMISSION_RATE, COMMISSION_MAX_RATE,
 #   COMMISSION_MAX_CHANGE_RATE, MIN_SELF_DELEGATION, GAS_PRICES,
 #   START_TIMEOUT, FUND_TIMEOUT, NAME_TIMEOUT, ORACLE_PROFILE
+
+# Re-exec under real bash if invoked as `sh new-validator.sh` (bypasses the
+# shebang above) — this script uses bash-only features (set -o pipefail,
+# arrays-free but still bash-specific parameter handling) that break under
+# a POSIX/BusyBox `sh` (e.g. Alpine's ash) with a cryptic
+# "Illegal option -o pipefail" rather than a clear error.
+if [ -z "${BASH_VERSION:-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash "$0" "$@"
+  else
+    echo "ERROR: this script requires bash (it uses 'set -o pipefail' and other bash-only features)." >&2
+    echo "Install it first, e.g.: apt install bash   /   apk add bash   /   yum install bash" >&2
+    exit 1
+  fi
+fi
+
 set -euo pipefail
 
 # ── config (override via env) ────────────────────────────────────────────────
