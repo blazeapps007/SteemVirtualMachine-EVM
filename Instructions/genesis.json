@@ -1,7 +1,7 @@
 {
   "app_name": "steemvmd",
   "app_version": "v0.0.3-Beta-2",
-  "genesis_time": "2026-08-19T00:12:40.937256982Z",
+  "genesis_time": "2026-08-19T00:58:41.263898825Z",
   "chain_id": "steemvm",
   "initial_height": 1,
   "app_hash": null,
@@ -19,7 +19,7 @@
       "accounts": [
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "steem1r6x0q5xc69y4xd9jwpjrj8s7vt6jq2xqeqxry5",
+          "address": "steem13md7r77ydgwyzrm2tus8c7mmxns2unwepsdncu",
           "pub_key": null,
           "account_number": "0",
           "sequence": "0"
@@ -36,7 +36,7 @@
       },
       "balances": [
         {
-          "address": "steem1r6x0q5xc69y4xd9jwpjrj8s7vt6jq2xqeqxry5",
+          "address": "steem13md7r77ydgwyzrm2tus8c7mmxns2unwepsdncu",
           "coins": [
             {
               "denom": "asbd",
@@ -61,29 +61,6 @@
       ],
       "denom_metadata": [
         {
-          "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
-          "denom_units": [
-            {
-              "denom": "asteem",
-              "exponent": 0,
-              "aliases": [
-                "attosteem"
-              ]
-            },
-            {
-              "denom": "steem",
-              "exponent": 18,
-              "aliases": []
-            }
-          ],
-          "base": "asteem",
-          "display": "steem",
-          "name": "Steem",
-          "symbol": "STEEM",
-          "uri": "",
-          "uri_hash": ""
-        },
-        {
           "description": "Bridged SBD",
           "denom_units": [
             {
@@ -103,6 +80,29 @@
           "display": "sbd",
           "name": "Steem Backed Dollar",
           "symbol": "SBD",
+          "uri": "",
+          "uri_hash": ""
+        },
+        {
+          "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
+          "denom_units": [
+            {
+              "denom": "asteem",
+              "exponent": 0,
+              "aliases": [
+                "attosteem"
+              ]
+            },
+            {
+              "denom": "steem",
+              "exponent": 18,
+              "aliases": []
+            }
+          ],
+          "base": "asteem",
+          "display": "steem",
+          "name": "Steem",
+          "symbol": "STEEM",
           "uri": "",
           "uri_hash": ""
         }
@@ -242,10 +242,10 @@
                 },
                 "min_self_delegation": "1",
                 "delegator_address": "",
-                "validator_address": "steemvaloper1r6x0q5xc69y4xd9jwpjrj8s7vt6jq2xqnnfslh",
+                "validator_address": "steemvaloper13md7r77ydgwyzrm2tus8c7mmxns2unwetrzqrl",
                 "pubkey": {
                   "@type": "/cosmos.crypto.ed25519.PubKey",
-                  "key": "TRw0+gQdDNFKBKs+GHuMOMOjen2fi4xPu0I/pDnjyOI="
+                  "key": "HmHOji03q05ofYJF3Qgk36IPEH1LAEmB5g5inmjfcnU="
                 },
                 "value": {
                   "denom": "asteem",
@@ -253,7 +253,7 @@
                 }
               }
             ],
-            "memo": "7bfe97a20d0a0b3862518fde262c13dd30b97413@57.131.13.43:26656",
+            "memo": "8905d0d5e2a00daddb0f78609a090ef8c31f2fb8@57.131.13.43:26656",
             "timeout_height": "0",
             "unordered": false,
             "timeout_timestamp": null,
@@ -265,7 +265,7 @@
               {
                 "public_key": {
                   "@type": "/cosmos.evm.crypto.v1.ethsecp256k1.PubKey",
-                  "key": "Aws8tmNXyHckiFOciYXuojo7lVbfWXxgC/gwdepVRImn"
+                  "key": "AsnvRqNmmZwdVj52LMfweIMZY1uyta4y7uhpPYeGoB8P"
                 },
                 "mode_info": {
                   "single": {
@@ -284,7 +284,7 @@
             "tip": null
           },
           "signatures": [
-            "ED4wEz8CobpUFW8rtbTGGbgkH3fnKiAgOGKnYDBhq71d/bXpTMbD8uJwBx3OAkII7HltSYhYqMCfttJo3RFaGAE="
+            "Q3f78hACCZ0aCvmKstoxd8Sr6843fJ6Mk+kj+x4MW0pKg4YTD7dhQOtXkkL9/poYrjUiXb5doZ6rDgaiDvNBrAE="
           ]
         }
       ]
@@ -495,7 +495,7 @@
           "gateway_account": "svm.bank",
           "amount_millisteem": "1",
           "memo": "genesis",
-          "derived_destination": "steem1r6x0q5xc69y4xd9jwpjrj8s7vt6jq2xqeqxry5",
+          "derived_destination": "steem13md7r77ydgwyzrm2tus8c7mmxns2unwepsdncu",
           "destination_type": "DESTINATION_TYPE_COSMOS",
           "status": "NAME_REGISTRATION_STATUS_ACTIVE",
           "created_at": "0",
@@ -509,7 +509,7 @@
       "active_name_list": [
         {
           "steem_account": "blazed007",
-          "address": "steem1r6x0q5xc69y4xd9jwpjrj8s7vt6jq2xqeqxry5",
+          "address": "steem13md7r77ydgwyzrm2tus8c7mmxns2unwepsdncu",
           "registration_id": "0",
           "linked_at": "0"
         }
