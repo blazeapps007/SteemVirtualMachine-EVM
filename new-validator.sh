@@ -290,10 +290,25 @@ echo
 log "Waiting for an already-bonded validator to attest it (timeout ${NAME_TIMEOUT}s)…"
 deadline=$(( $(date +%s) + NAME_TIMEOUT ))
 REG_ID=""
+poll_n=0
 while :; do
-  REG_ID="$(kf query steembridge awaiting-name-registrations-by-destination "$ADDR" --output json 2>/dev/null \
-              | grep -oE '"id":"[0-9]+"' | head -1 | grep -oE '[0-9]+' || true)"
-  [ -n "$REG_ID" ] && break
+  poll_n=$((poll_n + 1))
+  QOUT="$(kf query steembridge awaiting-name-registrations-by-destination "$ADDR" --output json 2>&1)"
+  QRC=$?
+  if [ $QRC -ne 0 ]; then
+    warn "query failed (exit $QRC), retrying: $QOUT"
+  else
+    REG_ID="$(printf '%s' "$QOUT" | grep -oE '"id":"[0-9]+"' | head -1 | grep -oE '[0-9]+' || true)"
+    [ -n "$REG_ID" ] && break
+    # Every 4th poll (~1min at the default 15s interval), print what the
+    # query actually returned — the two prior times this loop looked "stuck"
+    # despite a manual query on the side confirming the registration WAS
+    # ready, this is what would have shown whether it's a real parsing bug
+    # or just needing more time.
+    if [ $((poll_n % 4)) -eq 0 ]; then
+      log "still waiting ($(( $(date +%s) - (deadline - NAME_TIMEOUT) ))s elapsed) — last query returned: $QOUT"
+    fi
+  fi
   [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Send the transfer above (if you haven't), wait for a validator to attest it, then run: $BIN tx steembridge confirm-name <id> --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
   sleep 15
 done
