@@ -24,11 +24,14 @@
 #      persistent_peers/seeds come from Instructions/config.toml as already
 #      configured (not touched by this script — edit that file yourself if
 #      you need different peers)
-#   6. generates a brand-new SteemVM key via `steemvmd keys add <username>`
-#      (mnemonic is shown once, never written to disk) and prints + saves the
-#      resulting address to validator-address.txt
+#   6. generates a brand-new SteemVM key via `steemvmd keys add <username>`,
+#      saves the mnemonic to validator-mnemonic.txt (chmod 600, gitignored —
+#      it is only ever shown once by steemvmd itself, this is your only
+#      chance to capture it) and the address to validator-address.txt. Uses
+#      the `file` keyring backend by default (password-protected, prompts on
+#      every signing op — set KEYRING=test for the old unencrypted behavior)
 #   7. walks you through Steem-side name registration: prints the exact
-#      transfer to send from Steem (memo `svm-register <username>`), waits
+#      transfer to send from Steem (memo `svm-register <your-new-address>`), waits
 #      for an already-bonded validator to attest it, then automatically
 #      submits `confirm-name` itself once it's awaiting confirmation — this
 #      is the ante-gate identity requirement create-validator needs
@@ -77,7 +80,7 @@ HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # host-side path — must match docker-compose.yml's bind mount
 export STEEMVM_HOME    # docker-compose.yml's ${STEEMVM_HOME:-...} substitution needs this in the actual environment, not just a local shell var
 CHAIN_ID="${CHAIN_ID:-steemvm}"
-KEYRING="${KEYRING:-test}"
+KEYRING="${KEYRING:-file}"    # password-protected, prompts on every signing op (set KEYRING=test to go back to unencrypted/no-prompt, e.g. for CI)
 KEY_TYPE="${KEY_TYPE:-eth_secp256k1}"
 
 STAKE_AMOUNT="${STAKE_AMOUNT:-800000000000000000000asteem}"   # 800 STEEM
@@ -90,6 +93,7 @@ ORACLE_PROFILE="${ORACLE_PROFILE:-go}"     # go|python|js — which client to st
 
 VALIDATOR_JSON="${VALIDATOR_JSON:-validator.json}"       # written to repo root == /workspace
 ADDRESS_FILE="${ADDRESS_FILE:-validator-address.txt}"    # printed + saved here
+MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}" # chmod 600 — this IS the master recovery phrase, treat accordingly
 
 START_TIMEOUT="${START_TIMEOUT:-1800}"     # seconds, node build+boot
 NAME_TIMEOUT="${NAME_TIMEOUT:-1800}"       # seconds, waiting for name-registration attestation
@@ -109,6 +113,17 @@ kf_i() { node_i "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 command -v docker >/dev/null || die "docker not found on PATH"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
 [ -f docker-compose.yml ] || die "run this from the repository root (where docker-compose.yml lives) — validator.json must land in the mounted /workspace."
+
+# Clear any stale validator.json/address file from an earlier (possibly
+# interrupted, possibly for a different username entirely) run before we do
+# anything else. Without this, an interruption between here and step 9 leaves
+# a leftover validator.json around; running create-validator against it later
+# signs with the WRONG moniker/details from whatever ran last, not this run.
+if [ -f "$VALIDATOR_JSON" ] || [ -f "$ADDRESS_FILE" ] || [ -f "$MNEMONIC_FILE" ]; then
+  warn "removing stale $VALIDATOR_JSON / $ADDRESS_FILE / $MNEMONIC_FILE from an earlier run — this run regenerates them fresh."
+  warn "(if you didn't already back up an old $MNEMONIC_FILE's contents, do that FIRST — Ctrl-C now — it's about to be deleted.)"
+  rm -f "$VALIDATOR_JSON" "$ADDRESS_FILE" "$MNEMONIC_FILE"
+fi
 
 # ── 1. Steem username → moniker + key name ────────────────────────────────────
 read -rp "Steem username (becomes your validator moniker): " STEEM_USERNAME < /dev/tty
@@ -213,9 +228,29 @@ ok "Node is producing blocks (height $height)."
 
 # ── 6. generate a fresh SteemVM key and save the address ──────────────────────
 log "Generating a new SteemVM key '$STEEM_USERNAME' (steemvmd keys add)…"
-kf keys delete "$STEEM_USERNAME" -y >/dev/null 2>&1 || true
-node_i keys add "$STEEM_USERNAME" --key-type "$KEY_TYPE" --keyring-backend "$KEYRING" --home "$HOME_DIR"
-warn "^ SAVE THAT MNEMONIC NOW. It is shown once and is never written to disk."
+kf_i keys delete "$STEEM_USERNAME" -y || true    # no output redirect: a file/os-backend delete may prompt for the keyring passphrase, which must stay visible
+
+# Capture keys add's output via tee — the terminal still sees everything live
+# (including any keyring passphrase prompt for the file/os backend), while a
+# copy lands in a temp file for extraction. Mnemonics only get shown ONCE at
+# creation, so this is the only chance to save it — the discriminating regex
+# below (12-24 lowercase words on their own line) reliably isolates it
+# regardless of whether output is JSON or text, or what prompt text preceded it.
+TMP_KEYADD="$(mktemp)"
+node_i keys add "$STEEM_USERNAME" --key-type "$KEY_TYPE" --keyring-backend "$KEYRING" --home "$HOME_DIR" | tee "$TMP_KEYADD"
+MNEMONIC="$(grep -oE '^([a-z]+ ){11,23}[a-z]+$' "$TMP_KEYADD" | tail -1 || true)"
+rm -f "$TMP_KEYADD"
+
+if [ -n "$MNEMONIC" ]; then
+  printf '%s\n' "$MNEMONIC" > "$MNEMONIC_FILE"
+  chmod 600 "$MNEMONIC_FILE"
+  warn "Mnemonic saved to $MNEMONIC_FILE (chmod 600). This is the MASTER RECOVERY PHRASE for this validator's"
+  warn "funds — anyone who reads it has full control. Back it up somewhere safe (password manager, offline"
+  warn "storage) and consider deleting this file afterward. It is gitignored, but double-check before any commit."
+else
+  warn "COULD NOT AUTO-CAPTURE THE MNEMONIC — copy it manually from the 'keys add' output printed just above."
+  warn "It will never be shown again."
+fi
 
 ADDR="$(kf keys show "$STEEM_USERNAME" -a)"
 VALOPER="$(kf keys show "$STEEM_USERNAME" --bech val -a)"
@@ -235,7 +270,9 @@ MIN_STEEM="$(awk -v m="$MIN_MILLISTEEM" 'BEGIN{printf "%.3f", m/1000}')"
 log "Name registration required before create-validator will pass this chain's ante gate."
 echo
 echo "  From your Steem account '$STEEM_USERNAME', send at least $MIN_STEEM STEEM to 'svm.bank'"
-echo "  with memo EXACTLY:  svm-register $STEEM_USERNAME"
+echo "  with memo EXACTLY:  svm-register $ADDR"
+echo "  (the memo carries the DESTINATION SteemVM address, not your Steem username —"
+echo "   the relayer already knows the username from who sent the transfer)"
 echo
 log "Waiting for an already-bonded validator to attest it (timeout ${NAME_TIMEOUT}s)…"
 deadline=$(( $(date +%s) + NAME_TIMEOUT ))
@@ -291,13 +328,20 @@ cat > "$VALIDATOR_JSON" <<EOF
 EOF
 
 log "Creating the validator…"
+# node_i (not plain node) + tee, not a bare $(...) capture: the file/os
+# keyring backend prompts for a password to sign this, and that prompt needs
+# to actually reach the terminal live, not be swallowed into a variable.
+# pipefail (set at the top of this script) makes $? below reflect create-
+# validator's own exit code, not tee's (tee itself always succeeds).
+TMP_CREATEVAL="$(mktemp)"
 set +e
-OUT="$(node tx staking create-validator "/workspace/$VALIDATOR_JSON" \
-        --from "$STEEM_USERNAME" --keyring-backend "$KEYRING" --home "$HOME_DIR" \
-        --chain-id "$CHAIN_ID" --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y 2>&1)"
+node_i tx staking create-validator "/workspace/$VALIDATOR_JSON" \
+  --from "$STEEM_USERNAME" --keyring-backend "$KEYRING" --home "$HOME_DIR" \
+  --chain-id "$CHAIN_ID" --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y 2>&1 | tee "$TMP_CREATEVAL"
 rc=$?
 set -e
-echo "$OUT"
+OUT="$(cat "$TMP_CREATEVAL")"
+rm -f "$TMP_CREATEVAL"
 if [ $rc -ne 0 ] || echo "$OUT" | grep -qiE 'active name-service|different account|Description.details|public key'; then
   warn "create-validator did not succeed."
   warn "If it mentions the name service / details: double-check step 7 actually landed (query steembridge resolve-name $STEEM_USERNAME). Fix and re-run \`$BIN tx staking create-validator …\` manually (key and $VALIDATOR_JSON are ready)."
