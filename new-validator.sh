@@ -174,8 +174,8 @@ while [ -z "$CMC_KEY" ]; do
 done
 
 # ── 4. fetch the network's live genesis.json ───────────────────────────────────
-read -rp "Existing node's RPC to fetch genesis + sync from (e.g. http://1.2.3.4:26657): " SEED_RPC < /dev/tty
-[ -n "$SEED_RPC" ] || die "a seed node RPC address is required to fetch the network's live genesis."
+read -rp "Existing node's RPC to fetch genesis + sync from [https://svm-rpc.steemscanner.com]: " SEED_RPC < /dev/tty
+SEED_RPC="${SEED_RPC:-https://svm-rpc.steemscanner.com}"
 command -v curl >/dev/null 2>&1 || die "curl is required to fetch genesis from $SEED_RPC — install it first."
 command -v jq   >/dev/null 2>&1 || die "jq is required to extract genesis from the RPC response — install it first (apt install jq / apk add jq)."
 
