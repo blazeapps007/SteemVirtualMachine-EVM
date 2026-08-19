@@ -19,12 +19,22 @@ here.
 
 ## 1. Get a clean genesis.json
 
-Your current `~/.steemvm/config/genesis.json` has a corrupted `active_name_list` entry (the full
-`keys show` YAML output got written into the address field instead of just the address). Re-init
-with `--overwrite` to regenerate a clean `genesis.json` — **this does not touch your keyring**,
+Re-init with `--overwrite` to get a clean `genesis.json` — **this does not touch your keyring**,
 `blazed007` and its mnemonic stay exactly as they are.
 
 ```sh
+steemvmd init blazed007 --chain-id steemvm --home ~/.steemvm --overwrite
+```
+
+`--overwrite` only governs `genesis.json`. `config.toml` is unconditionally rewritten by every
+`init` call regardless of the flag (so `mempool.type` always ends up correct), but **`app.toml` is
+only written if it doesn't already exist yet** (`cosmos-sdk/server/util.go`, gated on
+`os.IsNotExist`) — if you have a stale `app.toml` sitting around from before this repo's binary
+started hardcoding `minimum-gas-prices`, `init --overwrite` will silently leave it as-is. If
+`steemvmd start` later complains `set min gas price in app.toml`, delete it and let it regenerate:
+
+```sh
+rm -f ~/.steemvm/config/app.toml
 steemvmd init blazed007 --chain-id steemvm --home ~/.steemvm --overwrite
 ```
 
@@ -83,24 +93,15 @@ jq '.app_state.steembridge.params.bridge_enabled = true
       ],
       "base": "asbd", "display": "sbd", "name": "Steem Backed Dollar",
       "symbol": "SBD", "uri": "", "uri_hash": ""
-    }]' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
+    }]
+  | .app_state.bank.denom_metadata |= unique_by(.base)' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
 ```
 
-If you already ran the old version of this step and only added `asbd`, you'll hit that panic on
-`steemvmd start` (it happens at `InitChain`, before anything commits, so it's always safe to just fix
-genesis and retry — no data reset needed). Patch forward with just the missing entry:
-
-```sh
-jq '.app_state.bank.denom_metadata += [{
-    "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
-    "denom_units": [
-      {"denom": "asteem", "exponent": 0, "aliases": ["attosteem"]},
-      {"denom": "steem", "exponent": 18, "aliases": []}
-    ],
-    "base": "asteem", "display": "steem", "name": "Steem", "symbol": "STEEM",
-    "uri": "", "uri_hash": ""
-  }]' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
-```
+The trailing `unique_by(.base)` makes this command idempotent — safe to run twice in a row, or to
+re-run later if you're not sure whether it already ran, without producing a `duplicate client
+metadata for denom asteem` error from `gentx`/`validate-genesis`. If you're fixing forward from that
+exact error (you ran an older two-step version of this guide and ended up with a duplicate), just
+run this same command again — the dedupe pass cleans it up regardless of how it got duplicated.
 
 ## 5. Seed blazed007's Steem name as ACTIVE
 
@@ -137,21 +138,20 @@ jq --arg addr "$ADDR" '.app_state.steembridge.name_registration_list += [{
     "confirm_tx_hash": "",
     "validator_confirmations": []
   }]
-  | .app_state.steembridge.name_registration_count = "1"
+  | .app_state.steembridge.name_registration_list |= unique_by(.id)
+  | .app_state.steembridge.name_registration_count = (.app_state.steembridge.name_registration_list | length | tostring)
   | .app_state.steembridge.active_name_list += [{
       "steem_account": "blazed007",
       "address": $addr,
       "registration_id": "0",
       "linked_at": "0"
-    }]' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
+    }]
+  | .app_state.steembridge.active_name_list |= unique_by(.steem_account)' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
 ```
 
-If you already ran the old version of this step and only have the `active_name_list` entry (no
-matching registration — i.e. you're fixing forward from the `references missing registration 0`
-error rather than starting fresh), it's safe to run the command above as-is: `+=` just appends the
-registration and re-adds an equivalent `active_name_list` entry. Only watch out for
-`duplicated steem account in active name list` — if that fires, your existing entry already has the
-right shape and you only needed the registration; drop the trailing `| .app_state.steembridge.active_name_list += [...]` clause and re-run.
+The trailing `unique_by(...)` passes make this safe to run more than once — if you're fixing forward
+from `references missing registration N` or `duplicated steem account in active name list`, just
+run this exact command again; the dedupe collapses whatever's already there back to one of each.
 
 Sanity-check both before moving on:
 
