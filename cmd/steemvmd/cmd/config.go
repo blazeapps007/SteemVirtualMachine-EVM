@@ -17,6 +17,11 @@ func initCometBFTConfig() *cmtcfg.Config {
 	// cfg.P2P.MaxNumInboundPeers = 100
 	// cfg.P2P.MaxNumOutboundPeers = 40
 
+	// cosmos/evm's EVM mempool takes over tx handling from CometBFT's default
+	// flood-gossip mempool; boot refuses to start ("EVM mempool enabled, but
+	// comet-bft has invalid config.toml:mempool.type") unless this is "app".
+	cfg.Mempool.Type = cmtcfg.MempoolTypeApp
+
 	return cfg
 }
 
