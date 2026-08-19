@@ -80,7 +80,10 @@ HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # host-side path — must match docker-compose.yml's bind mount
 export STEEMVM_HOME    # docker-compose.yml's ${STEEMVM_HOME:-...} substitution needs this in the actual environment, not just a local shell var
 CHAIN_ID="${CHAIN_ID:-steemvm}"
-KEYRING="${KEYRING:-file}"    # password-protected, prompts on every signing op (set KEYRING=test to go back to unencrypted/no-prompt, e.g. for CI)
+KEYRING="${KEYRING:-test}"    # unencrypted, no prompts — the only backend proven reliable through this script's automation.
+                               # Set KEYRING=file (or os) for a password-protected keyring instead, but know what
+                               # that costs here: EVERY keyring touch (not just signing — even reading your own
+                               # address) prompts for the password, repeatedly, throughout the rest of this script.
 KEY_TYPE="${KEY_TYPE:-eth_secp256k1}"
 
 STAKE_AMOUNT="${STAKE_AMOUNT:-800000000000000000000asteem}"   # 800 STEEM
@@ -106,7 +109,13 @@ warn() { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 node() { docker exec "$CONTAINER" "$BIN" "$@"; }
-node_i() { docker exec -i "$CONTAINER" "$BIN" "$@"; }
+# -it, not just -i: `-i` alone keeps stdin open but allocates no real TTY, so
+# password-masking (and in some cases even the prompt text itself) never
+# renders — steemvmd was silently waiting on a prompt you couldn't see. `-t`
+# allocates a real pseudo-terminal so masking and prompt text both work. This
+# whole script is already interactive (reads from /dev/tty throughout), so a
+# real terminal is guaranteed to be available to allocate.
+node_i() { docker exec -it "$CONTAINER" "$BIN" "$@"; }
 kf() { node "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 kf_i() { node_i "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 
@@ -252,8 +261,12 @@ else
   warn "It will never be shown again."
 fi
 
-ADDR="$(kf keys show "$STEEM_USERNAME" -a)"
-VALOPER="$(kf keys show "$STEEM_USERNAME" --bech val -a)"
+# kf_i, not kf: with the file/os backend, even reading an existing key's
+# address requires the keyring password — the EOF crash this script hit came
+# from these two calls still using the non-interactive kf() wrapper, which
+# has no stdin connected at all for steemvmd to read a password from.
+ADDR="$(kf_i keys show "$STEEM_USERNAME" -a)"
+VALOPER="$(kf_i keys show "$STEEM_USERNAME" --bech val -a)"
 {
   echo "moniker:  $STEEM_USERNAME"
   echo "address:  $ADDR"
