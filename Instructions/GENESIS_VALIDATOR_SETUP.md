@@ -26,6 +26,15 @@ Re-init with `--overwrite` to get a clean `genesis.json` — **this does not tou
 steemvmd init blazed007 --chain-id steemvm --home ~/.steemvm --overwrite
 ```
 
+`steemvmd init` now bakes in everything that used to require manual `jq` patching after it: both
+`asteem`/`asbd` bank denom metadata, `steembridge.params.bridge_enabled` /
+`bridge_out_enabled` / `name_service_enabled` all set `true`, and all 11 EVM static precompiles
+this chain ships or activates — the 9 standard cosmos/evm ones (p256, bech32, staking,
+distribution, ics20, bank, gov, slashing, ics02) plus this chain's own two (steembridge `0x...0900`,
+oracledata `0x...0902`) — added to `evm.params.active_static_precompiles`. See
+`cmd/steemvmd/cmd/init_genesis_defaults.go`. None of the old step 4 in this guide is needed
+anymore; jump straight to funding the account below.
+
 `--overwrite` only governs `genesis.json`. `config.toml` is unconditionally rewritten by every
 `init` call regardless of the flag (so `mempool.type` always ends up correct), but **`app.toml` is
 only written if it doesn't already exist yet** (`cosmos-sdk/server/util.go`, gated on
@@ -62,48 +71,7 @@ steemvmd genesis add-genesis-account blazed007 \
   --home ~/.steemvm
 ```
 
-## 4. Enable the bridge/name-service, add denom metadata for both asteem and asbd
-
-A fresh `init` genesis ships with the bridge and name service **disabled**, and `bank.denom_metadata`
-completely **empty** — not just missing `asbd`, `asteem` isn't there either. This one is not optional:
-`x/vm`'s `InitGenesis` reads `bank.denom_metadata` for the EVM's configured native denom (`asteem`)
-and **panics at boot** (`error initializing evm coin info: denom metadata asteem could not be found`)
-if it's missing. Patch bridge params and both denoms together with `jq` (install with `apt install jq`
-if you don't already have it):
-
-```sh
-GENESIS=~/.steemvm/config/genesis.json
-
-jq '.app_state.steembridge.params.bridge_enabled = true
-  | .app_state.steembridge.params.bridge_out_enabled = true
-  | .app_state.steembridge.params.name_service_enabled = true
-  | .app_state.bank.denom_metadata += [{
-      "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
-      "denom_units": [
-        {"denom": "asteem", "exponent": 0, "aliases": ["attosteem"]},
-        {"denom": "steem", "exponent": 18, "aliases": []}
-      ],
-      "base": "asteem", "display": "steem", "name": "Steem", "symbol": "STEEM",
-      "uri": "", "uri_hash": ""
-    }, {
-      "description": "Bridged SBD",
-      "denom_units": [
-        {"denom": "asbd", "exponent": 0, "aliases": ["attosbd"]},
-        {"denom": "sbd", "exponent": 18, "aliases": []}
-      ],
-      "base": "asbd", "display": "sbd", "name": "Steem Backed Dollar",
-      "symbol": "SBD", "uri": "", "uri_hash": ""
-    }]
-  | .app_state.bank.denom_metadata |= unique_by(.base)' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
-```
-
-The trailing `unique_by(.base)` makes this command idempotent — safe to run twice in a row, or to
-re-run later if you're not sure whether it already ran, without producing a `duplicate client
-metadata for denom asteem` error from `gentx`/`validate-genesis`. If you're fixing forward from that
-exact error (you ran an older two-step version of this guide and ended up with a duplicate), just
-run this same command again — the dedupe pass cleans it up regardless of how it got duplicated.
-
-## 5. Seed blazed007's Steem name as ACTIVE
+## 4. Seed blazed007's Steem name as ACTIVE
 
 No live chain exists yet to run the normal attest → confirm flow, so this seeds the link directly
 in genesis state instead. Two pieces are required together — **`active_name_list` alone is not
@@ -166,12 +134,12 @@ string, not a multi-line block) and one `name_registration_list` object with mat
 Because this is seeded now, `blazed007` will also pass the validator-identity ante gate for any
 *future* live `MsgEditValidator`, without ever needing to run the normal attest/confirm dance.
 
-## 6. gentx
+## 5. gentx
 
 Pick your own self-stake amount — this example uses 100,000 STEEM, leaving 2.9M STEEM +
 3M SBD free for operational spending (gas, price-feed votes, etc.). Substitute your real Steem
 `owner`/`active`/`posting` public keys in `--details` (optional at genesis since gentx bypasses the
-live ante-gate identity check, but worth setting now for a complete record — see step 5's note).
+live ante-gate identity check, but worth setting now for a complete record — see step 4's note).
 
 ```sh
 steemvmd genesis gentx blazed007 100000000000000000000000asteem \
@@ -184,7 +152,7 @@ Watch the output — if this errors, it'll dump the full `Usage:` help text rath
 error message (a quirk of this CLI command), so scroll past the usage block to find the actual
 error line at the bottom before assuming it's a flag problem.
 
-## 7. Collect and validate
+## 6. Collect and validate
 
 ```sh
 steemvmd genesis collect-gentxs --home ~/.steemvm
@@ -192,9 +160,9 @@ steemvmd genesis validate-genesis --home ~/.steemvm
 ```
 
 `validate-genesis` should print nothing and exit cleanly. If it repeats the "unparseable address"
-error, go back to step 5 — it means `$ADDR` still holds the wrong value.
+error, go back to step 4 — it means `$ADDR` still holds the wrong value.
 
-## 8. Hand off to docker compose
+## 7. Hand off to docker compose
 
 ```sh
 cp ~/.steemvm/config/genesis.json Instructions/genesis.json
