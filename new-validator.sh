@@ -9,28 +9,39 @@
 #      public — condenser_api.get_accounts) and asks you to confirm them,
 #      falling back to manual entry if that account isn't a plain single-key
 #      account or the lookup fails for any reason
-#   3. asks for a CoinMarketCap API key (optional — blank just skips the two
-#      CMC-sourced price pairs, see oracle/.env.example)
-#   4. writes that moniker into Instructions/config.toml and starts the node
-#      (docker compose up -d), waiting for it to build + produce blocks
-#   5. generates a brand-new SteemVM key via `steemvmd keys add <username>`
+#   3. asks for a CoinMarketCap API key — REQUIRED, not optional: without it
+#      your oracle can't price STEEM/USD_External or SBD/USD_External, and
+#      missing whitelisted pairs count against your price-feed participation
+#      just like missing them for any other reason — miss enough and you get
+#      jailed/slashed the same as skipping the duty outright. Keeps
+#      re-prompting until you give it a non-empty value.
+#   4. fetches the network's live genesis.json from an existing node's RPC
+#      (/genesis) and stages it before the node ever boots — never trusts a
+#      possibly-stale git-committed copy for a validator joining an existing
+#      chain
+#   5. writes your moniker into Instructions/config.toml and starts the node
+#      (docker compose up -d), waiting for it to build + produce blocks —
+#      persistent_peers/seeds come from Instructions/config.toml as already
+#      configured (not touched by this script — edit that file yourself if
+#      you need different peers)
+#   6. generates a brand-new SteemVM key via `steemvmd keys add <username>`
 #      (mnemonic is shown once, never written to disk) and prints + saves the
 #      resulting address to validator-address.txt
-#   6. walks you through Steem-side name registration: prints the exact
+#   7. walks you through Steem-side name registration: prints the exact
 #      transfer to send from Steem (memo `svm-register <username>`), waits
 #      for an already-bonded validator to attest it, then automatically
 #      submits `confirm-name` itself once it's awaiting confirmation — this
 #      is the ante-gate identity requirement create-validator needs
-#   7. waits for your new address to be funded (fund it yourself — a plain
+#   8. waits for your new address to be funded (fund it yourself — a plain
 #      deposit transfer memoed with your new SteemVM address, a genesis
 #      allocation, or a faucet), then builds validator.json and runs
 #      `tx staking create-validator`
-#   8. writes oracle/.env with your new key + CMC key and starts your oracle
+#   9. writes oracle/.env with your new key + CMC key and starts your oracle
 #      client (default: go) via `docker compose --profile <lang> up -d`
 #
-# The real Steem transfers (steps 6 and 7) are yours to send manually — this
+# The real Steem transfers (steps 7 and 8) are yours to send manually — this
 # script never touches Steem private keys, only public ones (step 2) and
-# SteemVM keys (steps 5/9). Everything else is automated.
+# SteemVM keys (steps 6/9). Everything else is automated.
 #
 # If the node home already has data and you want a clean fresh-chain start,
 # run `docker compose down -v` yourself before this script — it does not wipe
@@ -63,6 +74,8 @@ COMPOSE="${COMPOSE:-docker compose}"       # or: docker-compose
 CONTAINER="${CONTAINER:-steemvm-node}"
 BIN="${BIN:-/root/go/bin/steemvmd}"
 HOME_DIR="${HOME_DIR:-/root/.steemvm}"
+STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # host-side path — must match docker-compose.yml's bind mount
+export STEEMVM_HOME    # docker-compose.yml's ${STEEMVM_HOME:-...} substitution needs this in the actual environment, not just a local shell var
 CHAIN_ID="${CHAIN_ID:-steemvm}"
 KEYRING="${KEYRING:-test}"
 KEY_TYPE="${KEY_TYPE:-eth_secp256k1}"
@@ -148,10 +161,34 @@ fi
 [ -n "$OWNER_KEY" ] && [ -n "$ACTIVE_KEY" ] && [ -n "$POSTING_KEY" ] || die "owner, active, and posting keys are all required."
 DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
 
-# ── 3. CoinMarketCap API key (for the oracle's price-feed duty) ───────────────
-read -rp "CoinMarketCap API key (optional, ENTER to skip STEEM/USD + SBD/USD pricing): " CMC_KEY < /dev/tty
+# ── 3. CoinMarketCap API key — REQUIRED ────────────────────────────────────────
+# Not optional: your oracle can't price STEEM/USD_External or SBD/USD_External
+# without it, and a missed whitelisted pair is a missed price-feed duty —
+# skip this and you're walking into a jail/slash for something a 30-second
+# CoinMarketCap signup would have prevented. Get a free key at
+# https://coinmarketcap.com/api/ if you don't have one yet.
+CMC_KEY=""
+while [ -z "$CMC_KEY" ]; do
+  read -rp "CoinMarketCap API key (REQUIRED — get one free at coinmarketcap.com/api): " CMC_KEY < /dev/tty
+  [ -z "$CMC_KEY" ] && warn "a CoinMarketCap API key is required — without it your oracle will miss price-feed duty and risks getting jailed/slashed."
+done
 
-# ── 4. set the node moniker and start the node ────────────────────────────────
+# ── 4. fetch the network's live genesis.json ───────────────────────────────────
+read -rp "Existing node's RPC to fetch genesis + sync from (e.g. http://1.2.3.4:26657): " SEED_RPC < /dev/tty
+[ -n "$SEED_RPC" ] || die "a seed node RPC address is required to fetch the network's live genesis."
+command -v curl >/dev/null 2>&1 || die "curl is required to fetch genesis from $SEED_RPC — install it first."
+command -v jq   >/dev/null 2>&1 || die "jq is required to extract genesis from the RPC response — install it first (apt install jq / apk add jq)."
+
+log "Fetching genesis from ${SEED_RPC%/}/genesis…"
+mkdir -p "$STEEMVM_HOME/config"
+if ! curl -fsS "${SEED_RPC%/}/genesis" | jq -e '.result.genesis' > "$STEEMVM_HOME/config/genesis.json.fetch" 2>/dev/null; then
+  rm -f "$STEEMVM_HOME/config/genesis.json.fetch"
+  die "failed to fetch genesis from ${SEED_RPC%/}/genesis — node unreachable, or the genesis is too large for this endpoint (CometBFT falls back to /genesis_chunked above its size threshold, not handled here)."
+fi
+mv "$STEEMVM_HOME/config/genesis.json.fetch" "$STEEMVM_HOME/config/genesis.json"
+ok "Genesis staged at $STEEMVM_HOME/config/genesis.json"
+
+# ── 5. set the node moniker and start the node ────────────────────────────────
 log "Setting node moniker to '$STEEM_USERNAME'…"
 [ -f Instructions/config.toml ] || cp Instructions/config.toml.example Instructions/config.toml
 sed -i.bak "s/^moniker = .*/moniker = \"$STEEM_USERNAME\"/" Instructions/config.toml
@@ -174,7 +211,7 @@ while :; do
 done
 ok "Node is producing blocks (height $height)."
 
-# ── 5. generate a fresh SteemVM key and save the address ──────────────────────
+# ── 6. generate a fresh SteemVM key and save the address ──────────────────────
 log "Generating a new SteemVM key '$STEEM_USERNAME' (steemvmd keys add)…"
 kf keys delete "$STEEM_USERNAME" -y >/dev/null 2>&1 || true
 node_i keys add "$STEEM_USERNAME" --key-type "$KEY_TYPE" --keyring-backend "$KEYRING" --home "$HOME_DIR"
@@ -190,7 +227,7 @@ VALOPER="$(kf keys show "$STEEM_USERNAME" --bech val -a)"
 } | tee "$ADDRESS_FILE"
 ok "Address saved to $ADDRESS_FILE"
 
-# ── 6. Steem-side name registration (required by the validator identity gate) ─
+# ── 7. Steem-side name registration (required by the validator identity gate) ─
 MIN_MILLISTEEM="$(kf query steembridge params --output json 2>/dev/null | grep -oE '"name_registration_min_millisteem":"[0-9]+"' | grep -oE '[0-9]+' || true)"
 MIN_MILLISTEEM="${MIN_MILLISTEEM:-1}"
 MIN_STEEM="$(awk -v m="$MIN_MILLISTEEM" 'BEGIN{printf "%.3f", m/1000}')"
@@ -215,7 +252,7 @@ kf_i tx steembridge confirm-name "$REG_ID" --from "$STEEM_USERNAME" --chain-id "
   --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y
 ok "Name '$STEEM_USERNAME' confirmed ACTIVE for $ADDR."
 
-# ── 7. wait for the new address to be funded ──────────────────────────────────
+# ── 8. wait for the new address to be funded ──────────────────────────────────
 log "Now fund $ADDR (needed for self-delegation + gas):"
 echo
 echo "  Send STEEM to 'svm.bank' with memo EXACTLY your new SteemVM address:  $ADDR"
@@ -232,7 +269,7 @@ while :; do
 done
 ok "Account funded (balance ${BAL} asteem base units)."
 
-# ── 8. build validator.json + create the validator ────────────────────────────
+# ── 9. build validator.json + create the validator ────────────────────────────
 PUBKEY="$(node comet show-validator --home "$HOME_DIR")"
 [ -n "$PUBKEY" ] || die "could not read the node consensus pubkey (comet show-validator)."
 
@@ -263,12 +300,12 @@ set -e
 echo "$OUT"
 if [ $rc -ne 0 ] || echo "$OUT" | grep -qiE 'active name-service|different account|Description.details|public key'; then
   warn "create-validator did not succeed."
-  warn "If it mentions the name service / details: double-check step 6 actually landed (query steembridge resolve-name $STEEM_USERNAME). Fix and re-run \`$BIN tx staking create-validator …\` manually (key and $VALIDATOR_JSON are ready)."
+  warn "If it mentions the name service / details: double-check step 7 actually landed (query steembridge resolve-name $STEEM_USERNAME). Fix and re-run \`$BIN tx staking create-validator …\` manually (key and $VALIDATOR_JSON are ready)."
   die "stopping before oracle setup."
 fi
 ok "Validator create tx broadcast."
 
-# ── 9. wire up and start this validator's oracle client ───────────────────────
+# ── 10. wire up and start this validator's oracle client ──────────────────────
 log "Exporting the new key's raw private key for oracle/.env (never written to disk elsewhere)…"
 PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail -1 | tr -d '[:space:]')"
 [ -n "$PRIVKEY" ] || die "could not export the private key — set it up manually in oracle/.env (see oracle/.env.example) and run: $COMPOSE --profile $ORACLE_PROFILE up -d"
@@ -278,7 +315,7 @@ PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail 
   echo "ORACLE_PRIVATE_KEY=$PRIVKEY"
   echo "ORACLE_START_BLOCK=latest"
   echo "ORACLE_STEEM_RPC=https://api.steemit.com"
-  [ -n "$CMC_KEY" ] && echo "ORACLE_CMC_API_KEY=$CMC_KEY"
+  echo "ORACLE_CMC_API_KEY=$CMC_KEY"
 } > oracle/.env
 ok "oracle/.env written."
 

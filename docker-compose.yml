@@ -51,19 +51,34 @@ services:
         # Only bootstraps a brand-new identity if the bind-mounted home is
         # genuinely empty. An already-bootstrapped validator's real keys are
         # never touched or regenerated.
+        FRESH_HOME=0
         if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
-          /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm
+          FRESH_HOME=1
+          # `init` always writes ITS OWN placeholder genesis as a side effect
+          # of generating priv_validator_key.json, even on a fresh home — that
+          # placeholder must never win. If a caller (e.g. new-validator.sh,
+          # which fetches the live network genesis before this container ever
+          # starts) already staged a real genesis.json here, preserve it
+          # across the init call (which needs --overwrite so it doesn't choke
+          # on a pre-staged file) rather than letting init's own default
+          # clobber it; otherwise fall back to the tracked Instructions/ copy.
+          [ -f /root/.steemvm/config/genesis.json ] && mv /root/.steemvm/config/genesis.json /root/.steemvm/config/genesis.json.staged
+          /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm --overwrite
+          if [ -f /root/.steemvm/config/genesis.json.staged ]; then
+            mv /root/.steemvm/config/genesis.json.staged /root/.steemvm/config/genesis.json
+          else
+            cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
+          fi
         fi
         # app.toml/config.toml are per-validator (gitignored). Seed them from the
         # tracked *.example templates, and seed the node's own config/ from those,
         # but ONLY if not already present — never overwrite a real validator's
-        # already-tuned config or an already-running chain's genesis.
+        # already-tuned config.
         [ -f /workspace/Instructions/app.toml ]    || cp /workspace/Instructions/app.toml.example   /workspace/Instructions/app.toml
         [ -f /workspace/Instructions/config.toml ] || cp /workspace/Instructions/config.toml.example /workspace/Instructions/config.toml
         [ -f /root/.steemvm/config/app.toml ]      || cp /workspace/Instructions/app.toml    /root/.steemvm/config/app.toml
         [ -f /root/.steemvm/config/config.toml ]   || cp /workspace/Instructions/config.toml /root/.steemvm/config/config.toml
         [ -f /root/.steemvm/config/client.toml ]   || cp /workspace/Instructions/client.toml /root/.steemvm/config/client.toml
-        [ -f /root/.steemvm/config/genesis.json ]  || cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
         # cosmovisor layout: the launch binary lives in genesis/bin and runs from
         # block 1. On a fresh chain this bootstraps to THIS build; on a later
         # governance upgrade cosmovisor swaps to the staged binary at its height.
