@@ -1,0 +1,75 @@
+# Standalone compose file for running ONE oracle client on its own — against
+# an already-running steemvmd (bare-metal `steemvmd start`, or the top-level
+# ../docker-compose.yml's `steemvm` service, or a remote node). Use this
+# instead of the top-level compose file when you don't want/need to also
+# manage the chain node itself from the same compose invocation.
+#
+# Usage (from this directory, or `-f oracle/docker-compose.yml` from repo root):
+#
+#     cp .env.example .env    # then edit .env (your key)
+#     docker compose --profile go up -d       # or --profile python / --profile js
+#
+# Never run more than one profile at once — all three clients share the same
+# signing key and scan-cursor state, and would race each other.
+#
+# network_mode: host lets the container reach a node running directly on this
+# same machine (bare-metal steemvmd, or another container publishing to host
+# ports) via plain `localhost` — no docker-compose service-name DNS is in
+# scope here since there's no `steemvm` node service in this file. Override
+# ORACLE_NODE_RPC/ORACLE_NODE_REST in .env if the node is on a different host.
+services:
+  oracle-go:
+    build:
+      context: ..
+      dockerfile: oracle/go/Dockerfile
+    container_name: steemvm-oracle-go-standalone
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ORACLE_NODE_RPC: ${ORACLE_NODE_RPC:-http://localhost:26657}
+    volumes:
+      - oracle-standalone-data:/oracle-data
+    profiles: ["go"]
+
+  oracle-python:
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    container_name: steemvm-oracle-python-standalone
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ORACLE_NODE_REST: ${ORACLE_NODE_REST:-http://localhost:1317}
+    volumes:
+      - oracle-standalone-data:/oracle-data
+    profiles: ["python"]
+
+  oracle-js:
+    build:
+      context: ./js
+      dockerfile: Dockerfile
+    container_name: steemvm-oracle-js-standalone
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ORACLE_NODE_REST: ${ORACLE_NODE_REST:-http://localhost:1317}
+    volumes:
+      - oracle-standalone-data:/oracle-data
+    profiles: ["js"]
+
+volumes:
+  # Deliberately separate from the top-level compose's `oracle-data` volume —
+  # this is a different compose project, so it would get its own namespaced
+  # volume either way. If you're switching from running an oracle profile via
+  # ../docker-compose.yml to this standalone file (or back), the scan cursor
+  # starts fresh; that's harmless (see oracle/.env.example's ORACLE_START_BLOCK).
+  oracle-standalone-data:

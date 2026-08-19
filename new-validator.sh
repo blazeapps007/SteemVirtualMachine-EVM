@@ -1,19 +1,36 @@
 #!/usr/bin/env bash
 #
-# new-validator.sh — interactive validator setup.
+# new-validator.sh — fully interactive validator + oracle setup.
 #
 # Flow:
 #   1. asks for your Steem username → also used as the node moniker and the
 #      SteemVM key name
-#   2. writes that moniker into Instructions/config.toml and starts the node
+#   2. fetches your Steem owner / active / posting PUBLIC keys itself (they're
+#      public — condenser_api.get_accounts) and asks you to confirm them,
+#      falling back to manual entry if that account isn't a plain single-key
+#      account or the lookup fails for any reason
+#   3. asks for a CoinMarketCap API key (optional — blank just skips the two
+#      CMC-sourced price pairs, see oracle/.env.example)
+#   4. writes that moniker into Instructions/config.toml and starts the node
 #      (docker compose up -d), waiting for it to build + produce blocks
-#   3. asks for your Steem owner / active / posting PUBLIC keys
-#   4. generates a brand-new SteemVM key via `steemvmd keys add <username>`
+#   5. generates a brand-new SteemVM key via `steemvmd keys add <username>`
 #      (mnemonic is shown once, never written to disk) and prints + saves the
 #      resulting address to validator-address.txt
-#   5. waits for that address to be funded (fund it yourself — genesis
-#      allocation, a transfer, a faucet), then builds validator.json and runs
+#   6. walks you through Steem-side name registration: prints the exact
+#      transfer to send from Steem (memo `svm-register <username>`), waits
+#      for an already-bonded validator to attest it, then automatically
+#      submits `confirm-name` itself once it's awaiting confirmation — this
+#      is the ante-gate identity requirement create-validator needs
+#   7. waits for your new address to be funded (fund it yourself — a plain
+#      deposit transfer memoed with your new SteemVM address, a genesis
+#      allocation, or a faucet), then builds validator.json and runs
 #      `tx staking create-validator`
+#   8. writes oracle/.env with your new key + CMC key and starts your oracle
+#      client (default: go) via `docker compose --profile <lang> up -d`
+#
+# The real Steem transfers (steps 6 and 7) are yours to send manually — this
+# script never touches Steem private keys, only public ones (step 2) and
+# SteemVM keys (steps 5/9). Everything else is automated.
 #
 # If the node home already has data and you want a clean fresh-chain start,
 # run `docker compose down -v` yourself before this script — it does not wipe
@@ -22,7 +39,7 @@
 # Non-interactive knobs (defaults are fine for most runs):
 #   STAKE_AMOUNT, COMMISSION_RATE, COMMISSION_MAX_RATE,
 #   COMMISSION_MAX_CHANGE_RATE, MIN_SELF_DELEGATION, GAS_PRICES,
-#   START_TIMEOUT, FUND_TIMEOUT
+#   START_TIMEOUT, FUND_TIMEOUT, NAME_TIMEOUT, ORACLE_PROFILE
 set -euo pipefail
 
 # ── config (override via env) ────────────────────────────────────────────────
@@ -40,11 +57,13 @@ COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
 COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
 MIN_SELF_DELEGATION="${MIN_SELF_DELEGATION:-1}"
 GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
+ORACLE_PROFILE="${ORACLE_PROFILE:-go}"     # go|python|js — which client to start at the end
 
 VALIDATOR_JSON="${VALIDATOR_JSON:-validator.json}"       # written to repo root == /workspace
 ADDRESS_FILE="${ADDRESS_FILE:-validator-address.txt}"    # printed + saved here
 
 START_TIMEOUT="${START_TIMEOUT:-1800}"     # seconds, node build+boot
+NAME_TIMEOUT="${NAME_TIMEOUT:-1800}"       # seconds, waiting for name-registration attestation
 FUND_TIMEOUT="${FUND_TIMEOUT:-600}"        # seconds, waiting for the new address to be funded
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -56,6 +75,7 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 node() { docker exec "$CONTAINER" "$BIN" "$@"; }
 node_i() { docker exec -i "$CONTAINER" "$BIN" "$@"; }
 kf() { node "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
+kf_i() { node_i "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 
 command -v docker >/dev/null || die "docker not found on PATH"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
@@ -65,7 +85,57 @@ $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=d
 read -rp "Steem username (becomes your validator moniker): " STEEM_USERNAME < /dev/tty
 [ -n "$STEEM_USERNAME" ] || die "a Steem username is required."
 
-# ── 2. set the node moniker and start the node ────────────────────────────────
+# ── 2. Steem owner / active / posting public keys ─────────────────────────────
+# Public keys are, well, public — fetch them straight from Steem
+# (condenser_api.get_accounts) instead of asking you to paste three strings.
+# Only trusted for a plain single-key account (weight_threshold=1, exactly one
+# key_auths entry) — anything more exotic (multisig, delegated auth) falls
+# back to asking you directly rather than guessing which key is "the" key.
+STEEM_RPC="${STEEM_RPC:-https://api.steemit.com}"
+
+fetch_steem_keys() {
+  local resp
+  resp="$(curl -fsS -X POST "$STEEM_RPC" -H 'content-type: application/json' \
+            -d "{\"jsonrpc\":\"2.0\",\"method\":\"condenser_api.get_accounts\",\"params\":[[\"$STEEM_USERNAME\"]],\"id\":1}" 2>/dev/null)" || return 1
+  [ -n "$resp" ] || return 1
+  echo "$resp" | jq -e '.result[0] != null' >/dev/null 2>&1 || return 1
+
+  for role in owner active posting; do
+    wt="$(echo "$resp" | jq -r ".result[0].$role.weight_threshold")"
+    nk="$(echo "$resp" | jq -r ".result[0].$role.key_auths | length")"
+    [ "$wt" = "1" ] && [ "$nk" = "1" ] || return 1
+  done
+
+  OWNER_KEY="$(echo "$resp" | jq -r '.result[0].owner.key_auths[0][0]')"
+  ACTIVE_KEY="$(echo "$resp" | jq -r '.result[0].active.key_auths[0][0]')"
+  POSTING_KEY="$(echo "$resp" | jq -r '.result[0].posting.key_auths[0][0]')"
+}
+
+OWNER_KEY="" ACTIVE_KEY="" POSTING_KEY=""
+if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && fetch_steem_keys; then
+  log "Fetched public keys for '$STEEM_USERNAME' from $STEEM_RPC:"
+  echo "  owner:   $OWNER_KEY"
+  echo "  active:  $ACTIVE_KEY"
+  echo "  posting: $POSTING_KEY"
+  read -rp "Use these? [Y/n]: " USE_FETCHED < /dev/tty
+  case "$USE_FETCHED" in
+    [nN]*) OWNER_KEY="" ACTIVE_KEY="" POSTING_KEY="" ;;
+  esac
+fi
+
+if [ -z "$OWNER_KEY" ] || [ -z "$ACTIVE_KEY" ] || [ -z "$POSTING_KEY" ]; then
+  [ -z "${USE_FETCHED:-}" ] && warn "could not auto-fetch keys (no curl/jq, network issue, account not found, or a multisig/delegated account) — falling back to manual entry."
+  read -rp "Steem OWNER public key   (STM...): " OWNER_KEY < /dev/tty
+  read -rp "Steem ACTIVE public key  (STM...): " ACTIVE_KEY < /dev/tty
+  read -rp "Steem POSTING public key (STM...): " POSTING_KEY < /dev/tty
+fi
+[ -n "$OWNER_KEY" ] && [ -n "$ACTIVE_KEY" ] && [ -n "$POSTING_KEY" ] || die "owner, active, and posting keys are all required."
+DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
+
+# ── 3. CoinMarketCap API key (for the oracle's price-feed duty) ───────────────
+read -rp "CoinMarketCap API key (optional, ENTER to skip STEEM/USD + SBD/USD pricing): " CMC_KEY < /dev/tty
+
+# ── 4. set the node moniker and start the node ────────────────────────────────
 log "Setting node moniker to '$STEEM_USERNAME'…"
 [ -f Instructions/config.toml ] || cp Instructions/config.toml.example Instructions/config.toml
 sed -i.bak "s/^moniker = .*/moniker = \"$STEEM_USERNAME\"/" Instructions/config.toml
@@ -88,14 +158,7 @@ while :; do
 done
 ok "Node is producing blocks (height $height)."
 
-# ── 3. Steem owner / active / posting public keys ─────────────────────────────
-read -rp "Steem OWNER public key   (STM...): " OWNER_KEY < /dev/tty
-read -rp "Steem ACTIVE public key  (STM...): " ACTIVE_KEY < /dev/tty
-read -rp "Steem POSTING public key (STM...): " POSTING_KEY < /dev/tty
-[ -n "$OWNER_KEY" ] && [ -n "$ACTIVE_KEY" ] && [ -n "$POSTING_KEY" ] || die "owner, active, and posting keys are all required."
-DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
-
-# ── 4. generate a fresh SteemVM key and save the address ──────────────────────
+# ── 5. generate a fresh SteemVM key and save the address ──────────────────────
 log "Generating a new SteemVM key '$STEEM_USERNAME' (steemvmd keys add)…"
 kf keys delete "$STEEM_USERNAME" -y >/dev/null 2>&1 || true
 node_i keys add "$STEEM_USERNAME" --key-type "$KEY_TYPE" --keyring-backend "$KEYRING" --home "$HOME_DIR"
@@ -111,8 +174,38 @@ VALOPER="$(kf keys show "$STEEM_USERNAME" --bech val -a)"
 } | tee "$ADDRESS_FILE"
 ok "Address saved to $ADDRESS_FILE"
 
-# ── 5. wait for the new address to be funded ──────────────────────────────────
-log "Waiting for $ADDR to be funded (timeout ${FUND_TIMEOUT}s) — fund it now (genesis allocation, transfer, or faucet)…"
+# ── 6. Steem-side name registration (required by the validator identity gate) ─
+MIN_MILLISTEEM="$(kf query steembridge params --output json 2>/dev/null | grep -oE '"name_registration_min_millisteem":"[0-9]+"' | grep -oE '[0-9]+' || true)"
+MIN_MILLISTEEM="${MIN_MILLISTEEM:-1}"
+MIN_STEEM="$(awk -v m="$MIN_MILLISTEEM" 'BEGIN{printf "%.3f", m/1000}')"
+
+log "Name registration required before create-validator will pass this chain's ante gate."
+echo
+echo "  From your Steem account '$STEEM_USERNAME', send at least $MIN_STEEM STEEM to 'svm.bank'"
+echo "  with memo EXACTLY:  svm-register $STEEM_USERNAME"
+echo
+log "Waiting for an already-bonded validator to attest it (timeout ${NAME_TIMEOUT}s)…"
+deadline=$(( $(date +%s) + NAME_TIMEOUT ))
+REG_ID=""
+while :; do
+  REG_ID="$(kf query steembridge awaiting-name-registrations-by-destination "$ADDR" --output json 2>/dev/null \
+              | grep -oE '"id":"[0-9]+"' | head -1 | grep -oE '[0-9]+' || true)"
+  [ -n "$REG_ID" ] && break
+  [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Send the transfer above (if you haven't), wait for a validator to attest it, then run: $BIN tx steembridge confirm-name <id> --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
+  sleep 15
+done
+ok "Registration #$REG_ID is awaiting confirmation — confirming now…"
+kf_i tx steembridge confirm-name "$REG_ID" --from "$STEEM_USERNAME" --chain-id "$CHAIN_ID" \
+  --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y
+ok "Name '$STEEM_USERNAME' confirmed ACTIVE for $ADDR."
+
+# ── 7. wait for the new address to be funded ──────────────────────────────────
+log "Now fund $ADDR (needed for self-delegation + gas):"
+echo
+echo "  Send STEEM to 'svm.bank' with memo EXACTLY your new SteemVM address:  $ADDR"
+echo "  (a plain deposit — do NOT reuse the svm-register memo for this transfer)"
+echo
+log "Waiting for funds to arrive (timeout ${FUND_TIMEOUT}s)…"
 deadline=$(( $(date +%s) + FUND_TIMEOUT ))
 BAL=0
 while :; do
@@ -123,7 +216,7 @@ while :; do
 done
 ok "Account funded (balance ${BAL} asteem base units)."
 
-# ── 6. build validator.json + create the validator ────────────────────────────
+# ── 8. build validator.json + create the validator ────────────────────────────
 PUBKEY="$(node comet show-validator --home "$HOME_DIR")"
 [ -n "$PUBKEY" ] || die "could not read the node consensus pubkey (comet show-validator)."
 
@@ -154,10 +247,29 @@ set -e
 echo "$OUT"
 if [ $rc -ne 0 ] || echo "$OUT" | grep -qiE 'active name-service|different account|Description.details|public key'; then
   warn "create-validator did not succeed."
-  warn "If it mentions the name service / details: $ADDR needs an ACTIVE name link named '$STEEM_USERNAME' with these Steem keys, OR set params.name_service_enabled=false in config.yml. Fix and re-run \`$BIN tx staking create-validator …\` manually (key and $VALIDATOR_JSON are ready)."
-  die "stopping."
+  warn "If it mentions the name service / details: double-check step 6 actually landed (query steembridge resolve-name $STEEM_USERNAME). Fix and re-run \`$BIN tx staking create-validator …\` manually (key and $VALIDATOR_JSON are ready)."
+  die "stopping before oracle setup."
 fi
+ok "Validator create tx broadcast."
 
-ok "Validator create tx broadcast. Confirm it bonded:"
+# ── 9. wire up and start this validator's oracle client ───────────────────────
+log "Exporting the new key's raw private key for oracle/.env (never written to disk elsewhere)…"
+PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail -1 | tr -d '[:space:]')"
+[ -n "$PRIVKEY" ] || die "could not export the private key — set it up manually in oracle/.env (see oracle/.env.example) and run: $COMPOSE --profile $ORACLE_PROFILE up -d"
+
+[ -f oracle/.env ] && warn "oracle/.env already exists — overwriting it with this validator's key."
+{
+  echo "ORACLE_PRIVATE_KEY=$PRIVKEY"
+  echo "ORACLE_START_BLOCK=latest"
+  echo "ORACLE_STEEM_RPC=https://api.steemit.com"
+  [ -n "$CMC_KEY" ] && echo "ORACLE_CMC_API_KEY=$CMC_KEY"
+} > oracle/.env
+ok "oracle/.env written."
+
+log "Starting the oracle ($ORACLE_PROFILE profile)…"
+$COMPOSE --profile "$ORACLE_PROFILE" up -d
+
+ok "All done. Confirm your validator bonded:"
 echo "    docker exec $CONTAINER $BIN query staking validator $VALOPER"
-echo "Remember: the oracle uses a SEPARATE key in oracle/.env."
+echo "Watch your oracle:"
+echo "    $COMPOSE logs -f oracle-$ORACLE_PROFILE"
