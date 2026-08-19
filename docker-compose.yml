@@ -48,20 +48,33 @@ services:
         # to this app's own build, which isn't affected — see go.mod's sonic replace).
         [ -x /root/go/bin/cosmovisor ] || GOTOOLCHAIN=go1.25.10 go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.0
         make install
+        # app.toml/config.toml are per-validator (gitignored). Seed the tracked
+        # *.example templates into Instructions/ first (moniker/persistent_peers
+        # live in config.toml — new-validator.sh edits this copy before we
+        # ever get here).
+        [ -f /workspace/Instructions/app.toml ]    || cp /workspace/Instructions/app.toml.example   /workspace/Instructions/app.toml
+        [ -f /workspace/Instructions/config.toml ] || cp /workspace/Instructions/config.toml.example /workspace/Instructions/config.toml
         # Only bootstraps a brand-new identity if the bind-mounted home is
-        # genuinely empty. An already-bootstrapped validator's real keys are
-        # never touched or regenerated.
+        # genuinely empty. An already-bootstrapped validator's real keys/config
+        # are never touched or regenerated.
         FRESH_HOME=0
         if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
           FRESH_HOME=1
-          # `init` always writes ITS OWN placeholder genesis as a side effect
-          # of generating priv_validator_key.json, even on a fresh home — that
-          # placeholder must never win. If a caller (e.g. new-validator.sh,
-          # which fetches the live network genesis before this container ever
-          # starts) already staged a real genesis.json here, preserve it
-          # across the init call (which needs --overwrite so it doesn't choke
-          # on a pre-staged file) rather than letting init's own default
-          # clobber it; otherwise fall back to the tracked Instructions/ copy.
+          # `init` always (re)writes its OWN app.toml/config.toml/genesis.json
+          # as a side effect of generating priv_validator_key.json on an empty
+          # home — config.toml unconditionally regardless of --overwrite,
+          # app.toml via the PreRun hook the first time any command touches
+          # this home. Left alone, THOSE placeholders silently win over this
+          # repo's own Instructions/ templates (persistent_peers, min-gas-price
+          # tuning, etc. would go missing without any error — this is exactly
+          # what caused a fresh node to log "No addresses to dial. Falling
+          # back to seeds": init's own empty persistent_peers "won" over
+          # Instructions/config.toml's real one). If a caller (e.g.
+          # new-validator.sh, which fetches the live network genesis before
+          # this container ever starts) already staged a real genesis.json
+          # here, preserve it across the init call (which needs --overwrite so
+          # it doesn't choke on a pre-staged file) instead of letting init's
+          # own default clobber it.
           [ -f /root/.steemvm/config/genesis.json ] && mv /root/.steemvm/config/genesis.json /root/.steemvm/config/genesis.json.staged
           /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm --overwrite
           if [ -f /root/.steemvm/config/genesis.json.staged ]; then
@@ -69,16 +82,10 @@ services:
           else
             cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
           fi
+          cp /workspace/Instructions/app.toml    /root/.steemvm/config/app.toml
+          cp /workspace/Instructions/config.toml /root/.steemvm/config/config.toml
+          cp /workspace/Instructions/client.toml /root/.steemvm/config/client.toml
         fi
-        # app.toml/config.toml are per-validator (gitignored). Seed them from the
-        # tracked *.example templates, and seed the node's own config/ from those,
-        # but ONLY if not already present — never overwrite a real validator's
-        # already-tuned config.
-        [ -f /workspace/Instructions/app.toml ]    || cp /workspace/Instructions/app.toml.example   /workspace/Instructions/app.toml
-        [ -f /workspace/Instructions/config.toml ] || cp /workspace/Instructions/config.toml.example /workspace/Instructions/config.toml
-        [ -f /root/.steemvm/config/app.toml ]      || cp /workspace/Instructions/app.toml    /root/.steemvm/config/app.toml
-        [ -f /root/.steemvm/config/config.toml ]   || cp /workspace/Instructions/config.toml /root/.steemvm/config/config.toml
-        [ -f /root/.steemvm/config/client.toml ]   || cp /workspace/Instructions/client.toml /root/.steemvm/config/client.toml
         # cosmovisor layout: the launch binary lives in genesis/bin and runs from
         # block 1. On a fresh chain this bootstraps to THIS build; on a later
         # governance upgrade cosmovisor swaps to the staged binary at its height.
