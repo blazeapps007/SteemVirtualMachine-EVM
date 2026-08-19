@@ -7,7 +7,7 @@ ifeq (,$(VERSION))
   # Fixed release version so every node stamps the SAME steemvmd version,
   # independent of git branch/commit. Bump this per release. Override at build
   # time with `make install VERSION=x.y.z` if ever needed.
-  VERSION := 0.0.2-Beta1
+  VERSION := v0.0.3-Beta-2
 endif
 
 # Update the ldflags with the app, client & server names

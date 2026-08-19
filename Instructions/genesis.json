@@ -1,6 +1,6 @@
 {
   "app_name": "steemvmd",
-  "app_version": "0.0.2-Beta1",
+  "app_version": "v0.0.3-Beta-2",
   "genesis_time": "2026-08-18T23:43:26.29286871Z",
   "chain_id": "steemvm",
   "initial_height": 1,
