@@ -52,11 +52,14 @@ steemvmd genesis add-genesis-account blazed007 \
   --home ~/.steemvm
 ```
 
-## 4. Enable the bridge/name-service, add SBD denom metadata
+## 4. Enable the bridge/name-service, add denom metadata for both asteem and asbd
 
-A fresh `init` genesis ships with the bridge and name service **disabled**, and only `asteem` in
-`bank.denom_metadata` (no `asbd` entry). Patch both with `jq` (install with `apt install jq` if
-you don't already have it):
+A fresh `init` genesis ships with the bridge and name service **disabled**, and `bank.denom_metadata`
+completely **empty** — not just missing `asbd`, `asteem` isn't there either. This one is not optional:
+`x/vm`'s `InitGenesis` reads `bank.denom_metadata` for the EVM's configured native denom (`asteem`)
+and **panics at boot** (`error initializing evm coin info: denom metadata asteem could not be found`)
+if it's missing. Patch bridge params and both denoms together with `jq` (install with `apt install jq`
+if you don't already have it):
 
 ```sh
 GENESIS=~/.steemvm/config/genesis.json
@@ -65,6 +68,14 @@ jq '.app_state.steembridge.params.bridge_enabled = true
   | .app_state.steembridge.params.bridge_out_enabled = true
   | .app_state.steembridge.params.name_service_enabled = true
   | .app_state.bank.denom_metadata += [{
+      "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
+      "denom_units": [
+        {"denom": "asteem", "exponent": 0, "aliases": ["attosteem"]},
+        {"denom": "steem", "exponent": 18, "aliases": []}
+      ],
+      "base": "asteem", "display": "steem", "name": "Steem", "symbol": "STEEM",
+      "uri": "", "uri_hash": ""
+    }, {
       "description": "Bridged SBD",
       "denom_units": [
         {"denom": "asbd", "exponent": 0, "aliases": ["attosbd"]},
@@ -73,6 +84,22 @@ jq '.app_state.steembridge.params.bridge_enabled = true
       "base": "asbd", "display": "sbd", "name": "Steem Backed Dollar",
       "symbol": "SBD", "uri": "", "uri_hash": ""
     }]' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
+```
+
+If you already ran the old version of this step and only added `asbd`, you'll hit that panic on
+`steemvmd start` (it happens at `InitChain`, before anything commits, so it's always safe to just fix
+genesis and retry — no data reset needed). Patch forward with just the missing entry:
+
+```sh
+jq '.app_state.bank.denom_metadata += [{
+    "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
+    "denom_units": [
+      {"denom": "asteem", "exponent": 0, "aliases": ["attosteem"]},
+      {"denom": "steem", "exponent": 18, "aliases": []}
+    ],
+    "base": "asteem", "display": "steem", "name": "Steem", "symbol": "STEEM",
+    "uri": "", "uri_hash": ""
+  }]' "$GENESIS" > /tmp/genesis.json && mv /tmp/genesis.json "$GENESIS"
 ```
 
 ## 5. Seed blazed007's Steem name as ACTIVE

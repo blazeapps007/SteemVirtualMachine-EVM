@@ -61,6 +61,29 @@
       ],
       "denom_metadata": [
         {
+          "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
+          "denom_units": [
+            {
+              "denom": "asteem",
+              "exponent": 0,
+              "aliases": [
+                "attosteem"
+              ]
+            },
+            {
+              "denom": "steem",
+              "exponent": 18,
+              "aliases": []
+            }
+          ],
+          "base": "asteem",
+          "display": "steem",
+          "name": "Steem",
+          "symbol": "STEEM",
+          "uri": "",
+          "uri_hash": ""
+        },
+        {
           "description": "Bridged SBD",
           "denom_units": [
             {
