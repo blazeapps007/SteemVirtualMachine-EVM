@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
+	cmttypes "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	clienttx "github.com/cosmos/cosmos-sdk/client/tx"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -91,9 +93,28 @@ func broadcastTx(ctx context.Context, clientCtx client.Context, keyName string, 
 	if err != nil {
 		return "", fmt.Errorf("encoding tx: %w", err)
 	}
+	// Computed locally (matches how cosmos-sdk itself derives res.TxHash) so
+	// it's available even when BroadcastTxSync errors below without ever
+	// returning a *ResultBroadcastTx.
+	computedTxHash := fmt.Sprintf("%X", cmttypes.Tx(txBytes).Hash())
 
 	res, err := clientCtx.BroadcastTxSync(txBytes)
 	if err != nil {
+		// "tx already seen" means the mempool already has this EXACT tx —
+		// which happens when a prior attempt's waitForDelivery below timed
+		// out (still pending, not failed) and the caller retried: the
+		// account sequence hasn't advanced (only increments on inclusion,
+		// not on entering the mempool), so the rebuilt tx is byte-identical
+		// to the one still in flight. Without this, that's a permanent
+		// stall — every retry rebuilds the identical tx, gets rejected as a
+		// duplicate, and the cursor never advances. Treat it as "the
+		// broadcast already happened" and just wait for the SAME hash.
+		if strings.Contains(err.Error(), "already seen") {
+			if werr := waitForDelivery(ctx, clientCtx, computedTxHash); werr != nil {
+				return computedTxHash, werr
+			}
+			return computedTxHash, nil
+		}
 		return "", fmt.Errorf("broadcasting tx: %w", err)
 	}
 	if res.Code != 0 {
@@ -121,7 +142,10 @@ func waitForDelivery(ctx context.Context, clientCtx client.Context, txHash strin
 
 	const (
 		pollEvery = 2 * time.Second
-		maxWait   = 45 * time.Second
+		// ~6s blocks means 45s (~7-8 blocks) had little margin for ordinary
+		// network/mempool jitter before every such hiccup fed directly into
+		// the "already seen" retry loop above. 90s gives real headroom.
+		maxWait = 90 * time.Second
 	)
 	deadline := time.Now().Add(maxWait)
 	for {
