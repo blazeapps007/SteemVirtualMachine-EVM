@@ -19,9 +19,8 @@ Configuration is entirely from environment variables (see ``oracle/.env.example`
     ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD_External + SBD/USD_External.
                            Empty skips those two pairs (see oracle/PROTOCOL.md SS7).
     ORACLE_CMC_BASE_URL   CoinMarketCap API base URL (default the production API)
-    ORACLE_GAS_PRICES     required to activate the price feeder at all -- price-feed
-                           txs are NOT fee-exempt, unlike bridge attestations
-                           (e.g. "1000000000asteem"; see oracle/PROTOCOL.md SS3)
+    ORACLE_GAS_PRICES     price-feed txs are NOT fee-exempt, unlike bridge attestations
+                           (default "1000000000asteem"; see oracle/PROTOCOL.md SS3)
 """
 
 from __future__ import annotations
@@ -109,13 +108,15 @@ def build_keypair(env: dict) -> Keypair:
 
 
 def build_price_source(env: dict, steem_rpc: str) -> tuple[Optional[CompositePriceSource], str]:
-    """Returns (price_source_or_None, gas_prices). Activated only when
-    ORACLE_GAS_PRICES is set (price-feed txs are NOT fee-exempt, unlike
-    bridge attestations -- see oracle/PROTOCOL.md SS3)."""
-    gas_prices = _env(env, "ORACLE_GAS_PRICES")
-    if not gas_prices:
-        logger.info("price feeder disabled: set ORACLE_GAS_PRICES to activate (price-feed txs are not fee-exempt)")
-        return None, ""
+    """Returns (price_source_or_None, gas_prices). Price-feed txs are NOT
+    fee-exempt (unlike bridge attestations -- see oracle/PROTOCOL.md SS3), so
+    gas_prices must be non-empty for the feeder to activate. Defaults to
+    1000000000asteem (matches Instructions/app.toml.example's
+    minimum-gas-prices and this chain's EVM feemarket base_fee) rather than
+    leaving the feeder silently disabled -- a missed whitelisted price pair
+    is a missed duty and counts toward jailing/slashing the same as skipping
+    it any other way."""
+    gas_prices = _env(env, "ORACLE_GAS_PRICES", "1000000000asteem")
 
     cmc = None
     cmc_key = _env(env, "ORACLE_CMC_API_KEY")

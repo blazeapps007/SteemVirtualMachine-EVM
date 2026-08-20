@@ -10,6 +10,8 @@
 // re-encoding is not guaranteed byte-stable). This module marshals TxBody
 // and AuthInfo exactly once each and reuses those bytes everywhere.
 
+import { createHash } from "node:crypto";
+
 import { Registry } from "@cosmjs/proto-signing";
 import { TxBody, AuthInfo, SignDoc, TxRaw, Fee, SignerInfo, ModeInfo } from "cosmjs-types/cosmos/tx/v1beta1/tx";
 import { SignMode } from "cosmjs-types/cosmos/tx/signing/v1beta1/signing";
@@ -193,8 +195,27 @@ export async function signAndBroadcastTx(opts: {
     TxRaw.fromPartial({ bodyBytes, authInfoBytes, signatures: [signatureBytes] }),
   ).finish();
 
+  // Computed locally (SHA256 of the raw tx bytes, matching how CometBFT/
+  // cosmos-sdk itself derives a tx hash) so it's available even when the
+  // broadcast response's own txhash isn't usable (the "already seen" case
+  // below never got one from CheckTx).
+  const computedTxHash = createHash("sha256").update(txRawBytes).digest("hex").toUpperCase();
+
   const broadcastResp = await broadcastTxSync(restUrl, txRawBytes);
   if (broadcastResp.code !== 0) {
+    // "already seen"/"already exists" means the mempool already has this
+    // EXACT tx — happens when a prior attempt's waitForDelivery below timed
+    // out (still pending, not failed) and the caller retried: the account
+    // sequence hasn't advanced (only increments on inclusion, not on
+    // entering the mempool), so the rebuilt tx is byte-identical to the one
+    // still in flight. Without this, that's a permanent stall — every retry
+    // rebuilds the identical tx, gets rejected as a duplicate, and the
+    // cursor never advances. Treat it as "the broadcast already happened"
+    // and just wait for the SAME hash.
+    const rawLog = broadcastResp.rawLog.toLowerCase();
+    if (rawLog.includes("already seen") || rawLog.includes("already exists")) {
+      return waitForDelivery(restUrl, computedTxHash);
+    }
     return broadcastResp; // CheckTx rejection — caller decides whether that's expected
   }
 
@@ -228,7 +249,10 @@ async function broadcastTxSync(restUrl: string, txBytes: Uint8Array): Promise<Br
  * attestations were never actually executed, only broadcast-accepted. */
 async function waitForDelivery(restUrl: string, txHash: string): Promise<BroadcastResult> {
   const pollEveryMs = 2_000;
-  const maxWaitMs = 45_000;
+  // ~6s blocks means 45s (~7-8 blocks) had little margin for ordinary
+  // network/mempool jitter before every such hiccup fed directly into the
+  // "already seen" retry path above. 90s gives real headroom.
+  const maxWaitMs = 90_000;
   const deadline = Date.now() + maxWaitMs;
 
   while (true) {

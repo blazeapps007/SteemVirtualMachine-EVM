@@ -2,9 +2,9 @@
 // Mirrors oracle/go/main.go: watches Steem for gateway transfers and,
 // when its configured key belongs to a bonded validator, broadcasts the
 // matching bridge-deposit / withdrawal-payout / name-registration
-// attestations, plus (when ORACLE_GAS_PRICES is set) the commit-reveal
-// price feed. Configuration is entirely from environment variables — see
-// oracle/.env.example.
+// attestations, plus the commit-reveal price feed (ORACLE_GAS_PRICES
+// defaults on, see config.ts). Configuration is entirely from environment
+// variables — see oracle/.env.example.
 
 import { loadConfig, loadSigner } from "./config";
 import { buildRegistry } from "./broadcast";

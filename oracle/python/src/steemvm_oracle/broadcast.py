@@ -10,6 +10,7 @@ CheckTx-accepted, never actually executed.
 from __future__ import annotations
 
 import base64
+import hashlib
 import time
 from dataclasses import dataclass
 from typing import Sequence
@@ -26,7 +27,10 @@ MAX_MSGS_PER_TX = 50
 PRICE_FEED_GAS_PER_MSG = 250_000
 
 DEFAULT_POLL_EVERY = 2.0
-DEFAULT_MAX_WAIT = 45.0
+# ~6s blocks means 45s (~7-8 blocks) had little margin for ordinary
+# network/mempool jitter before every such hiccup fed directly into the
+# "already seen" retry loop in submit_tx below. 90s gives real headroom.
+DEFAULT_MAX_WAIT = 90.0
 
 
 class BroadcastError(RuntimeError):
@@ -170,10 +174,29 @@ def submit_tx(
         fee=fee,
         memo=memo,
     )
+    # Computed locally (SHA256 of the raw tx bytes, matching how CometBFT/
+    # cosmos-sdk itself derives a tx hash) so it's available even if the
+    # broadcast response never carries a usable txhash (the "already seen"
+    # case below).
+    computed_tx_hash = hashlib.sha256(signed.tx_raw_bytes).hexdigest().upper()
+
     tx_response = rest.broadcast_tx_sync(signed.tx_raw_bytes)
     code = int(tx_response.get("code", 0))
-    tx_hash = tx_response.get("txhash", "")
+    tx_hash = tx_response.get("txhash", "") or computed_tx_hash
     if code != 0:
+        raw_log = str(tx_response.get("raw_log", ""))
+        # "already seen"/"already exists" means the mempool already has this
+        # EXACT tx -- happens when a prior attempt's wait_for_delivery below
+        # timed out (still pending, not failed) and the caller retried: the
+        # account sequence hasn't advanced (only increments on inclusion,
+        # not on entering the mempool), so the rebuilt tx is byte-identical
+        # to the one still in flight. Without this, that's a permanent
+        # stall -- every retry rebuilds the identical tx, gets rejected as a
+        # duplicate, and the cursor never advances. Treat it as "the
+        # broadcast already happened" and just wait for the SAME hash.
+        if "already seen" in raw_log.lower() or "already exists" in raw_log.lower():
+            rest.wait_for_delivery(computed_tx_hash)
+            return computed_tx_hash
         raise BroadcastError(f"tx rejected (code {code}): {tx_response.get('raw_log')}")
 
     # Sync broadcast only proves the tx passed CheckTx; wait for it to land

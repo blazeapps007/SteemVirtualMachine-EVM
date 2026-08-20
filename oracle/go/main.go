@@ -23,9 +23,8 @@
 //	ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD_External + SBD/USD_External.
 //	                      Empty skips those two pairs (see oracle/PROTOCOL.md §7).
 //	ORACLE_CMC_BASE_URL   CoinMarketCap API base URL (default the production API)
-//	ORACLE_GAS_PRICES     required to activate the price feeder at all — price-feed
-//	                      txs are NOT fee-exempt, unlike bridge attestations
-//	                      (e.g. "1000000000asteem"; see oracle/PROTOCOL.md §3)
+//	ORACLE_GAS_PRICES     price-feed txs are NOT fee-exempt, unlike bridge attestations
+//	                      (default "1000000000asteem"; see oracle/PROTOCOL.md §3)
 package main
 
 import (
@@ -142,11 +141,14 @@ func run(logger log.Logger) error {
 	}
 	logger.Info("oracle key loaded", "address", addr.String(), "node_rpc", nodeRPC, "steem_rpc", steemRPC)
 
-	// Price feeder: activated only when ORACLE_GAS_PRICES is set (price-feed
-	// txs are NOT fee-exempt, unlike bridge attestations — see
-	// oracle/PROTOCOL.md §3). Without it the feeder stays nil and idles,
-	// exactly like the shipped-but-unwired default before this source existed.
-	gasPrices := strings.TrimSpace(os.Getenv("ORACLE_GAS_PRICES"))
+	// Price feeder: price-feed txs are NOT fee-exempt (unlike bridge
+	// attestations — see oracle/PROTOCOL.md §3), so this must be non-empty
+	// for it to activate. Defaults to 1000000000asteem (matches
+	// Instructions/app.toml.example's minimum-gas-prices and this chain's
+	// EVM feemarket base_fee) rather than leaving the price feeder silently
+	// disabled — a missed whitelisted price pair is a missed duty and counts
+	// toward jailing/slashing the same as skipping it any other way.
+	gasPrices := envOr("ORACLE_GAS_PRICES", "1000000000asteem")
 	var priceSource relayer.PriceSource
 	if gasPrices != "" {
 		var cmc *relayer.CMCClient

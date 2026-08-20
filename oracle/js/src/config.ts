@@ -70,7 +70,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     startBlockIsLatest,
     cmcApiKey: (env.ORACLE_CMC_API_KEY || "").trim(),
     cmcBaseUrl: (env.ORACLE_CMC_BASE_URL || "").trim(),
-    gasPrices: (env.ORACLE_GAS_PRICES || "").trim(),
+    // Price-feed txs are NOT fee-exempt (unlike bridge attestations — see
+    // oracle/PROTOCOL.md §3), so this must be non-empty for the feeder to
+    // activate. Defaults to 1000000000asteem (matches
+    // Instructions/app.toml.example's minimum-gas-prices and this chain's
+    // EVM feemarket base_fee) rather than leaving the feeder silently
+    // disabled — a missed whitelisted price pair is a missed duty and
+    // counts toward jailing/slashing the same as skipping it any other way.
+    gasPrices: (env.ORACLE_GAS_PRICES || "1000000000asteem").trim(),
   };
 }
 
