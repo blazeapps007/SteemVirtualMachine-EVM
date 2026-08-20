@@ -50,11 +50,14 @@ steemvmd init blazed007 --chain-id steemvm --home ~/.steemvm --overwrite
 ## 2. Capture your address correctly
 
 The `-a` flag is what makes this print *only* the raw address — without it you get the full YAML
-block, which is what broke the JSON edit last time.
+block, which is what broke the JSON edit last time. Also set `$GENESIS` here — step 4's `jq`
+command needs it, and this is the one variable every later `jq` step in this guide depends on
+(nothing else in this guide sets it — if `jq` ever complains `Could not open file :`, this is why).
 
 ```sh
 ADDR=$(steemvmd keys show blazed007 -a --home ~/.steemvm)
 echo "$ADDR"
+GENESIS=~/.steemvm/config/genesis.json
 ```
 
 Confirm it printed a single line like `steem1m6ek05g9w966fkk5x46a7uxaskpd3ugpav28q2` — not a
