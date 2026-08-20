@@ -100,7 +100,7 @@ MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}" # chmod 600 — this IS
 
 START_TIMEOUT="${START_TIMEOUT:-1800}"     # seconds, node build+boot
 NAME_TIMEOUT="${NAME_TIMEOUT:-1800}"       # seconds, waiting for name-registration attestation
-FUND_TIMEOUT="${FUND_TIMEOUT:-600}"        # seconds, waiting for the new address to be funded
+FUND_TIMEOUT="${FUND_TIMEOUT:-1800}"       # seconds, waiting for the new address to be funded (deposits attest through the same bridge flow as name registration — comparably slow)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -276,63 +276,108 @@ VALOPER="$(kf_i keys show "$STEEM_USERNAME" --bech val -a)"
 ok "Address saved to $ADDRESS_FILE"
 
 # ── 7. Steem-side name registration (required by the validator identity gate) ─
-MIN_MILLISTEEM="$(kf query steembridge params --output json 2>/dev/null | grep -oE '"name_registration_min_millisteem":"[0-9]+"' | grep -oE '[0-9]+' || true)"
+MIN_MILLISTEEM="$(kf query steembridge params --output json 2>/dev/null | jq -r '.params.name_registration_min_millisteem // empty' 2>/dev/null || true)"
 MIN_MILLISTEEM="${MIN_MILLISTEEM:-1}"
 MIN_STEEM="$(awk -v m="$MIN_MILLISTEEM" 'BEGIN{printf "%.3f", m/1000}')"
 
-log "Name registration required before create-validator will pass this chain's ante gate."
-echo
-echo "  From your Steem account '$STEEM_USERNAME', send at least $MIN_STEEM STEEM to 'svm.bank'"
-echo "  with memo EXACTLY:  svm-register $ADDR"
-echo "  (the memo carries the DESTINATION SteemVM address, not your Steem username —"
-echo "   the relayer already knows the username from who sent the transfer)"
-echo
-log "Waiting for an already-bonded validator to attest it (timeout ${NAME_TIMEOUT}s)…"
-deadline=$(( $(date +%s) + NAME_TIMEOUT ))
-REG_ID=""
-poll_n=0
-while :; do
-  poll_n=$((poll_n + 1))
-  QOUT="$(kf query steembridge awaiting-name-registrations-by-destination "$ADDR" --output json 2>&1)"
-  QRC=$?
-  if [ $QRC -ne 0 ]; then
-    warn "query failed (exit $QRC), retrying: $QOUT"
-  else
-    REG_ID="$(printf '%s' "$QOUT" | grep -oE '"id":"[0-9]+"' | head -1 | grep -oE '[0-9]+' || true)"
-    [ -n "$REG_ID" ] && break
-    # Every 4th poll (~1min at the default 15s interval), print what the
-    # query actually returned — the two prior times this loop looked "stuck"
-    # despite a manual query on the side confirming the registration WAS
-    # ready, this is what would have shown whether it's a real parsing bug
-    # or just needing more time.
-    if [ $((poll_n % 4)) -eq 0 ]; then
-      log "still waiting ($(( $(date +%s) - (deadline - NAME_TIMEOUT) ))s elapsed) — last query returned: $QOUT"
+# Skip the whole dance if this is a re-run after an earlier interruption and
+# the name is already ACTIVE (e.g. you confirmed it manually while a prior
+# instance of this script was still polling — that instance can never detect
+# it either, since a CONFIRMED registration no longer shows up in the
+# "awaiting" list it's watching, and it'll just loop until it times out).
+RESOLVED_ADDR="$(kf query steembridge resolve-name "$STEEM_USERNAME" --output json 2>/dev/null | jq -r '.name.address // empty' 2>/dev/null || true)"
+if [ "$RESOLVED_ADDR" = "$ADDR" ]; then
+  ok "'$STEEM_USERNAME' is already ACTIVE for $ADDR — name registration already done, skipping ahead."
+else
+  log "Name registration required before create-validator will pass this chain's ante gate."
+  echo
+  echo "  From your Steem account '$STEEM_USERNAME', send at least $MIN_STEEM STEEM to 'svm.bank'"
+  echo "  with memo EXACTLY:  svm-register $ADDR"
+  echo "  (the memo carries the DESTINATION SteemVM address, not your Steem username —"
+  echo "   the relayer already knows the username from who sent the transfer)"
+  echo
+  log "Waiting for an already-bonded validator to attest it (timeout ${NAME_TIMEOUT}s)…"
+  deadline=$(( $(date +%s) + NAME_TIMEOUT ))
+  REG_ID=""
+  poll_n=0
+  while :; do
+    poll_n=$((poll_n + 1))
+    QOUT="$(kf query steembridge awaiting-name-registrations-by-destination "$ADDR" --output json 2>&1)"
+    QRC=$?
+    if [ $QRC -ne 0 ]; then
+      warn "query failed (exit $QRC), retrying: $QOUT"
+    else
+      # jq, not grep: cosmos-sdk's `--output json` pretty-prints with a space
+      # after every colon ("id": "3", not "id":"3") — a grep pattern assuming
+      # no space silently never matches, no matter how long you wait. This bit
+      # every run of this script so far; jq parses the actual JSON structure
+      # instead of pattern-matching formatting that isn't guaranteed stable.
+      REG_ID="$(printf '%s' "$QOUT" | jq -r '.registrations[0].id // empty' 2>/dev/null || true)"
+      [ -n "$REG_ID" ] && break
+      # Every 4th poll (~1min at the default 15s interval), print what the
+      # query actually returned — the two prior times this loop looked "stuck"
+      # despite a manual query on the side confirming the registration WAS
+      # ready, this is what would have shown whether it's a real parsing bug
+      # or just needing more time.
+      if [ $((poll_n % 4)) -eq 0 ]; then
+        log "still waiting ($(( $(date +%s) - (deadline - NAME_TIMEOUT) ))s elapsed) — last query returned: $QOUT"
+      fi
     fi
+    # Also bail early if the name went ACTIVE without us ever seeing it in
+    # the "awaiting" list — possible if a validator's attestation AND the
+    # threshold-confirmation both land between two polls, or (as above) if
+    # you confirmed it manually mid-poll.
+    RESOLVED_ADDR="$(kf query steembridge resolve-name "$STEEM_USERNAME" --output json 2>/dev/null | jq -r '.name.address // empty' 2>/dev/null || true)"
+    if [ "$RESOLVED_ADDR" = "$ADDR" ]; then
+      ok "'$STEEM_USERNAME' is already ACTIVE for $ADDR."
+      REG_ID=""
+      break
+    fi
+    [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Send the transfer above (if you haven't), wait for a validator to attest it, then run: $BIN tx steembridge confirm-name <id> --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
+    sleep 15
+  done
+  if [ -n "$REG_ID" ]; then
+    ok "Registration #$REG_ID is awaiting confirmation — confirming now…"
+    kf_i tx steembridge confirm-name "$REG_ID" --from "$STEEM_USERNAME" --chain-id "$CHAIN_ID" \
+      --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y
+    ok "Name '$STEEM_USERNAME' confirmed ACTIVE for $ADDR."
   fi
-  [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Send the transfer above (if you haven't), wait for a validator to attest it, then run: $BIN tx steembridge confirm-name <id> --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
-  sleep 15
-done
-ok "Registration #$REG_ID is awaiting confirmation — confirming now…"
-kf_i tx steembridge confirm-name "$REG_ID" --from "$STEEM_USERNAME" --chain-id "$CHAIN_ID" \
-  --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y
-ok "Name '$STEEM_USERNAME' confirmed ACTIVE for $ADDR."
+fi
 
 # ── 8. wait for the new address to be funded ──────────────────────────────────
-log "Now fund $ADDR (needed for self-delegation + gas):"
+# STAKE_NUM: STAKE_AMOUNT with the "asteem" suffix stripped, for comparison
+# below. These numbers (10^20+) exceed bash's 64-bit integer arithmetic, so
+# the comparison uses awk instead of [ -ge ] / (( )).
+STAKE_NUM="${STAKE_AMOUNT%asteem}"
+
+log "Now fund $ADDR — needs enough for the self-stake ($STAKE_AMOUNT) plus gas:"
 echo
 echo "  Send STEEM to 'svm.bank' with memo EXACTLY your new SteemVM address:  $ADDR"
 echo "  (a plain deposit — do NOT reuse the svm-register memo for this transfer)"
+echo "  Get a comfortable buffer above the self-stake amount — e.g. 30,000 STEEM from a"
+echo "  faucet if you're on a testnet — so you don't come up short on gas/operational funds."
 echo
-log "Waiting for funds to arrive (timeout ${FUND_TIMEOUT}s)…"
+read -rp "Press ENTER once you've sent it… " _unused < /dev/tty
+
+log "Waiting for the deposit to be observed, attested, and minted (timeout ${FUND_TIMEOUT}s) —"
+log "this goes through the same bridge attestation flow as name registration, so it can take a few minutes."
 deadline=$(( $(date +%s) + FUND_TIMEOUT ))
 BAL=0
+poll_n=0
 while :; do
-  BAL="$(kf query bank balances "$ADDR" --output json 2>/dev/null | grep -oE '"amount":"[0-9]+"' | grep -oE '[0-9]+' | head -1 || echo 0)"
-  [ "${BAL:-0}" != "0" ] && break
-  [ "$(date +%s)" -ge "$deadline" ] && die "no funds arrived at $ADDR within ${FUND_TIMEOUT}s. Fund it, then run create-validator manually — the key and $VALIDATOR_JSON are ready."
+  poll_n=$((poll_n + 1))
+  BAL="$(kf query bank balances "$ADDR" --output json 2>/dev/null | jq -r '.balances[]? | select(.denom=="asteem") | .amount' 2>/dev/null || true)"
+  BAL="${BAL:-0}"
+  if awk -v b="$BAL" -v n="$STAKE_NUM" 'BEGIN{exit !(b+0>=n+0)}'; then
+    break
+  fi
+  if [ $((poll_n % 6)) -eq 0 ]; then
+    log "still waiting ($(( $(date +%s) - (deadline - FUND_TIMEOUT) ))s elapsed) — current balance: ${BAL} asteem, need >= ${STAKE_NUM} asteem"
+  fi
+  [ "$(date +%s)" -ge "$deadline" ] && die "balance still below the $STAKE_AMOUNT self-stake requirement after ${FUND_TIMEOUT}s (current: ${BAL} asteem). Fund more, then run create-validator manually — the key and $VALIDATOR_JSON are ready."
   sleep 10
 done
-ok "Account funded (balance ${BAL} asteem base units)."
+ok "Account funded (balance ${BAL} asteem base units, self-stake needs ${STAKE_NUM})."
 
 # ── 9. build validator.json + create the validator ────────────────────────────
 PUBKEY="$(node comet show-validator --home "$HOME_DIR")"

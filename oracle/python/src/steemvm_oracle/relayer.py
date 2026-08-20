@@ -200,12 +200,22 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
             if _already_attested(cycle.rest, transfer, intent, cycle.keypair.valoper_address):
                 continue
             block_msgs.append(build_transfer_any(transfer, intent, cycle.keypair.address, gateway))
+            intent_label = "name-registration" if intent == Intent.REGISTER else "deposit"
+            logger.info(
+                "attesting transfer: intent=%s txid=%s op_index=%d from=%s amount_millisteem=%d memo=%s",
+                intent_label, transfer.txid, transfer.op_index, transfer.from_,
+                transfer.amount_millisteem, transfer.memo,
+            )
 
         # Withdrawal payouts: optimistic, no per-validator dedup query
         # needed (chain benign-no-ops duplicates at 2/3 threshold).
         if bridge_out_enabled:
             for payout in extract_gateway_payouts(block_num, block, gateway):
                 block_msgs.append(build_payout_any(payout, cycle.keypair.address))
+                logger.info(
+                    "attesting withdrawal payout: withdrawal_id=%d steem_txid=%s op_index=%d",
+                    payout.withdrawal_id, payout.txid, payout.op_index,
+                )
 
         if len(msgs) + len(block_msgs) > MAX_MSGS_PER_TX:
             break  # stop at a block boundary; the rest is picked up next cycle
@@ -317,6 +327,13 @@ def run(
 
         cycle = Cycle(rest=rest, steem=steem, keypair=keypair, chain_id=chain_id, cfg=cfg, state_dir=state_dir)
 
+        # Heartbeat: the "idle"/"waiting" logs below are debug-level (filtered
+        # out by default), so a quiet cycle -- no new transfers to attest,
+        # which is most cycles most of the time -- produces zero output at
+        # all without this. Mirrors oracle/go/relayer/relayer.go's heartbeat.
+        HEARTBEAT_EVERY = 10
+        tick_count = 0
+
         while not stop.is_set():
             if stop.wait(cfg.poll_interval_seconds):
                 break
@@ -331,6 +348,10 @@ def run(
                     run_price_feeder_cycle(cycle, feeder, gas_prices, last_handled_period)
                 except Exception:  # noqa: BLE001
                     logger.exception("price feeder cycle failed")
+
+            tick_count += 1
+            if tick_count % HEARTBEAT_EVERY == 0:
+                logger.info("steem oracle heartbeat: last_scanned_block=%d", state.last_scanned_block)
 
         logger.info("steem oracle stopped")
     finally:

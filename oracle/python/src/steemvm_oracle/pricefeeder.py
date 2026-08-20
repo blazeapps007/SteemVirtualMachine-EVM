@@ -13,10 +13,13 @@ reveal -- that's what ``state.FeederState`` persists.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional, Sequence
+
+logger = logging.getLogger("steemvm_oracle.pricefeeder")
 
 from . import _protopath  # noqa: F401
 from .decimal_fmt import legacy_dec_string
@@ -152,6 +155,7 @@ class Feeder:
 
         if prev.exchange_rates and prev.prevote_period + 1 == period:
             msgs.append(build_vote_any(self.validator, prev.salt, prev.exchange_rates))
+            logger.info("submitting price vote: period=%d exchange_rates=%s", period, prev.exchange_rates)
 
         if self.source is None:
             return msgs, FeederState()
@@ -168,4 +172,11 @@ class Feeder:
         salt = new_salt()
         exchange_rates = build_exchange_rates_string(filtered)
         msgs.append(build_prevote_any(self.validator, exchange_rates, salt))
+        # Logs the hash, not the rates themselves -- mirrors the commit-reveal
+        # scheme's own hide-until-reveal semantics (oracle/go/relayer does the
+        # same), even though this is a local-only log with no other observer.
+        logger.info(
+            "submitting price prevote: period=%d hash=%s",
+            period, get_aggregate_vote_hash(salt, exchange_rates, self.validator),
+        )
         return msgs, FeederState(prevote_period=period, salt=salt, exchange_rates=exchange_rates)

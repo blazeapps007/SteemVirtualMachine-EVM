@@ -13,7 +13,7 @@ import { SteemClient, extractGatewayTransfers, extractGatewayPayouts } from "./s
 import { routeMemo, buildMsg, Intent, GATEWAY_ACCOUNT } from "./router";
 import { broadcastAttestations, broadcastPriceFeedMsgs, type EncodeObject } from "./broadcast";
 import { loadState, saveState, loadFeederState, saveFeederState } from "./state";
-import { Feeder, type PriceSource } from "./priceFeeder";
+import { Feeder, getAggregateVoteHash, type PriceSource } from "./priceFeeder";
 import { TYPE_URL_MSG_ATTEST_WITHDRAWAL_PAYOUT } from "./broadcast";
 
 export interface CycleLogger {
@@ -206,6 +206,12 @@ export async function run(opts: {
   });
 
   let notBondedLogged = false;
+  // Heartbeat: the "idle"/"waiting" logs below are debug-level (filtered out
+  // by default), so a quiet cycle -- no new transfers to attest, which is
+  // most cycles most of the time -- produces zero output at all without
+  // this. Mirrors oracle/go/relayer/relayer.go's heartbeat.
+  const HEARTBEAT_EVERY = 10;
+  let tickCount = 0;
 
   while (!abortSignal.aborted) {
     await sleepOrAbort(cfg.pollIntervalMs, abortSignal);
@@ -234,6 +240,11 @@ export async function run(opts: {
       } catch (err) {
         logger.error("price feeder cycle failed", { err: String(err) });
       }
+    }
+
+    tickCount++;
+    if (tickCount % HEARTBEAT_EVERY === 0) {
+      logger.info("steem oracle heartbeat", { last_scanned_block: state.last_scanned_block });
     }
   }
 
@@ -327,6 +338,14 @@ async function runCycle(
       if (attested) continue;
 
       blockMsgs.push(buildMsg(transfer, intent, signer.address, gateway));
+      logger.info("attesting transfer", {
+        intent: intent === Intent.Register ? "name-registration" : "deposit",
+        txid: transfer.txid,
+        opIndex: transfer.opIndex,
+        from: transfer.from,
+        amountMillisteem: transfer.amountMillisteem.toString(),
+        memo: transfer.memo,
+      });
     }
 
     if (params.bridge_out_enabled) {
@@ -341,6 +360,11 @@ async function runCycle(
             steemBlock: payout.steemBlock,
             steemTimestamp: payout.steemTimestamp,
           },
+        });
+        logger.info("attesting withdrawal payout", {
+          withdrawalId: payout.withdrawalId.toString(),
+          steemTxid: payout.txid,
+          opIndex: payout.opIndex,
         });
       }
     }
@@ -437,6 +461,19 @@ async function runPriceFeederCycle(
   const { msgs, state: newState } = await feeder.step(period, params.whitelist, prevState);
   if (msgs.length === 0) {
     return period;
+  }
+
+  if (prevState.exchange_rates !== "" && prevState.prevote_period + 1 === period) {
+    logger.info("submitting price vote", { period, exchangeRates: prevState.exchange_rates });
+  }
+  if (newState.exchange_rates !== "") {
+    // Logs the hash, not the rates themselves -- mirrors the commit-reveal
+    // scheme's own hide-until-reveal semantics (oracle/go/relayer does the
+    // same), even though this is a local-only log with no other observer.
+    logger.info("submitting price prevote", {
+      period,
+      hash: getAggregateVoteHash(newState.salt, newState.exchange_rates, signer.address),
+    });
   }
 
   const result = await broadcastPriceFeedMsgs({

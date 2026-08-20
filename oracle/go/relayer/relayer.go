@@ -86,6 +86,12 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	notBondedLogged := false
+	// Heartbeat: "idle"/"waiting" states below are debug-level (filtered out
+	// by default), so without this, a quiet cycle — no new transfers to
+	// attest, which is most cycles most of the time — produces zero output
+	// at all. This is what makes a perfectly healthy client look dead.
+	const heartbeatEvery = 10
+	tickCount := 0
 
 	for {
 		select {
@@ -97,6 +103,11 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 
 		if err := runCycle(ctx, logger, cfg, clientCtx, steem, bridgeQuery, stakingQuery, signerAddr, valoperAddr, stateDir, &state, &notBondedLogged); err != nil {
 			logger.Error("steem oracle cycle failed", "err", err)
+		}
+
+		tickCount++
+		if tickCount%heartbeatEvery == 0 {
+			logger.Info("steem oracle heartbeat", "last_scanned_block", state.LastScannedBlock)
 		}
 
 		if priceSource != nil {
@@ -156,6 +167,15 @@ func runPriceFeederCycle(
 	if len(msgs) == 0 {
 		*lastHandledPeriod = period
 		return nil
+	}
+
+	for _, m := range msgs {
+		switch msg := m.(type) {
+		case *oracledatatypes.MsgAggregateExchangeRatePrevote:
+			logger.Info("submitting price prevote", "period", period, "hash", msg.Hash)
+		case *oracledatatypes.MsgAggregateExchangeRateVote:
+			logger.Info("submitting price vote", "period", period, "exchange_rates", msg.ExchangeRates)
+		}
 	}
 
 	txHash, err := BroadcastPriceFeedMsgs(ctx, clientCtx, clientCtx.FromName, msgs, gasPrices)
@@ -279,6 +299,13 @@ func runCycle(
 				continue
 			}
 			blockMsgs = append(blockMsgs, BuildMsg(transfer, intent, signerAddr, gateway))
+			intentLabel := "deposit"
+			if intent == IntentRegister {
+				intentLabel = "name-registration"
+			}
+			logger.Info("attesting transfer",
+				"intent", intentLabel, "txid", transfer.Txid, "op_index", transfer.OpIndex,
+				"from", transfer.From, "amount_millisteem", transfer.AmountMillisteem, "memo", transfer.Memo)
 		}
 		// Withdrawal payouts: gateway→user transfers memoed "svm-withdrawal <id>".
 		// Optimistic — every payout seen is attested once (the cursor scans each
@@ -295,6 +322,8 @@ func runCycle(
 					SteemBlock:     payout.SteemBlock,
 					SteemTimestamp: payout.SteemTimestamp,
 				})
+				logger.Info("attesting withdrawal payout",
+					"withdrawal_id", payout.WithdrawalID, "steem_txid", payout.Txid, "op_index", payout.OpIndex)
 			}
 		}
 		if len(msgs)+len(blockMsgs) > MaxMsgsPerTx {
