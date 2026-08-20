@@ -15,10 +15,8 @@
 #      just like missing them for any other reason — miss enough and you get
 #      jailed/slashed the same as skipping the duty outright. Keeps
 #      re-prompting until you give it a non-empty value.
-#   4. fetches the network's live genesis.json from an existing node's RPC
-#      (/genesis) and stages it before the node ever boots — never trusts a
-#      possibly-stale git-committed copy for a validator joining an existing
-#      chain
+#   4. stages Instructions/genesis.json — this repo's own canonical, kept-
+#      in-sync genesis — into the node home before it ever boots
 #   5. writes your moniker into Instructions/config.toml and starts the node
 #      (docker compose up -d), waiting for it to build + produce blocks —
 #      persistent_peers/seeds come from Instructions/config.toml as already
@@ -197,19 +195,13 @@ while [ -z "$CMC_KEY" ]; do
   [ -z "$CMC_KEY" ] && warn "a CoinMarketCap API key is required — without it your oracle will miss price-feed duty and risks getting jailed/slashed."
 done
 
-# ── 4. fetch the network's live genesis.json ───────────────────────────────────
-read -rp "Existing node's RPC to fetch genesis + sync from [https://svm-rpc.steemscanner.com]: " SEED_RPC < /dev/tty
-SEED_RPC="${SEED_RPC:-https://svm-rpc.steemscanner.com}"
-command -v curl >/dev/null 2>&1 || die "curl is required to fetch genesis from $SEED_RPC — install it first."
-command -v jq   >/dev/null 2>&1 || die "jq is required to extract genesis from the RPC response — install it first (apt install jq / apk add jq)."
-
-log "Fetching genesis from ${SEED_RPC%/}/genesis…"
+# ── 4. stage genesis.json ───────────────────────────────────────────────────────
+# Instructions/genesis.json in this checkout IS the canonical genesis — kept
+# in sync by the repo itself, no network round-trip needed to go re-fetch a
+# copy of something already sitting right here.
+[ -f Instructions/genesis.json ] || die "Instructions/genesis.json not found — run this from the repository root."
 mkdir -p "$STEEMVM_HOME/config"
-if ! curl -fsS "${SEED_RPC%/}/genesis" | jq -e '.result.genesis' > "$STEEMVM_HOME/config/genesis.json.fetch" 2>/dev/null; then
-  rm -f "$STEEMVM_HOME/config/genesis.json.fetch"
-  die "failed to fetch genesis from ${SEED_RPC%/}/genesis — node unreachable, or the genesis is too large for this endpoint (CometBFT falls back to /genesis_chunked above its size threshold, not handled here)."
-fi
-mv "$STEEMVM_HOME/config/genesis.json.fetch" "$STEEMVM_HOME/config/genesis.json"
+cp Instructions/genesis.json "$STEEMVM_HOME/config/genesis.json"
 ok "Genesis staged at $STEEMVM_HOME/config/genesis.json"
 
 # ── 5. set the node moniker and start the node ────────────────────────────────
