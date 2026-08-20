@@ -82,10 +82,12 @@ docker compose up -d
 docker compose logs -f
 ```
 
-The first start compiles the chain binary inside the container, then the node
-replays from genesis and follows the chain via normal block sync. On a young
-chain this is quick. The bridge oracle (section 10) starts alongside the node
-automatically.
+The first start builds the `steemvmd` image (a real, cached Docker image
+build — see the repo-root `Dockerfile` — so this only happens once, not on
+every restart) unless you've already pulled a pre-built one
+(`docker compose pull steemvm`). Once the image is ready the node replays from
+genesis and follows the chain via normal block sync. On a young chain this is
+quick. The bridge oracle (section 10) starts alongside the node automatically.
 
 ## 3. Wait for block sync
 

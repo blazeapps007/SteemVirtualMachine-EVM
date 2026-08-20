@@ -102,3 +102,21 @@ govulncheck:
 	@govulncheck ./...
 
 .PHONY: govet govulncheck
+
+##############
+### Docker ###
+##############
+
+# Pre-built image consumed by docker-compose.yml's `steemvm` service (see
+# Dockerfile). Override DOCKER_IMAGE with your own registry namespace:
+#   make docker-push DOCKER_IMAGE=youruser/steemvmd
+DOCKER_IMAGE ?= steemvm/steemvmd
+DOCKER_TAG   ?= $(VERSION)
+
+docker-build:
+	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
+docker-push: docker-build
+	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
+
+.PHONY: docker-build docker-push

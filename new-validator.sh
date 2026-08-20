@@ -339,8 +339,17 @@ fi
 # address requires the keyring password — the EOF crash this script hit came
 # from these two calls still using the non-interactive kf() wrapper, which
 # has no stdin connected at all for steemvmd to read a password from.
-ADDR="$(kf_i keys show "$STEEM_USERNAME" -a)"
-VALOPER="$(kf_i keys show "$STEEM_USERNAME" --bech val -a)"
+# tr -d '\r': docker exec -it allocates a real pseudo-TTY, which by default
+# translates outgoing \n to \r\n — capturing that via $(...) leaves a trailing
+# \r baked into the value. It's invisible wherever this gets printed (a \r at
+# line-end doesn't visibly corrupt anything), but every downstream command
+# that consumes "$ADDR" as an argument (e.g. the funding-wait balance query)
+# gets a corrupted bech32 string, errors out, and that error is silently
+# swallowed by `2>/dev/null` — surfacing only as a balance that never updates
+# no matter how long you wait, even though the real address (checked
+# separately, outside this script) is genuinely funded.
+ADDR="$(kf_i keys show "$STEEM_USERNAME" -a | tr -d '\r')"
+VALOPER="$(kf_i keys show "$STEEM_USERNAME" --bech val -a | tr -d '\r')"
 {
   echo "moniker:  $STEEM_USERNAME"
   echo "address:  $ADDR"
@@ -433,8 +442,9 @@ echo "  faucet if you're on a testnet — so you don't come up short on gas/oper
 echo
 read -rp "Press ENTER once you've sent it… " _unused < /dev/tty
 
-log "Waiting for the deposit to be observed, attested, and minted (timeout ${FUND_TIMEOUT}s) —"
-log "this goes through the same bridge attestation flow as name registration, so it can take a few minutes."
+log "Waiting for $ADDR's asteem balance to reach the self-stake amount (timeout ${FUND_TIMEOUT}s) —"
+log "this only checks your raw wallet balance, not bridge/deposit state, so it works the same"
+log "whether the funds arrive via a real bridge deposit, a manual attest-deposit, or a genesis allocation."
 deadline=$(( $(date +%s) + FUND_TIMEOUT ))
 BAL=0
 poll_n=0
