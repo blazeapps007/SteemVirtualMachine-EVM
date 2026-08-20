@@ -214,6 +214,13 @@ ok "Genesis staged at $STEEMVM_HOME/config/genesis.json"
 
 # ── 5. set the node moniker and start the node ────────────────────────────────
 log "Setting node moniker to '$STEEM_USERNAME'…"
+# Instructions/config.toml (no .example) is gitignored -- copied from the
+# template ONLY if missing, to protect an operator's own hand-edits. That
+# also means it's a permanent local cache: once created, it never picks up
+# LATER changes to config.toml.example (e.g. persistent_peers pointing at a
+# new node ID) on its own, even across git pull / wiping ~/.steemvm. If
+# persistent_peers ever looks stale, `rm -f Instructions/config.toml` and
+# re-run this step.
 [ -f Instructions/config.toml ] || cp Instructions/config.toml.example Instructions/config.toml
 sed -i.bak "s/^moniker = .*/moniker = \"$STEEM_USERNAME\"/" Instructions/config.toml
 rm -f Instructions/config.toml.bak

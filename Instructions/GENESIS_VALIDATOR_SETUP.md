@@ -16,6 +16,14 @@ here.
   commands were run with `--keyring-backend test`, others with the default (`os`), against a key
   that only exists in `os`. Keep it consistent across every command in this guide.
 - All commands assume `--home ~/.steemvm`. Adjust if you're using a different path.
+- **`Instructions/config.toml` and `Instructions/app.toml` (no `.example`) are gitignored, locally
+  cached copies** — both `new-validator.sh` and `docker-compose.yml` only create them from the
+  `.example` templates *if they don't already exist*, to protect an operator's own hand-edits. This
+  means once created, **neither survives being refreshed by a `git pull` or by wiping
+  `~/.steemvm`** — if `Instructions/*.example` gets updated later (e.g. `persistent_peers` pointing
+  at a new node ID), your existing `Instructions/config.toml`/`app.toml` keeps the stale value
+  forever until you delete it yourself: `rm -f Instructions/config.toml Instructions/app.toml`,
+  then re-run whatever step copies them into `~/.steemvm/config/`.
 
 ## 1. Get a clean genesis.json
 
