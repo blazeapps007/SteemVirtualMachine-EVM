@@ -253,9 +253,16 @@ done
 # run — a new node loaded a genesis with a different validator baked in than
 # the peer it was syncing from actually had, "validator address mismatch").
 # Fetching live from the network itself avoids that class of mismatch by
-# construction. Falls back to Instructions/genesis.json only if unreachable.
-read -rp "Existing node's RPC to fetch genesis + sync from [https://svm-rpc.steemscanner.com]: " SEED_RPC < /dev/tty
-SEED_RPC="${SEED_RPC:-https://svm-rpc.steemscanner.com}"
+# construction — but ONLY if the RPC it fetches from actually IS the current
+# ground truth. Defaults to blazed007's own node directly (57.131.13.43),
+# not a third-party mirror: an earlier default (svm-rpc.steemscanner.com)
+# was itself confirmed stale relative to blazed007's own node after several
+# resets — its genesis hash matched what THIS script fetched, but not what
+# blazed007's node actually signed block 1 with, meaning the mirror was
+# never being kept in sync with blazed007's resets in the first place.
+# Falls back to Instructions/genesis.json only if the RPC is unreachable.
+read -rp "Existing node's RPC to fetch genesis + sync from [http://57.131.13.43:26657]: " SEED_RPC < /dev/tty
+SEED_RPC="${SEED_RPC:-http://57.131.13.43:26657}"
 mkdir -p "$STEEMVM_HOME/config"
 
 if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
