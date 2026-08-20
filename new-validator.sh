@@ -15,8 +15,11 @@
 #      just like missing them for any other reason — miss enough and you get
 #      jailed/slashed the same as skipping the duty outright. Keeps
 #      re-prompting until you give it a non-empty value.
-#   4. stages Instructions/genesis.json — this repo's own canonical, kept-
-#      in-sync genesis — into the node home before it ever boots
+#   4. fetches the network's live genesis.json from an existing node's RPC
+#      (/genesis) and stages it before the node ever boots — falls back to
+#      this repo's Instructions/genesis.json only if the RPC is unreachable
+#      (a locally-committed copy can go stale relative to what's actually
+#      running; fetching live avoids that class of mismatch entirely)
 #   5. writes your moniker into Instructions/config.toml and starts the node
 #      (docker compose up -d), waiting for it to build + produce blocks —
 #      persistent_peers/seeds come from Instructions/config.toml as already
@@ -44,9 +47,19 @@
 # script never touches Steem private keys, only public ones (step 2) and
 # SteemVM keys (steps 6/9). Everything else is automated.
 #
-# If the node home already has data and you want a clean fresh-chain start,
-# run `docker compose down -v` yourself before this script — it does not wipe
-# anything.
+# Usage: ./new-validator.sh [--cleanup | --cleanup-full]
+#   --cleanup       deletes validator.json/validator-address.txt/
+#                    validator-mnemonic.txt/oracle/.env/Instructions/
+#                    {config,app}.toml (all regenerate fresh on the next
+#                    run) and `docker compose down`s the containers. Does
+#                    NOT touch your node home (keys, chain data) or docker
+#                    volumes. Asks for confirmation, then exits — does not
+#                    continue into the interactive setup.
+#   --cleanup-full  everything --cleanup does, PLUS wipes $STEEMVM_HOME
+#                    (your node's keys and chain data — irreversible unless
+#                    you already backed up validator-mnemonic.txt) and runs
+#                    `docker compose down -v` (drops volumes too). Asks for
+#                    confirmation, then exits.
 #
 # Non-interactive knobs (defaults are fine for most runs):
 #   STAKE_AMOUNT, COMMISSION_RATE, COMMISSION_MAX_RATE,
@@ -120,6 +133,44 @@ kf_i() { node_i "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 command -v docker >/dev/null || die "docker not found on PATH"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
 [ -f docker-compose.yml ] || die "run this from the repository root (where docker-compose.yml lives) — validator.json must land in the mounted /workspace."
+
+# ── --cleanup / --cleanup-full ──────────────────────────────────────────────────
+run_cleanup() {
+  local full="${1:-}"
+  warn "This will delete:"
+  warn "  - $VALIDATOR_JSON, $ADDRESS_FILE, $MNEMONIC_FILE, oracle/.env"
+  warn "  - Instructions/config.toml, Instructions/app.toml (regenerate fresh from .example next run)"
+  warn "  - stop all containers from this compose project ($COMPOSE down)"
+  if [ "$full" = "full" ]; then
+    warn "  - $STEEMVM_HOME — YOUR NODE'S KEYS AND CHAIN DATA. Irreversible unless you already"
+    warn "    backed up $MNEMONIC_FILE's contents (or the raw private key) somewhere safe."
+    warn "  - docker volumes for this project too (docker compose down -v)"
+  fi
+  read -rp "Type YES to confirm: " CONFIRM < /dev/tty
+  [ "$CONFIRM" = "YES" ] || die "cleanup cancelled — nothing was deleted."
+
+  log "Stopping containers…"
+  if [ "$full" = "full" ]; then
+    $COMPOSE down -v 2>&1 || true
+  else
+    $COMPOSE down 2>&1 || true
+  fi
+
+  rm -f "$VALIDATOR_JSON" "$ADDRESS_FILE" "$MNEMONIC_FILE" oracle/.env \
+        Instructions/config.toml Instructions/app.toml
+
+  if [ "$full" = "full" ]; then
+    rm -rf "$STEEMVM_HOME"
+    ok "Wiped $STEEMVM_HOME."
+  fi
+  ok "Cleanup done."
+  exit 0
+}
+
+case "${1:-}" in
+  --cleanup)      run_cleanup ;;
+  --cleanup-full) run_cleanup full ;;
+esac
 
 # Clear any stale validator.json/address file from an earlier (possibly
 # interrupted, possibly for a different username entirely) run before we do
@@ -195,14 +246,31 @@ while [ -z "$CMC_KEY" ]; do
   [ -z "$CMC_KEY" ] && warn "a CoinMarketCap API key is required — without it your oracle will miss price-feed duty and risks getting jailed/slashed."
 done
 
-# ── 4. stage genesis.json ───────────────────────────────────────────────────────
-# Instructions/genesis.json in this checkout IS the canonical genesis — kept
-# in sync by the repo itself, no network round-trip needed to go re-fetch a
-# copy of something already sitting right here.
-[ -f Instructions/genesis.json ] || die "Instructions/genesis.json not found — run this from the repository root."
+# ── 4. fetch the network's live genesis.json ───────────────────────────────────
+# Fetched fresh from a running node rather than trusted from this repo's
+# Instructions/genesis.json: a locally-committed copy can go stale relative
+# to what a validator's node is actually, currently running (this bit a real
+# run — a new node loaded a genesis with a different validator baked in than
+# the peer it was syncing from actually had, "validator address mismatch").
+# Fetching live from the network itself avoids that class of mismatch by
+# construction. Falls back to Instructions/genesis.json only if unreachable.
+read -rp "Existing node's RPC to fetch genesis + sync from [https://svm-rpc.steemscanner.com]: " SEED_RPC < /dev/tty
+SEED_RPC="${SEED_RPC:-https://svm-rpc.steemscanner.com}"
 mkdir -p "$STEEMVM_HOME/config"
-cp Instructions/genesis.json "$STEEMVM_HOME/config/genesis.json"
-ok "Genesis staged at $STEEMVM_HOME/config/genesis.json"
+
+if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+   && curl -fsS "${SEED_RPC%/}/genesis" 2>/dev/null | jq -e '.result.genesis' > "$STEEMVM_HOME/config/genesis.json.fetch" 2>/dev/null; then
+  mv "$STEEMVM_HOME/config/genesis.json.fetch" "$STEEMVM_HOME/config/genesis.json"
+  ok "Genesis fetched live from ${SEED_RPC%/}/genesis and staged at $STEEMVM_HOME/config/genesis.json"
+else
+  rm -f "$STEEMVM_HOME/config/genesis.json.fetch"
+  warn "could not fetch genesis from $SEED_RPC (unreachable, no curl/jq, or genesis too large for this endpoint —"
+  warn "CometBFT falls back to /genesis_chunked above its size threshold, not handled here)."
+  warn "Falling back to Instructions/genesis.json — make sure it's actually current for the live network."
+  [ -f Instructions/genesis.json ] || die "Instructions/genesis.json not found either — run this from the repository root, or fix the RPC URL."
+  cp Instructions/genesis.json "$STEEMVM_HOME/config/genesis.json"
+  ok "Genesis staged at $STEEMVM_HOME/config/genesis.json (from Instructions/genesis.json)"
+fi
 
 # ── 5. set the node moniker and start the node ────────────────────────────────
 log "Setting node moniker to '$STEEM_USERNAME'…"
