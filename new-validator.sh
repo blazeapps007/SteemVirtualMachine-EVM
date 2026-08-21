@@ -356,6 +356,7 @@ PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail 
   echo "ORACLE_START_BLOCK=latest"
   echo "ORACLE_STEEM_RPC=https://api.steemit.com"
   echo "ORACLE_CMC_API_KEY=$CMC_KEY"
+  echo "ORACLE_SBD_SYMBOL=SBD"
 } > oracle/.env
 ok "oracle/.env written."
 

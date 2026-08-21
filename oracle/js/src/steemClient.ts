@@ -194,8 +194,8 @@ export function parseSteemAmount(amount: string, symbol: string): bigint | undef
 /** Scans a block for STEEM and SBD transfer operations whose recipient is
  * the gateway account. steemSymbol qualifies as STEEM; if sbdSymbol is
  * non-empty, transfers in that symbol are also extracted and tagged
- * BRIDGE_ASSET_SBD — leaving sbdSymbol "" disables SBD (the v0.0.3
- * feature-gate). Other symbols and non-transfer ops are ignored. */
+ * BRIDGE_ASSET_SBD — leaving sbdSymbol "" disables SBD. Other symbols and
+ * non-transfer ops are ignored. */
 export function extractGatewayTransfers(
   blockNum: number,
   block: SteemBlock,

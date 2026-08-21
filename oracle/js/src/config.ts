@@ -40,7 +40,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const nodeRestUrl = envOr(env, "ORACLE_NODE_REST", "http://steemvm:1317");
   const stateDir = envOr(env, "ORACLE_STATE_DIR", "/oracle-data");
-  const sbdSymbol = (env.ORACLE_SBD_SYMBOL || "").trim();
+  // Defaults to "SBD" (mainnet's SBD symbol) now that the chain supports
+  // asbd bridging. Unset -> "SBD"; explicitly ORACLE_SBD_SYMBOL="" -> disabled
+  // (envOr can't tell "unset" from "set empty", so check presence directly).
+  const sbdSymbol = env.ORACLE_SBD_SYMBOL === undefined ? "SBD" : env.ORACLE_SBD_SYMBOL.trim();
 
   const pollIntervalMs = envDurationMs(env, "ORACLE_POLL_INTERVAL", 60_000);
   const maxBlocksPerPoll = envUint(env, "ORACLE_MAX_BLOCKS", 100);

@@ -51,8 +51,7 @@ class Config:
     # watching the same network must set the SAME symbol, since consensus
     # only ever sees the resulting integer millisteem.
     steem_symbol: str = "STEEM"
-    # Empty disables SBD extraction -- the v0.0.3 feature-gate
-    # (ORACLE_SBD_SYMBOL=SBD enables it once the chain can mint asbd).
+    # Overridden to "SBD" by main.py's default; empty here disables SBD extraction.
     sbd_symbol: str = ""
     poll_interval_seconds: float = 60.0
     max_blocks_per_poll: int = 100

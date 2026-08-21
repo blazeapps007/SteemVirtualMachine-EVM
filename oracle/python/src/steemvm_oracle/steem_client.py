@@ -183,9 +183,8 @@ def extract_gateway_transfers(
     sbd_symbol: str,
 ) -> list[Transfer]:
     """Scans a block for STEEM and SBD transfer operations whose recipient
-    is the gateway account. Leaving sbd_symbol "" disables SBD extraction
-    (the v0.0.3 feature-gate). Mirrors
-    oracle/go/relayer/steem.go's ExtractGatewayTransfers."""
+    is the gateway account. Leaving sbd_symbol "" disables SBD extraction.
+    Mirrors oracle/go/relayer/steem.go's ExtractGatewayTransfers."""
     if not block:
         return []
 

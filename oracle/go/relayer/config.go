@@ -16,10 +16,8 @@ type Config struct {
 	// relayer-side only — consensus sees just the integer millisteem — so every
 	// oracle watching the same network must set the SAME symbol.
 	SteemSymbol string
-	// SbdSymbol is the asset symbol that counts as bridgeable SBD (mainnet "SBD").
-	// Empty disables SBD extraction — the v0.0.3 feature-gate: validators set it
-	// (ORACLE_SBD_SYMBOL=SBD) once the chain has upgraded to v0.0.3, so SBD
-	// deposits are only attested when the chain can mint asbd.
+	// SbdSymbol is the asset symbol that counts as bridgeable SBD (mainnet
+	// "SBD", defaulted in main.go). Empty disables SBD extraction.
 	SbdSymbol string
 	// KeyName is the in-memory keyring key that signs attestation transactions —
 	// the validator's operator account, imported from the oracle env.

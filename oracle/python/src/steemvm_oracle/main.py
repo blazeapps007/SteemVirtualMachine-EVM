@@ -14,8 +14,8 @@ Configuration is entirely from environment variables (see ``oracle/.env.example`
     ORACLE_START_BLOCK    fresh-scan start: a block number, or "latest" to start
                            at Steem's current tip (new validators skip all history)
                            (default 0 = use the chain's relayer_start_block anchor)
-    ORACLE_SBD_SYMBOL     Steem symbol that counts as bridgeable SBD (e.g. "SBD");
-                           empty (default) disables SBD bridging -- the v0.0.3 feature-gate
+    ORACLE_SBD_SYMBOL     Steem symbol that counts as bridgeable SBD (default "SBD");
+                           set to "" to disable SBD bridging
     ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD_External + SBD/USD_External.
                            Empty skips those two pairs (see oracle/PROTOCOL.md SS7).
     ORACLE_CMC_BASE_URL   CoinMarketCap API base URL (default the production API)
@@ -57,7 +57,10 @@ def build_config(env: dict) -> tuple[str, str, str, Config]:
     state_dir = _env(env, "ORACLE_STATE_DIR", "/oracle-data")
 
     cfg = Config(steem_rpc_url=steem_rpc)
-    cfg.sbd_symbol = _env(env, "ORACLE_SBD_SYMBOL")
+    # Defaults to "SBD" now that the chain supports asbd bridging. Unset ->
+    # "SBD"; explicitly ORACLE_SBD_SYMBOL="" -> disabled (_env's "or default"
+    # can't tell "unset" from "set empty", so check presence directly).
+    cfg.sbd_symbol = env["ORACLE_SBD_SYMBOL"].strip() if "ORACLE_SBD_SYMBOL" in env else "SBD"
 
     poll_interval = _env(env, "ORACLE_POLL_INTERVAL")
     if poll_interval:
