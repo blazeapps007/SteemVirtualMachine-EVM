@@ -40,10 +40,23 @@ if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
 fi
 
 # cosmovisor layout: the launch binary lives in genesis/bin and runs from
-# block 1. On a fresh chain this bootstraps to THIS image's build; on a later
-# governance upgrade cosmovisor swaps to the staged binary at its height.
+# block 1. Refresh genesis/bin on EVERY start, not just when missing, as long
+# as cosmovisor hasn't already moved past it via a real coordinated
+# software-upgrade governance proposal (checked via the `current` symlink's
+# target). Without this, an ad-hoc rebuild-and-restart for a plain bug fix
+# (not a version bump — this repo's VERSION string is fixed in the Makefile
+# and doesn't change per-commit) would silently keep running whatever binary
+# was staged on the node's very first-ever boot, forever, no matter how many
+# times the image gets rebuilt — cosmovisor itself never re-checks genesis/bin
+# once `current` exists. `current` not existing yet (first-ever boot, before
+# cosmovisor has run once) also refreshes, since cosmovisor creates it
+# pointing at genesis on its first run.
 mkdir -p /root/.steemvm/cosmovisor/genesis/bin
-[ -f /root/.steemvm/cosmovisor/genesis/bin/steemvmd ] || cp /root/go/bin/steemvmd /root/.steemvm/cosmovisor/genesis/bin/steemvmd
+CURRENT_LINK=/root/.steemvm/cosmovisor/current
+GENESIS_DIR=/root/.steemvm/cosmovisor/genesis
+if [ ! -e "$CURRENT_LINK" ] || [ "$(readlink -f "$CURRENT_LINK" 2>/dev/null)" = "$(readlink -f "$GENESIS_DIR" 2>/dev/null)" ]; then
+  cp /root/go/bin/steemvmd /root/.steemvm/cosmovisor/genesis/bin/steemvmd
+fi
 # Stage this image's binary under its own stamped version name too.
 # cosmovisor swaps to it only when an on-chain plan of that exact name
 # reaches its height, so a mismatched build can't be mis-staged.
