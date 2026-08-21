@@ -123,7 +123,7 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		app.appCodec,
 		app.GetKey(evmtypes.StoreKey),
 		evmObjectKey,
-		app.GetStoreKeys(),
+		app.GetStoreKeysMap(),
 		authtypes.NewModuleAddress(govtypes.ModuleName),
 		app.AuthKeeper,
 		app.BankKeeper,

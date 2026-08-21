@@ -391,13 +391,29 @@ func BlockedAddresses() map[string]bool {
 
 	return result
 }
-// GetStoreKeysMap returns every registered store key (KV, object, etc.) as
-// the []storetypes.StoreKey slice the EVM keeper's constructor expects for
-// cross-module store access (cosmos/evm v0.7.0 evmkeeper.NewKeeper's 4th
-// arg). Prior to the v0.7.0 migration this filtered down to only
-// *storetypes.KVStoreKey and returned a map; the new keeper builds its own
-// name-keyed map internally from the raw slice, so this is now a thin
-// wrapper around GetStoreKeys kept for API compatibility.
+
+// GetStoreKeysMap returns the []storetypes.StoreKey slice the EVM keeper's
+// constructor expects for cross-module store access (cosmos/evm v0.7.0
+// evmkeeper.NewKeeper's 4th arg), filtered to only *storetypes.KVStoreKey and
+// *storetypes.ObjectStoreKey entries. Filtering matters: cosmos/evm's
+// x/vm/store/snapshotmulti.NewStore partitions every key it's handed into
+// "is it a *storetypes.KVStoreKey?" vs. "must be Object-store-shaped" — it
+// never checks for *storetypes.ObjectStoreKey specifically, so any other
+// legacy key type (e.g. x/params' still-unmigrated *storetypes.TransientStoreKey,
+// picked up by the unfiltered app.GetStoreKeys()) falls into the wrong branch
+// and panics with "store with key ... is not ObjKVStore" on the first
+// stateful precompile call of any tx. Nothing in this app (or x/erc20, which
+// doesn't use a legacy params Subspace) needs x/params' transient store
+// reachable through this EVM cross-store mechanism, so excluding it has no
+// functional downside.
 func (app *App) GetStoreKeysMap() []storetypes.StoreKey {
-	return app.GetStoreKeys()
+	all := app.GetStoreKeys()
+	filtered := make([]storetypes.StoreKey, 0, len(all))
+	for _, k := range all {
+		switch k.(type) {
+		case *storetypes.KVStoreKey, *storetypes.ObjectStoreKey:
+			filtered = append(filtered, k)
+		}
+	}
+	return filtered
 }
