@@ -6,9 +6,12 @@
 # -> new SteemVM key -> Steem name registration -> faucet + stake -> create
 # validator -> start oracle.
 #
-# Usage: ./new-validator.sh [--cleanup | --cleanup-full]
+# Usage: ./new-validator.sh [--cleanup | --cleanup-full | --fix-config]
 #   --cleanup       wipes generated files + `docker compose down` (keeps node home/volumes)
 #   --cleanup-full  --cleanup plus wipes $STEEMVM_HOME and volumes (irreversible)
+#   --fix-config    patches known-stale config values (e.g. mempool.type) on an
+#                    already-running validator, then restarts the node. Does NOT
+#                    touch keys/validator.json/mnemonic. Safe to run any time.
 #
 # Overridable via env: STAKE_AMOUNT, COMMISSION_RATE, COMMISSION_MAX_RATE,
 # COMMISSION_MAX_CHANGE_RATE, MIN_SELF_DELEGATION, GAS_PRICES, START_TIMEOUT,
@@ -69,6 +72,42 @@ command -v docker >/dev/null || die "docker not found on PATH"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
 [ -f docker-compose.yml ] || die "run this from the repository root."
 
+# fix_mempool_type patches a known-stale config.toml value: an old/carried-over
+# config.toml (repo-level Instructions/ cache, or an already-initialized node's
+# own ~/.steemvm/config/config.toml) can still have [mempool] type = "flood"
+# (the stock cosmos-sdk default) instead of "app", which this chain's EVM
+# mempool integration rejects at boot: "EVM mempool enabled, but comet-bft has
+# invalid config.toml:mempool.type (want 'app', got 'flood')". Patches in
+# place (not a full re-copy) so any other local hand-edits (persistent_peers,
+# etc.) are untouched. Returns 0 if it changed something, 1 if nothing to do.
+fix_mempool_type() {
+  local f="$1"
+  [ -f "$f" ] || return 1
+  awk '/^\[mempool\]/{m=1;next} /^\[/{m=0} m && /^type[ \t]*=[ \t]*"flood"/{found=1} END{exit !found}' "$f" || return 1
+  sed -i.bak '/^\[mempool\]/,/^\[/{s/^type = "flood"/type = "app"/}' "$f"
+  rm -f "$f.bak"
+  warn "patched stale mempool.type \"flood\" -> \"app\" in $f"
+  return 0
+}
+
+# ── --fix-config ─────────────────────────────────────────────────────────────
+run_fix_config() {
+  log "Checking for known stale config values…"
+  changed=0
+  [ -f Instructions/config.toml ] || cp Instructions/config.toml.example Instructions/config.toml
+  if fix_mempool_type Instructions/config.toml; then changed=1; fi
+  if fix_mempool_type "$STEEMVM_HOME/config/config.toml"; then changed=1; fi
+  if [ "$changed" = "1" ]; then
+    log "Restarting the node to pick up the fix…"
+    $COMPOSE down
+    $COMPOSE up -d --build
+    ok "Done — node restarted with the corrected config."
+  else
+    ok "No stale config values found — nothing to fix."
+  fi
+  exit 0
+}
+
 # ── --cleanup / --cleanup-full ──────────────────────────────────────────────
 run_cleanup() {
   local full="${1:-}"
@@ -97,6 +136,7 @@ run_cleanup() {
 case "${1:-}" in
   --cleanup)      run_cleanup ;;
   --cleanup-full) run_cleanup full ;;
+  --fix-config)   run_fix_config ;;
 esac
 
 # clear stale files from an earlier/interrupted run
@@ -184,6 +224,8 @@ log "Setting node moniker to '$STEEM_USERNAME'…"
 [ -f Instructions/config.toml ] || cp Instructions/config.toml.example Instructions/config.toml
 sed -i.bak "s/^moniker = .*/moniker = \"$STEEM_USERNAME\"/" Instructions/config.toml
 rm -f Instructions/config.toml.bak
+fix_mempool_type Instructions/config.toml || true
+fix_mempool_type "$STEEMVM_HOME/config/config.toml" || true
 
 log "Starting the node…"
 $COMPOSE up -d
