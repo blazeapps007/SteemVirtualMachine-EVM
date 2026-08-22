@@ -338,7 +338,15 @@ ok "Node is fully synced (height $height)."
 
 # ── 6. generate a fresh SteemVM key and save the address ────────────────────
 log "Generating SteemVM key '$STEEM_USERNAME'…"
-kf_i keys delete "$STEEM_USERNAME" -y || true
+# The leftover-home check earlier already guarantees a fresh or freshly-wiped
+# keyring by this point, so this is only a safety net for the rare edge case
+# where a stale key survives some other way — check first so the common case
+# (key genuinely doesn't exist) doesn't print a confusing "not found" as if
+# something went wrong.
+if kf_i keys show "$STEEM_USERNAME" >/dev/null 2>&1; then
+  warn "an existing key named '$STEEM_USERNAME' was found — deleting it to start fresh."
+  kf_i keys delete "$STEEM_USERNAME" -y
+fi
 
 TMP_KEYADD="$(mktemp)"
 node_i keys add "$STEEM_USERNAME" --key-type "$KEY_TYPE" --keyring-backend "$KEYRING" --home "$HOME_DIR" | tee "$TMP_KEYADD"
