@@ -312,7 +312,13 @@ while :; do
     # endpoint) — top-level keys are already sync_info/catching_up directly.
     STATUS="$(node status 2>/dev/null || true)"
     if [ -n "$STATUS" ]; then
-      CATCHING_UP="$(printf '%s' "$STATUS" | jq -r '.sync_info.catching_up // empty' 2>/dev/null || true)"
+      # NOT `// empty`: jq's `//` treats `false` as falsy too, same as
+      # null/missing — that silently swallows the one value we actually need
+      # to detect (catching_up genuinely becoming false), leaving this loop
+      # spinning forever even once the node is fully synced. A bare filter
+      # gives "true"/"false" for real values and an empty string only when
+      # the key is genuinely absent (null), which is the fallback we want.
+      CATCHING_UP="$(printf '%s' "$STATUS" | jq -r '.sync_info.catching_up' 2>/dev/null || true)"
       h="$(printf '%s' "$STATUS" | jq -r '.sync_info.latest_block_height // empty' 2>/dev/null || true)"
       [ -n "$h" ] && height="$h"
       log "sync check: height=${height:-0} catching_up=${CATCHING_UP:-<empty>}"
