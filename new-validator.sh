@@ -185,6 +185,28 @@ if [ -f "$VALIDATOR_JSON" ] || [ -f "$ADDRESS_FILE" ] || [ -f "$MNEMONIC_FILE" ]
   rm -f "$VALIDATOR_JSON" "$ADDRESS_FILE" "$MNEMONIC_FILE"
 fi
 
+# check for a leftover node home from an earlier run. This script ALWAYS
+# generates a brand-new SteemVM key and always create-validators fresh — a
+# stale $STEEMVM_HOME left over from an interrupted/earlier run (old
+# priv_validator_key.json, partial chain data) is exactly what caused real
+# failures this session: an orphaned validator identity whose consensus key
+# no longer matched anything useful, and nodes stuck on inconsistent partial
+# state. Since this script can never safely reuse an existing home anyway,
+# offer to wipe it up front instead of limping along on stale state.
+if [ -f "$STEEMVM_HOME/config/priv_validator_key.json" ]; then
+  warn "$STEEMVM_HOME already has a node identity from an earlier run."
+  warn "This script always generates a fresh SteemVM key and validator — leaving that"
+  warn "old node home in place risks the exact stale-state failures seen before."
+  read -rp "Wipe $STEEMVM_HOME and docker volumes, and start completely fresh? Type YES to confirm: " WIPE_HOME < /dev/tty
+  if [ "$WIPE_HOME" = "YES" ]; then
+    $COMPOSE down -v 2>&1 || true
+    rm -rf "$STEEMVM_HOME"
+    ok "Wiped $STEEMVM_HOME."
+  else
+    die "aborting — back up anything you need from $STEEMVM_HOME first (e.g. an old mnemonic), or set STEEMVM_HOME to a different path, then try again."
+  fi
+fi
+
 # ── 1. Steem username → moniker + key name ────────────────────────────────
 read -rp "Steem username (becomes your validator moniker): " STEEM_USERNAME < /dev/tty
 [ -n "$STEEM_USERNAME" ] || die "a Steem username is required."
@@ -364,8 +386,34 @@ else
   done
   if [ -n "$REG_ID" ]; then
     ok "Registration #$REG_ID awaiting confirmation — confirming…"
-    kf_i tx steembridge confirm-name "$REG_ID" --from "$STEEM_USERNAME" --chain-id "$CHAIN_ID" \
-      --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y
+    # Retry a few times (transient timing/sync issues do happen) and verify
+    # against actual on-chain state afterward — sync broadcast mode only
+    # proves CheckTx acceptance, not that the tx actually succeeded, and this
+    # script previously just trusted the broadcast blindly and pressed on
+    # even when confirm-name had genuinely failed, surfacing only later as a
+    # confusing "no active name-service registration" at create-validator.
+    CONFIRM_OK=0
+    for attempt in 1 2 3; do
+      TMP_CONFIRM="$(mktemp)"
+      set +e
+      kf_i tx steembridge confirm-name "$REG_ID" --from "$STEEM_USERNAME" --chain-id "$CHAIN_ID" \
+        --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y 2>&1 | tee "$TMP_CONFIRM"
+      rc=$?
+      set -e
+      CONFIRM_OUT="$(cat "$TMP_CONFIRM")"
+      rm -f "$TMP_CONFIRM"
+      if [ $rc -eq 0 ] && ! printf '%s' "$CONFIRM_OUT" | grep -qE '"code": [1-9]|does not exist|unauthorized'; then
+        CONFIRM_OK=1
+        break
+      fi
+      warn "confirm-name attempt $attempt failed, retrying in 10s…"
+      sleep 10
+    done
+    [ "$CONFIRM_OK" = "1" ] || die "confirm-name failed after 3 attempts. Run manually: $BIN tx steembridge confirm-name $REG_ID --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
+
+    sleep 6
+    RESOLVED_ADDR="$(kf query steembridge resolve-name "$STEEM_USERNAME" --output json 2>/dev/null | jq -r '.name.address // empty' 2>/dev/null || true)"
+    [ "$RESOLVED_ADDR" = "$ADDR" ] || die "confirm-name broadcast but the name isn't ACTIVE on-chain yet. Check: $BIN query steembridge resolve-name $STEEM_USERNAME --home $HOME_DIR"
     ok "Name '$STEEM_USERNAME' confirmed ACTIVE for $ADDR."
   fi
 fi
