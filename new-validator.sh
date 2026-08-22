@@ -315,10 +315,15 @@ while :; do
       CATCHING_UP="$(printf '%s' "$STATUS" | jq -r '.sync_info.catching_up // empty' 2>/dev/null || true)"
       h="$(printf '%s' "$STATUS" | jq -r '.sync_info.latest_block_height // empty' 2>/dev/null || true)"
       [ -n "$h" ] && height="$h"
+      log "sync check: height=${height:-0} catching_up=${CATCHING_UP:-<empty>}"
       if [ "$CATCHING_UP" = "false" ] && [ "${height:-0}" -ge 1 ] 2>/dev/null; then
         break
       fi
+    else
+      warn "sync check: 'node status' returned nothing (container not ready yet?)"
     fi
+  else
+    warn "sync check: $BIN not found/executable in $CONTAINER yet"
   fi
   [ "$(date +%s)" -ge "$deadline" ] && die "node did not finish syncing within ${START_TIMEOUT}s (still at height ${height:-0}). Check: \`$COMPOSE logs -f steemvm\`."
   sleep 10
