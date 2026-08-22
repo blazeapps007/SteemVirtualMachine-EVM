@@ -93,6 +93,9 @@ func applyChainDefaultsToGenesis(cmd *cobra.Command) error {
 	if err := patchEVMActiveStaticPrecompiles(appState); err != nil {
 		return fmt.Errorf("applying chain defaults to genesis (evm): %w", err)
 	}
+	if err := patchMintDefaults(appState); err != nil {
+		return fmt.Errorf("applying chain defaults to genesis (mint): %w", err)
+	}
 
 	newAppState, err := json.Marshal(appState)
 	if err != nil {
@@ -209,6 +212,65 @@ func patchSteembridgeDefaults(appState map[string]json.RawMessage) error {
 		return err
 	}
 	appState["steembridge"] = patched
+	return nil
+}
+
+// zeroDec is the JSON string form of a zero-valued LegacyDec (18 fixed
+// decimals, matching genesis.json's plain-JSON Dec encoding — never the
+// trimmed "0" form).
+const zeroDec = "0.000000000000000000"
+
+// patchMintDefaults zeroes out x/mint: this chain is bridged 1:1 from Steem
+// mainchain STEEM, there is no inflationary issuance by design (see
+// readme.md/CLAUDE.md), but `steemvmd init` otherwise inherits cosmos-sdk's
+// plain default mint genesis (13%/20%/7% inflation targeting 67% bonded) —
+// nothing previously zeroed this out here, so every fresh chain silently
+// launched with real, active inflation despite the documented design.
+// Zeroes both the params (the floor/ceiling/rate-of-change BeginBlocker
+// clamps to every block) and the initial minter state (so it never reads
+// nonzero even for the first block, before BeginBlocker's own clamp runs).
+func patchMintDefaults(appState map[string]json.RawMessage) error {
+	raw, ok := appState["mint"]
+	if !ok {
+		return nil
+	}
+	var mint map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &mint); err != nil {
+		return err
+	}
+
+	zeroJSON := json.RawMessage(`"` + zeroDec + `"`)
+
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(mint["params"], &params); err != nil {
+		return err
+	}
+	params["inflation_rate_change"] = zeroJSON
+	params["inflation_max"] = zeroJSON
+	params["inflation_min"] = zeroJSON
+	patchedParams, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	mint["params"] = patchedParams
+
+	var minter map[string]json.RawMessage
+	if err := json.Unmarshal(mint["minter"], &minter); err != nil {
+		return err
+	}
+	minter["inflation"] = zeroJSON
+	minter["annual_provisions"] = zeroJSON
+	patchedMinter, err := json.Marshal(minter)
+	if err != nil {
+		return err
+	}
+	mint["minter"] = patchedMinter
+
+	patched, err := json.Marshal(mint)
+	if err != nil {
+		return err
+	}
+	appState["mint"] = patched
 	return nil
 }
 

@@ -90,6 +90,46 @@ fix_mempool_type() {
   return 0
 }
 
+# fetch_statesync_trust queries $SEED_RPC for a recent, verifiable block
+# height+hash to use as state-sync's light-client trust anchor. Sets
+# TRUST_HEIGHT/TRUST_HASH; returns 1 (leaving both unset) on any failure so
+# the caller can fall back to a normal full replay from genesis instead.
+fetch_statesync_trust() {
+  TRUST_HEIGHT="" TRUST_HASH=""
+  command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
+  local latest h hash
+  latest="$(curl -fsS "${SEED_RPC%/}/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null)"
+  [ -n "$latest" ] || return 1
+  # Trust a height comfortably behind the tip — a snapshot at/before it is
+  # far more likely to already exist, and it stays safely inside the trust
+  # period. Floored at 1 for a very young chain (state-sync isn't useful yet
+  # anyway at that point; this just avoids a negative/zero height).
+  h=$((latest - 1000))
+  [ "$h" -lt 1 ] && h=1
+  hash="$(curl -fsS "${SEED_RPC%/}/commit?height=$h" 2>/dev/null | jq -r '.result.signed_header.commit.block_id.hash // empty' 2>/dev/null)"
+  [ -n "$hash" ] || return 1
+  TRUST_HEIGHT="$h" TRUST_HASH="$hash"
+  return 0
+}
+
+# enable_statesync patches a config.toml's [statesync] section (enable,
+# trust_height, trust_hash) so the new node fast-bootstraps from a snapshot
+# instead of fully replaying from genesis. Scoped to just that section so
+# nothing else is touched. Requires fetch_statesync_trust to have already
+# populated TRUST_HEIGHT/TRUST_HASH; no-ops (returns 1) otherwise.
+enable_statesync() {
+  local f="$1"
+  [ -f "$f" ] || return 1
+  [ -n "${TRUST_HEIGHT:-}" ] && [ -n "${TRUST_HASH:-}" ] || return 1
+  sed -i.bak \
+    -e '/^\[statesync\]/,/^\[/{s/^enable = false/enable = true/}' \
+    -e "/^\[statesync\]/,/^\[/{s/^trust_height = .*/trust_height = $TRUST_HEIGHT/}" \
+    -e "/^\[statesync\]/,/^\[/{s/^trust_hash = .*/trust_hash = \"$TRUST_HASH\"/}" \
+    "$f"
+  rm -f "$f.bak"
+  return 0
+}
+
 # ── --fix-config ─────────────────────────────────────────────────────────────
 run_fix_config() {
   log "Checking for known stale config values…"
@@ -217,6 +257,12 @@ else
   ok "Genesis staged from Instructions/genesis.json."
 fi
 
+if fetch_statesync_trust; then
+  ok "State-sync trust anchor: height $TRUST_HEIGHT."
+else
+  warn "could not determine a state-sync trust height from $SEED_RPC — will fall back to a full replay from genesis."
+fi
+
 # ── 5. set the node moniker and start the node ──────────────────────────────
 log "Setting node moniker to '$STEEM_USERNAME'…"
 # Instructions/config.toml is gitignored, seeded from .example only if missing —
@@ -226,23 +272,30 @@ sed -i.bak "s/^moniker = .*/moniker = \"$STEEM_USERNAME\"/" Instructions/config.
 rm -f Instructions/config.toml.bak
 fix_mempool_type Instructions/config.toml || true
 fix_mempool_type "$STEEMVM_HOME/config/config.toml" || true
+if enable_statesync Instructions/config.toml; then
+  ok "State-sync enabled — new node will fast-bootstrap from a snapshot instead of a full replay."
+fi
 
 log "Starting the node…"
 $COMPOSE up -d
 
-log "Waiting for block height ≥ 1 (timeout ${START_TIMEOUT}s)…"
+log "Waiting for the node to fully sync (timeout ${START_TIMEOUT}s)…"
 deadline=$(( $(date +%s) + START_TIMEOUT ))
 height=0
 while :; do
-  if docker exec "$CONTAINER" test -x "$BIN" 2>/dev/null; then
-    h="$(node status 2>/dev/null | grep -oE '"latest_block_height":"?[0-9]+"?' | grep -oE '[0-9]+' | head -1 || true)"
+  STATUS="$(curl -fsS http://localhost:26657/status 2>/dev/null || true)"
+  if [ -n "$STATUS" ]; then
+    CATCHING_UP="$(printf '%s' "$STATUS" | jq -r '.result.sync_info.catching_up // empty' 2>/dev/null || true)"
+    h="$(printf '%s' "$STATUS" | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null || true)"
     [ -n "$h" ] && height="$h"
+    if [ "$CATCHING_UP" = "false" ] && [ "${height:-0}" -ge 1 ] 2>/dev/null; then
+      break
+    fi
   fi
-  [ "${height:-0}" -ge 1 ] 2>/dev/null && break
-  [ "$(date +%s)" -ge "$deadline" ] && die "node did not reach height 1 within ${START_TIMEOUT}s. Check: \`$COMPOSE logs -f steemvm\`."
+  [ "$(date +%s)" -ge "$deadline" ] && die "node did not finish syncing within ${START_TIMEOUT}s (still at height ${height:-0}). Check: \`$COMPOSE logs -f steemvm\`."
   sleep 10
 done
-ok "Node is producing blocks (height $height)."
+ok "Node is fully synced (height $height)."
 
 # ── 6. generate a fresh SteemVM key and save the address ────────────────────
 log "Generating SteemVM key '$STEEM_USERNAME'…"
