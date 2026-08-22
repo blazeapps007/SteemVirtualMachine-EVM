@@ -305,13 +305,19 @@ log "Waiting for the node to fully sync (timeout ${START_TIMEOUT}s)…"
 deadline=$(( $(date +%s) + START_TIMEOUT ))
 height=0
 while :; do
-  STATUS="$(curl -fsS http://localhost:26657/status 2>/dev/null || true)"
-  if [ -n "$STATUS" ]; then
-    CATCHING_UP="$(printf '%s' "$STATUS" | jq -r '.result.sync_info.catching_up // empty' 2>/dev/null || true)"
-    h="$(printf '%s' "$STATUS" | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null || true)"
-    [ -n "$h" ] && height="$h"
-    if [ "$CATCHING_UP" = "false" ] && [ "${height:-0}" -ge 1 ] 2>/dev/null; then
-      break
+  if docker exec "$CONTAINER" test -x "$BIN" 2>/dev/null; then
+    # docker exec, not a host-side curl: avoids assuming the published RPC
+    # port is reachable from wherever this script happens to run. steemvmd's
+    # own `status` CLI output has NO "result" envelope (unlike the raw RPC
+    # endpoint) — top-level keys are already sync_info/catching_up directly.
+    STATUS="$(node status 2>/dev/null || true)"
+    if [ -n "$STATUS" ]; then
+      CATCHING_UP="$(printf '%s' "$STATUS" | jq -r '.sync_info.catching_up // empty' 2>/dev/null || true)"
+      h="$(printf '%s' "$STATUS" | jq -r '.sync_info.latest_block_height // empty' 2>/dev/null || true)"
+      [ -n "$h" ] && height="$h"
+      if [ "$CATCHING_UP" = "false" ] && [ "${height:-0}" -ge 1 ] 2>/dev/null; then
+        break
+      fi
     fi
   fi
   [ "$(date +%s)" -ge "$deadline" ] && die "node did not finish syncing within ${START_TIMEOUT}s (still at height ${height:-0}). Check: \`$COMPOSE logs -f steemvm\`."
