@@ -121,11 +121,12 @@ fetch_statesync_trust() {
   return 0
 }
 
-# A standing second peer (xpilar.witness), always included alongside
-# whatever $SEED_RPC resolves to, so every new validator connects to at
-# least two independent nodes instead of a single point of failure. Update
-# this if that node's identity/address ever changes.
-EXTRA_PERSISTENT_PEER="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:26656"
+# Standing extra peers (xpilar.witness, blaze.apps), always included
+# alongside whatever $SEED_RPC resolves to, so every new validator connects
+# to multiple independent nodes instead of a single point of failure.
+# Space-separated "id@host:26656" entries — add more here as needed, or
+# update an entry if that node's identity/address ever changes.
+EXTRA_PERSISTENT_PEERS="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:26656 9ce6a5ecd05e9bd8a7f455976b308094329d7937@167.235.9.31:26656"
 
 # fetch_seed_peer derives this network's persistent_peers/rpc_servers entries
 # LIVE from $SEED_RPC, instead of relying on Instructions/config.toml's
@@ -141,17 +142,20 @@ EXTRA_PERSISTENT_PEER="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:26
 fetch_seed_peer() {
   SEED_PEER="" SEED_RPC_LIST=""
   command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
-  local node_id host
+  local node_id host p
   node_id="$(curl -fsS "${SEED_RPC%/}/status" 2>/dev/null | jq -r '.result.node_info.id // empty' 2>/dev/null)"
   [ -n "$node_id" ] || return 1
   host="$(printf '%s' "$SEED_RPC" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')"
   [ -n "$host" ] || return 1
   SEED_PEER="${node_id}@${host}:26656"
-  # Don't duplicate the extra peer if $SEED_RPC already points at it.
-  case "$EXTRA_PERSISTENT_PEER" in
-    *"@${host}:"*) ;;
-    *) SEED_PEER="${SEED_PEER},${EXTRA_PERSISTENT_PEER}" ;;
-  esac
+  # Append the standing extras, skipping any whose host matches $SEED_RPC's
+  # own (avoids a duplicate self-peer entry).
+  for p in $EXTRA_PERSISTENT_PEERS; do
+    case "$p" in
+      *"@${host}:"*) ;;
+      *) SEED_PEER="${SEED_PEER},${p}" ;;
+    esac
+  done
   SEED_RPC_LIST="${SEED_RPC},${SEED_RPC}"
   return 0
 }
