@@ -90,20 +90,29 @@ fix_mempool_type() {
   return 0
 }
 
+# A snapshot can't exist before the chain has passed one snapshot-interval
+# (Instructions/app.toml.example ships snapshot-interval = 1000). On a chain
+# younger than this, state-sync's "discovering snapshots" phase hangs
+# forever — there's nothing to discover — so fetch_statesync_trust refuses
+# to hand back a trust anchor below this height and the caller falls back to
+# a normal replay from genesis instead (cheap anyway at this height).
+MIN_STATESYNC_HEIGHT=1500
+
 # fetch_statesync_trust queries $SEED_RPC for a recent, verifiable block
 # height+hash to use as state-sync's light-client trust anchor. Sets
-# TRUST_HEIGHT/TRUST_HASH; returns 1 (leaving both unset) on any failure so
-# the caller can fall back to a normal full replay from genesis instead.
+# TRUST_HEIGHT/TRUST_HASH; returns 1 (leaving both unset) on any failure —
+# including "chain too young for a snapshot to exist yet" — so the caller
+# can fall back to a normal full replay from genesis instead.
 fetch_statesync_trust() {
   TRUST_HEIGHT="" TRUST_HASH=""
   command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
   local latest h hash
   latest="$(curl -fsS "${SEED_RPC%/}/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null)"
   [ -n "$latest" ] || return 1
+  [ "$latest" -ge "$MIN_STATESYNC_HEIGHT" ] || return 1
   # Trust a height comfortably behind the tip — a snapshot at/before it is
   # far more likely to already exist, and it stays safely inside the trust
-  # period. Floored at 1 for a very young chain (state-sync isn't useful yet
-  # anyway at that point; this just avoids a negative/zero height).
+  # period.
   h=$((latest - 1000))
   [ "$h" -lt 1 ] && h=1
   hash="$(curl -fsS "${SEED_RPC%/}/commit?height=$h" 2>/dev/null | jq -r '.result.signed_header.commit.block_id.hash // empty' 2>/dev/null)"
@@ -324,7 +333,7 @@ fi
 if fetch_statesync_trust; then
   ok "State-sync trust anchor: height $TRUST_HEIGHT."
 else
-  warn "could not determine a state-sync trust height from $SEED_RPC — will fall back to a full replay from genesis."
+  warn "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — will fall back to a full replay from genesis (cheap at this height)."
 fi
 
 if fetch_seed_peer; then
