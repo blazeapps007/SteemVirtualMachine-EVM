@@ -214,7 +214,7 @@ external_address = ""
 seeds = ""
 
 # Comma separated list of nodes to keep persistent connections to
-persistent_peers = "54452516b79dd59f525a9f3a8f1094553bd48945@57.131.13.43:26656,3b98c9a62f8ae436d5a36505c8917396d4129337@167.235.9.31:26656,d77962811852c94e1d907def4424578f18f05dc5@95.217.44.178:26656"
+persistent_peers = "b20931fcca2666bfe45ff0dcf1094aea7633b0be@57.131.13.43:26656"
 
 # Path to address book
 addr_book_file = "config/addrbook.json"
@@ -380,7 +380,7 @@ enable = false
 # — see "Joining with state-sync" in Instructions/README.md. rpc_servers is
 # pre-filled with a public endpoint; add a second, different RPC as a witness
 # if you have one.
-rpc_servers = "http://167.235.9.31:26657,http://57.131.13.43:26657"
+rpc_servers = "https://svm-rpc.steemscanner.com,http://57.131.13.43:26657"
 trust_height = 0
 trust_hash = ""
 trust_period = "168h0m0s"
