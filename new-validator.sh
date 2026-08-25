@@ -181,6 +181,21 @@ enable_statesync() {
   return 0
 }
 
+# disable_statesync forces [statesync] enable = false. Needed because a prior
+# run of this script (e.g. before MIN_STATESYNC_HEIGHT existed, or while the
+# chain was still too young for any snapshot to exist) may have already
+# baked `enable = true` into an existing home's config.toml — enable_statesync
+# only ever flips false->true, so without this an already-bootstrapped,
+# stuck home has no way back to a plain replay from genesis.
+disable_statesync() {
+  local f="$1"
+  [ -f "$f" ] || return 1
+  grep -q '^\[statesync\]' "$f" || return 1
+  sed -i.bak -e '/^\[statesync\]/,/^\[/{s/^enable = true/enable = false/}' "$f"
+  rm -f "$f.bak"
+  return 0
+}
+
 # ── --fix-config ─────────────────────────────────────────────────────────────
 run_fix_config() {
   log "Checking for known stale config values…"
@@ -350,14 +365,32 @@ log "Setting node moniker to '$STEEM_USERNAME'…"
 sed -i.bak "s/^moniker = .*/moniker = \"$STEEM_USERNAME\"/" Instructions/config.toml
 rm -f Instructions/config.toml.bak
 fix_mempool_type Instructions/config.toml || true
+HOME_CONFIG_EXISTED=0
+[ -f "$STEEMVM_HOME/config/config.toml" ] && HOME_CONFIG_EXISTED=1
 fix_mempool_type "$STEEMVM_HOME/config/config.toml" || true
 apply_seed_peer Instructions/config.toml || true
+apply_seed_peer "$STEEMVM_HOME/config/config.toml" || true
 if enable_statesync Instructions/config.toml; then
   ok "State-sync enabled — new node will fast-bootstrap from a snapshot instead of a full replay."
+else
+  # Correct any stale enable=true left over from an earlier run of this
+  # script (e.g. before this chain had a snapshot to sync from) — otherwise
+  # an already-bootstrapped home stays stuck retrying state-sync forever,
+  # since Instructions/config.toml is only ever copied into a genuinely
+  # fresh home (see docker-entrypoint.sh), never re-synced into one that
+  # already has a priv_validator_key.json.
+  disable_statesync Instructions/config.toml || true
 fi
+enable_statesync "$STEEMVM_HOME/config/config.toml" || disable_statesync "$STEEMVM_HOME/config/config.toml" || true
 
 log "Starting the node…"
 $COMPOSE up -d
+if [ "$HOME_CONFIG_EXISTED" = "1" ]; then
+  # An existing home's config.toml was just patched in place — `up -d` alone
+  # won't make an already-running container reread it, so force a restart.
+  log "Existing node home found — restarting so it picks up the corrected config…"
+  $COMPOSE restart
+fi
 
 log "Waiting for the node to fully sync (timeout ${START_TIMEOUT}s)…"
 deadline=$(( $(date +%s) + START_TIMEOUT ))
