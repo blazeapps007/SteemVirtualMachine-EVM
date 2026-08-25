@@ -121,14 +121,20 @@ fetch_statesync_trust() {
   return 0
 }
 
+# A standing second peer (xpilar.witness), always included alongside
+# whatever $SEED_RPC resolves to, so every new validator connects to at
+# least two independent nodes instead of a single point of failure. Update
+# this if that node's identity/address ever changes.
+EXTRA_PERSISTENT_PEER="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:26656"
+
 # fetch_seed_peer derives this network's persistent_peers/rpc_servers entries
 # LIVE from $SEED_RPC, instead of relying on Instructions/config.toml's
 # static, easy-to-go-stale hardcoded values. A validator restart (e.g. after
 # a fresh-genesis reset) changes that node's P2P node ID every time, and
 # nothing keeps the committed template in sync automatically — deriving it
 # fresh here means this script can never connect to a stale/wrong peer as
-# long as $SEED_RPC itself is correct. Sets SEED_PEER ("id@host:26656") and
-# SEED_RPC_LIST ("SEED_RPC,SEED_RPC" — cometbft's light client wants 2+
+# long as $SEED_RPC itself is correct. Sets SEED_PEER ("id@host:26656[,extra]")
+# and SEED_RPC_LIST ("SEED_RPC,SEED_RPC" — cometbft's light client wants 2+
 # witnesses; reusing the one source twice isn't independently-verifying, but
 # this is a convenience default, not a security-critical public network).
 # Returns 1 (leaving both unset) on any failure.
@@ -141,6 +147,11 @@ fetch_seed_peer() {
   host="$(printf '%s' "$SEED_RPC" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')"
   [ -n "$host" ] || return 1
   SEED_PEER="${node_id}@${host}:26656"
+  # Don't duplicate the extra peer if $SEED_RPC already points at it.
+  case "$EXTRA_PERSISTENT_PEER" in
+    *"@${host}:"*) ;;
+    *) SEED_PEER="${SEED_PEER},${EXTRA_PERSISTENT_PEER}" ;;
+  esac
   SEED_RPC_LIST="${SEED_RPC},${SEED_RPC}"
   return 0
 }
