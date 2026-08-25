@@ -112,6 +112,48 @@ fetch_statesync_trust() {
   return 0
 }
 
+# fetch_seed_peer derives this network's persistent_peers/rpc_servers entries
+# LIVE from $SEED_RPC, instead of relying on Instructions/config.toml's
+# static, easy-to-go-stale hardcoded values. A validator restart (e.g. after
+# a fresh-genesis reset) changes that node's P2P node ID every time, and
+# nothing keeps the committed template in sync automatically — deriving it
+# fresh here means this script can never connect to a stale/wrong peer as
+# long as $SEED_RPC itself is correct. Sets SEED_PEER ("id@host:26656") and
+# SEED_RPC_LIST ("SEED_RPC,SEED_RPC" — cometbft's light client wants 2+
+# witnesses; reusing the one source twice isn't independently-verifying, but
+# this is a convenience default, not a security-critical public network).
+# Returns 1 (leaving both unset) on any failure.
+fetch_seed_peer() {
+  SEED_PEER="" SEED_RPC_LIST=""
+  command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
+  local node_id host
+  node_id="$(curl -fsS "${SEED_RPC%/}/status" 2>/dev/null | jq -r '.result.node_info.id // empty' 2>/dev/null)"
+  [ -n "$node_id" ] || return 1
+  host="$(printf '%s' "$SEED_RPC" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')"
+  [ -n "$host" ] || return 1
+  SEED_PEER="${node_id}@${host}:26656"
+  SEED_RPC_LIST="${SEED_RPC},${SEED_RPC}"
+  return 0
+}
+
+# apply_seed_peer patches persistent_peers/rpc_servers in a config.toml with
+# the live values from fetch_seed_peer, so this run always connects to the
+# actual current network instead of whatever Instructions/config.toml.example
+# last happened to have hardcoded. Returns 1 (no-op) if fetch_seed_peer never
+# succeeded.
+apply_seed_peer() {
+  local f="$1"
+  [ -f "$f" ] || return 1
+  [ -n "${SEED_PEER:-}" ] || return 1
+  sed -i.bak \
+    -e "s|^persistent_peers = .*|persistent_peers = \"$SEED_PEER\"|" \
+    -e "/^\[statesync\]/,/^\[/{s|^rpc_servers = .*|rpc_servers = \"$SEED_RPC_LIST\"|}" \
+    "$f"
+  rm -f "$f.bak"
+  warn "peers set live from \$SEED_RPC: $SEED_PEER"
+  return 0
+}
+
 # enable_statesync patches a config.toml's [statesync] section (enable,
 # trust_height, trust_hash) so the new node fast-bootstraps from a snapshot
 # instead of fully replaying from genesis. Scoped to just that section so
@@ -285,6 +327,12 @@ else
   warn "could not determine a state-sync trust height from $SEED_RPC — will fall back to a full replay from genesis."
 fi
 
+if fetch_seed_peer; then
+  ok "Live peer info fetched: $SEED_PEER"
+else
+  warn "could not fetch live peer info from $SEED_RPC — falling back to Instructions/config.toml's persistent_peers/rpc_servers (may be stale)."
+fi
+
 # ── 5. set the node moniker and start the node ──────────────────────────────
 log "Setting node moniker to '$STEEM_USERNAME'…"
 # Instructions/config.toml is gitignored, seeded from .example only if missing —
@@ -294,6 +342,7 @@ sed -i.bak "s/^moniker = .*/moniker = \"$STEEM_USERNAME\"/" Instructions/config.
 rm -f Instructions/config.toml.bak
 fix_mempool_type Instructions/config.toml || true
 fix_mempool_type "$STEEMVM_HOME/config/config.toml" || true
+apply_seed_peer Instructions/config.toml || true
 if enable_statesync Instructions/config.toml; then
   ok "State-sync enabled — new node will fast-bootstrap from a snapshot instead of a full replay."
 fi
