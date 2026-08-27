@@ -1,18 +1,20 @@
 package app
 
 import (
-	_ "steemvm/x/steembridge/module"
-	steembridgemoduletypes "steemvm/x/steembridge/types"
+	_ "steemvm/x/oracle/bridge/module"
+	steembridgemoduletypes "steemvm/x/oracle/bridge/types"
+	_ "steemvm/x/oracle/data/module"
+	oracledatamoduletypes "steemvm/x/oracle/data/types"
+	_ "steemvm/x/oracle/module"
+	oraclemoduletypes "steemvm/x/oracle/types"
 	_ "steemvm/x/steemvm/module"
 	steemvmmoduletypes "steemvm/x/steemvm/types"
-	"time"
 
 	runtimev1alpha1 "cosmossdk.io/api/cosmos/app/runtime/v1alpha1"
 	appv1alpha1 "cosmossdk.io/api/cosmos/app/v1alpha1"
 	authmodulev1 "cosmossdk.io/api/cosmos/auth/module/v1"
 	authzmodulev1 "cosmossdk.io/api/cosmos/authz/module/v1"
 	bankmodulev1 "cosmossdk.io/api/cosmos/bank/module/v1"
-	circuitmodulev1 "cosmossdk.io/api/cosmos/circuit/module/v1"
 	consensusmodulev1 "cosmossdk.io/api/cosmos/consensus/module/v1"
 	distrmodulev1 "cosmossdk.io/api/cosmos/distribution/module/v1"
 	epochsmodulev1 "cosmossdk.io/api/cosmos/epochs/module/v1"
@@ -20,9 +22,7 @@ import (
 	feegrantmodulev1 "cosmossdk.io/api/cosmos/feegrant/module/v1"
 	genutilmodulev1 "cosmossdk.io/api/cosmos/genutil/module/v1"
 	govmodulev1 "cosmossdk.io/api/cosmos/gov/module/v1"
-	groupmodulev1 "cosmossdk.io/api/cosmos/group/module/v1"
 	mintmodulev1 "cosmossdk.io/api/cosmos/mint/module/v1"
-	nftmodulev1 "cosmossdk.io/api/cosmos/nft/module/v1"
 	paramsmodulev1 "cosmossdk.io/api/cosmos/params/module/v1"
 	slashingmodulev1 "cosmossdk.io/api/cosmos/slashing/module/v1"
 	stakingmodulev1 "cosmossdk.io/api/cosmos/staking/module/v1"
@@ -30,16 +30,12 @@ import (
 	upgrademodulev1 "cosmossdk.io/api/cosmos/upgrade/module/v1"
 	vestingmodulev1 "cosmossdk.io/api/cosmos/vesting/module/v1"
 	"cosmossdk.io/depinject/appconfig"
-	_ "cosmossdk.io/x/circuit" // import for side-effects
-	circuittypes "cosmossdk.io/x/circuit/types"
-	_ "cosmossdk.io/x/evidence" // import for side-effects
-	evidencetypes "cosmossdk.io/x/evidence/types"
-	"cosmossdk.io/x/feegrant"
-	_ "cosmossdk.io/x/feegrant/module" // import for side-effects
-	"cosmossdk.io/x/nft"
-	_ "cosmossdk.io/x/nft/module" // import for side-effects
-	_ "cosmossdk.io/x/upgrade"    // import for side-effects
-	upgradetypes "cosmossdk.io/x/upgrade/types"
+	_ "github.com/cosmos/cosmos-sdk/x/evidence" // import for side-effects
+	evidencetypes "github.com/cosmos/cosmos-sdk/x/evidence/types"
+	"github.com/cosmos/cosmos-sdk/x/feegrant"
+	_ "github.com/cosmos/cosmos-sdk/x/feegrant/module" // import for side-effects
+	_ "github.com/cosmos/cosmos-sdk/x/upgrade"    // import for side-effects
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	_ "github.com/cosmos/cosmos-sdk/x/auth/tx/config"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -60,8 +56,6 @@ import (
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	_ "github.com/cosmos/cosmos-sdk/x/gov" // import for side-effects
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	"github.com/cosmos/cosmos-sdk/x/group"
-	_ "github.com/cosmos/cosmos-sdk/x/group/module" // import for side-effects
 	_ "github.com/cosmos/cosmos-sdk/x/mint"         // import for side-effects
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	_ "github.com/cosmos/cosmos-sdk/x/params" // import for side-effects
@@ -73,10 +67,9 @@ import (
 	erc20moduletypes "github.com/cosmos/evm/x/erc20/types"
 	feemarketmoduletypes "github.com/cosmos/evm/x/feemarket/types"
 	evmmoduletypes "github.com/cosmos/evm/x/vm/types"
-	icatypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/types"
-	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
-	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
-	"google.golang.org/protobuf/types/known/durationpb"
+	icatypes "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/types"
+	ibctransfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
+	ibcexported "github.com/cosmos/ibc-go/v11/modules/core/exported"
 )
 
 var (
@@ -87,20 +80,22 @@ var (
 		{Account: stakingtypes.BondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: stakingtypes.NotBondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: govtypes.ModuleName, Permissions: []string{authtypes.Burner}},
-		{Account: nft.ModuleName},
 		{Account: ibctransfertypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
 		{Account: icatypes.ModuleName},
 		{Account: evmmoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}}, {Account: erc20moduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
 		{Account: feemarketmoduletypes.ModuleName},
-		// blocked account addresses
-		{Account: steembridgemoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}}}
+		{Account: steembridgemoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
+		// STEEMBLACKHOLE: bridge mints out of it and its balance is burned every
+		// EndBlock (Minter+Burner). bridge_reward holds the 0.25% bridge fee until
+		// it is routed to stakers (no special perms).
+		{Account: steembridgemoduletypes.BlackHoleModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
+		{Account: steembridgemoduletypes.BridgeRewardModuleName}}
 	blockAccAddrs = []string{
 		authtypes.FeeCollectorName,
 		distrtypes.ModuleName,
 		minttypes.ModuleName,
 		stakingtypes.BondedPoolName,
 		stakingtypes.NotBondedPoolName,
-		nft.ModuleName,
 		// We allow the following module accounts to receive funds:
 		// govtypes.ModuleName
 	}
@@ -123,6 +118,9 @@ var (
 					// NOTE: staking module is required if HistoricalEntries param > 0
 					BeginBlockers: []string{
 						minttypes.ModuleName,
+						// steembridge fee-split (SplitFees) must run BEFORE distribution's
+						// BeginBlocker consumes the fee_collector balance.
+						steembridgemoduletypes.ModuleName,
 						distrtypes.ModuleName,
 						slashingtypes.ModuleName,
 						evidencetypes.ModuleName,
@@ -132,14 +130,21 @@ var (
 						// ibc modules
 						ibcexported.ModuleName,
 						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName},
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName},
 					EndBlockers: []string{
+						// bank's EndBlock (CreditVirtualAccounts) is new as of
+						// cosmos-sdk v0.54; upstream evmd places it first.
+						banktypes.ModuleName,
 						govtypes.ModuleName,
 						stakingtypes.ModuleName,
 						feegrant.ModuleName,
-						group.ModuleName,
 						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName},
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName,
+						// The parent oracle engine evaluates the unified slashing window
+						// LAST, after the duty modules have reported this block's
+						// participation (x/oracle/data in its EndBlock, x/oracle/bridge
+						// during tx handling).
+						oraclemoduletypes.ModuleName},
 					// The following is mostly only needed when ModuleName != StoreKey name.
 					OverrideStoreKeys: []*runtimev1alpha1.StoreKeyConfig{
 						{
@@ -150,6 +155,24 @@ var (
 					// NOTE: The genutils module must occur after staking so that pools are
 					// properly initialized with tokens from genesis accounts.
 					// NOTE: The genutils module must also occur after auth so that it can access the params from auth.
+					// NOTE: genutils delivers gentxs through the full ante handler chain,
+					// which (as of cosmos/evm v0.7.0, since WithDefaultEvmCoinInfo is gone)
+					// needs the evm module's own InitGenesis to have already hydrated the
+					// process-global evmCoinInfo — evmtypes.ModuleName (and feemarket/erc20,
+					// which it depends on) MUST run before genutiltypes.ModuleName, or a
+					// fresh-chain gentx delivery panics with "global evmCoinInfo is not set
+					// yet!". Matches upstream evmd's SetOrderInitGenesis ordering.
+					//
+					// steembridgemoduletypes/oracledatamoduletypes/oraclemoduletypes
+					// deliberately stay AFTER genutiltypes, unlike evm/feemarket/erc20: the
+					// steembridge validator-identity ante gate (ValidateValidatorCreationEligibility)
+					// relies on steembridge's own Params not being set yet when genesis
+					// gentxs are delivered — that ErrNotFound is its documented signal to
+					// trust genesis validators unconditionally (see
+					// x/oracle/bridge/keeper/validator_identity.go). Reordering steembridge
+					// ahead of genutil here would make Params visible during gentx delivery
+					// and start enforcing the identity gate against genesis validators,
+					// which is not how this app is designed to boot.
 					InitGenesis: []string{
 						consensustypes.ModuleName,
 						authtypes.ModuleName,
@@ -159,22 +182,21 @@ var (
 						slashingtypes.ModuleName,
 						govtypes.ModuleName,
 						minttypes.ModuleName,
-						genutiltypes.ModuleName,
-						evidencetypes.ModuleName,
-						authz.ModuleName,
-						feegrant.ModuleName,
-						vestingtypes.ModuleName,
-						nft.ModuleName,
-						group.ModuleName,
-						upgradetypes.ModuleName,
-						circuittypes.ModuleName,
-						epochstypes.ModuleName,
 						// ibc modules
 						ibcexported.ModuleName,
 						ibctransfertypes.ModuleName,
 						icatypes.ModuleName,
-						// chain modules
-						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName, steembridgemoduletypes.ModuleName},
+						// evm stack: must precede genutil (see note above)
+						steemvmmoduletypes.ModuleName, erc20moduletypes.ModuleName, feemarketmoduletypes.ModuleName, evmmoduletypes.ModuleName,
+						genutiltypes.ModuleName,
+						// oracle/bridge stack: must follow genutil (see note above)
+						steembridgemoduletypes.ModuleName, oracledatamoduletypes.ModuleName, oraclemoduletypes.ModuleName,
+						evidencetypes.ModuleName,
+						authz.ModuleName,
+						feegrant.ModuleName,
+						vestingtypes.ModuleName,
+						upgradetypes.ModuleName,
+						epochstypes.ModuleName},
 				}),
 			},
 			{
@@ -235,17 +257,6 @@ var (
 				Config: appconfig.WrapAny(&mintmodulev1.Module{}),
 			},
 			{
-				Name: group.ModuleName,
-				Config: appconfig.WrapAny(&groupmodulev1.Module{
-					MaxExecutionPeriod: durationpb.New(time.Second * 1209600),
-					MaxMetadataLen:     255,
-				}),
-			},
-			{
-				Name:   nft.ModuleName,
-				Config: appconfig.WrapAny(&nftmodulev1.Module{}),
-			},
-			{
 				Name:   feegrant.ModuleName,
 				Config: appconfig.WrapAny(&feegrantmodulev1.Module{}),
 			},
@@ -256,10 +267,6 @@ var (
 			{
 				Name:   consensustypes.ModuleName,
 				Config: appconfig.WrapAny(&consensusmodulev1.Module{}),
-			},
-			{
-				Name:   circuittypes.ModuleName,
-				Config: appconfig.WrapAny(&circuitmodulev1.Module{}),
 			},
 			{
 				Name:   paramstypes.ModuleName,
@@ -275,6 +282,12 @@ var (
 			}, {
 				Name:   steembridgemoduletypes.ModuleName,
 				Config: appconfig.WrapAny(&steembridgemoduletypes.Module{}),
+			}, {
+				Name:   oracledatamoduletypes.ModuleName,
+				Config: appconfig.WrapAny(&oracledatamoduletypes.Module{}),
+			}, {
+				Name:   oraclemoduletypes.ModuleName,
+				Config: appconfig.WrapAny(&oraclemoduletypes.Module{}),
 			}},
 	})
 )

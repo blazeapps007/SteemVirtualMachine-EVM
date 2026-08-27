@@ -2,7 +2,7 @@ package app
 
 import (
 	"cosmossdk.io/core/appmodule"
-	storetypes "cosmossdk.io/store/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
@@ -11,27 +11,26 @@ import (
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	erc20 "github.com/cosmos/evm/x/erc20"
 	erc20v2 "github.com/cosmos/evm/x/erc20/v2"
-	icamodule "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts"
-	icacontroller "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller"
-	icacontrollerkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/keeper"
-	icacontrollertypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/types"
-	icahost "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/host"
-	icahostkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/host/keeper"
-	icahosttypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/host/types"
-	icatypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/types"
-	ibctransfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer"
-	ibctransferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
-	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
-	ibctransferv2 "github.com/cosmos/ibc-go/v10/modules/apps/transfer/v2"
-	ibc "github.com/cosmos/ibc-go/v10/modules/core"
-	ibcclienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types" // nolint:staticcheck // Deprecated: params key table is needed for params migration
-	ibcconnectiontypes "github.com/cosmos/ibc-go/v10/modules/core/03-connection/types"
-	porttypes "github.com/cosmos/ibc-go/v10/modules/core/05-port/types"
-	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
-	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
-	ibckeeper "github.com/cosmos/ibc-go/v10/modules/core/keeper"
-	solomachine "github.com/cosmos/ibc-go/v10/modules/light-clients/06-solomachine"
-	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
+	icamodule "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts"
+	icacontroller "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/controller"
+	icacontrollerkeeper "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/controller/keeper"
+	icacontrollertypes "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/controller/types"
+	icahost "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/host"
+	icahostkeeper "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/host/keeper"
+	icahosttypes "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/host/types"
+	icatypes "github.com/cosmos/ibc-go/v11/modules/apps/27-interchain-accounts/types"
+	ibctransfer "github.com/cosmos/ibc-go/v11/modules/apps/transfer"
+	ibctransferkeeper "github.com/cosmos/ibc-go/v11/modules/apps/transfer/keeper"
+	ibctransfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
+	ibctransferv2 "github.com/cosmos/ibc-go/v11/modules/apps/transfer/v2"
+	ibc "github.com/cosmos/ibc-go/v11/modules/core"
+	ibcclienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
+	porttypes "github.com/cosmos/ibc-go/v11/modules/core/05-port/types"
+	ibcapi "github.com/cosmos/ibc-go/v11/modules/core/api"
+	ibcexported "github.com/cosmos/ibc-go/v11/modules/core/exported"
+	ibckeeper "github.com/cosmos/ibc-go/v11/modules/core/keeper"
+	solomachine "github.com/cosmos/ibc-go/v11/modules/light-clients/06-solomachine"
+	ibctm "github.com/cosmos/ibc-go/v11/modules/light-clients/07-tendermint"
 )
 
 // registerIBCModules register IBC keepers and non dependency inject modules.
@@ -46,31 +45,34 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 		return err
 	}
 
-	// register the key tables for legacy param subspaces
-	keyTable := ibcclienttypes.ParamKeyTable()
-	keyTable.RegisterParamSet(&ibcconnectiontypes.Params{})
-	app.ParamsKeeper.Subspace(ibcexported.ModuleName).WithKeyTable(keyTable)
-	app.ParamsKeeper.Subspace(ibctransfertypes.ModuleName).WithKeyTable(ibctransfertypes.ParamKeyTable())
-	app.ParamsKeeper.Subspace(icacontrollertypes.SubModuleName).WithKeyTable(icacontrollertypes.ParamKeyTable())
-	app.ParamsKeeper.Subspace(icahosttypes.SubModuleName).WithKeyTable(icahosttypes.ParamKeyTable())
-
+	// NOTE: ibc-go v11 removed legacy x/params subspace support entirely —
+	// ibcclienttypes.ParamKeyTable, ibctransfertypes.ParamKeyTable,
+	// icacontrollertypes.ParamKeyTable, and icahosttypes.ParamKeyTable no
+	// longer exist, and none of the keeper constructors below take a
+	// legacy subspace argument any more. The v0.6-era key-table
+	// registration block and every app.GetSubspace(...) call that fed these
+	// constructors have been removed accordingly (this is a fresh-chain
+	// launch, so there is no legacy param state to migrate).
 	govModuleAddr, _ := app.AuthKeeper.AddressCodec().BytesToString(authtypes.NewModuleAddress(govtypes.ModuleName))
 
-	// Create IBC keeper
+	// Create IBC keeper. ibc-go v11 dropped the capability-keeper argument
+	// (already nil pre-migration, nothing to migrate) from the signature.
 	app.IBCKeeper = ibckeeper.NewKeeper(
 		app.appCodec,
 		runtime.NewKVStoreService(app.GetKey(ibcexported.StoreKey)),
-		app.GetSubspace(ibcexported.ModuleName),
 		app.UpgradeKeeper,
 		govModuleAddr,
 	)
 
-	// Create IBC transfer keeper
+	// Create IBC transfer keeper. ibc-go v11 returns *transferkeeper.Keeper
+	// (App.TransferKeeper is now a pointer field — see app.go), takes the
+	// address codec inline (no more SetAddressCodec), and drops the
+	// duplicate ICS4Wrapper/ChannelKeeper param (the single channelKeeper
+	// param below doubles as the default ICS4Wrapper).
 	app.TransferKeeper = ibctransferkeeper.NewKeeper(
 		app.appCodec,
+		app.AuthKeeper.AddressCodec(),
 		runtime.NewKVStoreService(app.GetKey(ibctransfertypes.StoreKey)),
-		app.GetSubspace(ibctransfertypes.ModuleName),
-		app.IBCKeeper.ChannelKeeper,
 		app.IBCKeeper.ChannelKeeper,
 		app.MsgServiceRouter(),
 		app.AuthKeeper,
@@ -78,12 +80,12 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 		govModuleAddr,
 	)
 
-	// Create interchain account keepers
+	// Create interchain account keepers. Both now return pointers and drop
+	// the legacy subspace + duplicate ICS4Wrapper/channelKeeper params, same
+	// shape as the transfer keeper above.
 	app.ICAHostKeeper = icahostkeeper.NewKeeper(
 		app.appCodec,
 		runtime.NewKVStoreService(app.GetKey(icahosttypes.StoreKey)),
-		app.GetSubspace(icahosttypes.SubModuleName),
-		app.IBCKeeper.ChannelKeeper, // ICS4Wrapper
 		app.IBCKeeper.ChannelKeeper,
 		app.AuthKeeper,
 		app.MsgServiceRouter(),
@@ -94,8 +96,6 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 	app.ICAControllerKeeper = icacontrollerkeeper.NewKeeper(
 		app.appCodec,
 		runtime.NewKVStoreService(app.GetKey(icacontrollertypes.StoreKey)),
-		app.GetSubspace(icacontrollertypes.SubModuleName),
-		app.IBCKeeper.ChannelKeeper,
 		app.IBCKeeper.ChannelKeeper,
 		app.MsgServiceRouter(),
 		govModuleAddr,
@@ -109,6 +109,11 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 	// registerEVMModules creates the erc20 keeper, and the pointer-to-field
 	// sees that later assignment; the middleware is only invoked at packet
 	// time, long after both are wired. (v2's constructor takes args reversed.)
+	// erc20.NewIBCMiddleware / erc20v2.NewIBCMiddleware remain single-step
+	// constructors in cosmos/evm v0.7.0 — no SetICS4Wrapper/
+	// SetUnderlyingApplication split, unlike the (unused here) ibc-go
+	// callbacks middleware. app.ICAControllerKeeper/app.ICAHostKeeper are
+	// already pointer-typed fields now, so no leading & is needed.
 	var (
 		transferStack      porttypes.IBCModule = erc20.NewIBCMiddleware(&app.Erc20Keeper, ibctransfer.NewIBCModule(app.TransferKeeper))
 		transferStackV2    ibcapi.IBCModule    = erc20v2.NewIBCMiddleware(ibctransferv2.NewIBCModule(app.TransferKeeper), &app.Erc20Keeper)
@@ -142,7 +147,7 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 	if err := app.RegisterModules(
 		ibc.NewAppModule(app.IBCKeeper),
 		ibctransfer.NewAppModule(app.TransferKeeper),
-		icamodule.NewAppModule(&app.ICAControllerKeeper, &app.ICAHostKeeper),
+		icamodule.NewAppModule(app.ICAControllerKeeper, app.ICAHostKeeper),
 		ibctm.NewAppModule(tmLightClientModule),
 		solomachine.NewAppModule(soloLightClientModule),
 	); err != nil {
@@ -158,7 +163,7 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 func RegisterIBC(cdc codec.Codec) map[string]appmodule.AppModule {
 	modules := map[string]appmodule.AppModule{
 		ibcexported.ModuleName:      ibc.NewAppModule(&ibckeeper.Keeper{}),
-		ibctransfertypes.ModuleName: ibctransfer.NewAppModule(ibctransferkeeper.Keeper{}),
+		ibctransfertypes.ModuleName: ibctransfer.NewAppModule(&ibctransferkeeper.Keeper{}),
 		icatypes.ModuleName:         icamodule.NewAppModule(&icacontrollerkeeper.Keeper{}, &icahostkeeper.Keeper{}),
 		ibctm.ModuleName:            ibctm.NewAppModule(ibctm.NewLightClientModule(cdc, ibcclienttypes.StoreProvider{})),
 		solomachine.ModuleName:      solomachine.NewAppModule(solomachine.NewLightClientModule(cdc, ibcclienttypes.StoreProvider{})),

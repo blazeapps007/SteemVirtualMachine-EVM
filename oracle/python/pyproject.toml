@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "steemvm-oracle"
+version = "0.1.0"
+description = "SteemVM validator oracle client (Python): bridge attestation relay + commit-reveal price feed. See oracle/PROTOCOL.md."
+readme = "../README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Signing: eth_secp256k1 keygen/import + Keccak256 + BIP39->BIP32
+    # m/44'/60'/0'/0/0 mnemonic derivation. NOT a Cosmos-flavored library
+    # (e.g. cosmpy) -- Cosmos SignDoc/TxRaw assembly is hand-rolled in
+    # signing.py on top of this. See oracle/PROTOCOL.md SS1-2.
+    "eth-account>=0.13,<0.14",
+    # Explicit secp256k1 backend for eth-keys (pulled in by eth-account):
+    # libsecp256k1-backed, RFC6979-deterministic, canonical low-S signatures
+    # -- matches go-ethereum's crypto.Sign used by the reference Go client.
+    "coincurve>=20,<21",
+    "bech32>=1.2.0,<2",
+    "httpx>=0.27,<1",
+    # Must track the protoc-gen-python version used to generate proto_gen/
+    # (see buf.gen.yaml: buf.build/protocolbuffers/python:v29.3).
+    "protobuf>=5.29,<6",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

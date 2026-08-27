@@ -2,8 +2,9 @@ syntax = "proto3";
 package steemvm.steembridge.v1;
 
 import "gogoproto/gogo.proto";
+import "steemvm/steembridge/v1/asset.proto";
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // DestinationType is the derived destination account type for a deposit.
 enum DestinationType {
@@ -47,4 +48,6 @@ message Deposit {
   string mint_tx_hash = 15;
   uint64 created_at = 16;
   repeated Confirmation validator_confirmations = 17;
+  // asset is which native Steem asset this deposit minted (STEEM=asteem, SBD=asbd).
+  BridgeAsset asset = 18;
 }

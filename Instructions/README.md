@@ -5,10 +5,9 @@ This guide takes you from nothing to a running, staked validator using the
 config from the templates in this directory (`app.toml.example`,
 `config.toml.example`) and copies in `client.toml`/`genesis.json` on every start.
 
-> **New node? You MUST state-sync first.** The chain has already gone through an
-> on-chain upgrade, so a fresh node **cannot** replay from genesis — it will halt
-> mid-sync with an app-hash mismatch. Run `bash scripts/statesync.sh` **once
-> before** your first `docker compose up` (step 2 walks you through it).
+> **New node?** This is a freshly-launched chain — a new node simply replays
+> from the `genesis.json` in this directory (`docker compose up` handles it). No
+> state-sync step is required.
 
 > **Read this first — validators must have a Steem identity.** SteemVM does not
 > let anonymous validators join. To create a validator you must prove you own a
@@ -24,7 +23,7 @@ config from the templates in this directory (`app.toml.example`,
 
 | Step | What |
 |---|---|
-| 1–3 | Install Docker, **configure state-sync**, start the node, wait for sync |
+| 1–3 | Install Docker, start the node, wait for sync |
 | 4 | Create your key (your chain address) |
 | 5 | Send `0.001 STEEM` with memo `svm-register <address>` |
 | 6 | Confirm the name is yours → link goes ACTIVE |
@@ -52,26 +51,11 @@ If either command fails, install [Docker Desktop](https://docs.docker.com/get-do
 
 ## 2. Start the node
 
-Do two things **before** your first `docker compose up`:
+A new node replays from the `genesis.json` in this directory — no state-sync
+needed. Optionally set your moniker first (below), then start with
+`docker compose up -d` (step 3).
 
-### a) Configure state-sync — REQUIRED
-
-SteemVM has already completed an on-chain upgrade (v0.0.2-Beta1 at block 254133),
-so a brand-new node **cannot** replay from genesis — it halts with an app-hash
-mismatch at a pre-upgrade block. Bootstrap from a recent snapshot instead. Run
-this **once**, from your checkout:
-
-```sh
-bash scripts/statesync.sh
-```
-
-It fetches a recent trusted height + hash from the public provider nodes and
-writes the `[statesync]` block into [`Instructions/config.toml`](config.toml) for
-you (it also seeds `config.toml` from the template if you haven't yet). Use a
-different RPC with `SNAP_RPC=https://your.rpc bash scripts/statesync.sh`.
-**Skip this and your node will error out mid-sync.**
-
-### b) (Optional) set your node moniker
+### (Optional) set your node moniker
 
 Open [`Instructions/config.toml`](config.toml) and change the moniker from
 `your_username` to your Steem username:
@@ -98,11 +82,12 @@ docker compose up -d
 docker compose logs -f
 ```
 
-The first start compiles the chain binary inside the container, then state-sync
-kicks in: you'll see `Discovering snapshots…` → `Applying snapshot chunk…` and the
-node jumps to a recent height in **seconds** instead of replaying millions of
-blocks. It then switches to normal block sync, and the bridge oracle
-(section 10) starts alongside the node automatically.
+The first start builds the `steemvmd` image (a real, cached Docker image
+build — see the repo-root `Dockerfile` — so this only happens once, not on
+every restart) unless you've already pulled a pre-built one
+(`docker compose pull steemvm`). Once the image is ready the node replays from
+genesis and follows the chain via normal block sync. On a young chain this is
+quick. The bridge oracle (section 10) starts alongside the node automatically.
 
 ## 3. Wait for block sync
 
@@ -397,10 +382,12 @@ have submitted **identical** facts, the chain acts on them.
 
 ### The bridge oracle (recommended)
 
-Attesting is handled by a **separate `steem-oracle` container**, not the node
+Attesting is handled by a **separate oracle container**, not the node
 binary — so your validator's signing key lives only in the oracle's environment,
-never in the chain config. It's wired into `docker-compose.yml` and starts by
-default alongside the node.
+never in the chain config. Three interchangeable implementations are wired into
+`docker-compose.yml` (Go, Python, JS — pick whichever you're comfortable
+operating; see [`oracle/README.md`](../oracle/README.md)). None starts by
+default — you bring up exactly one with its Compose profile.
 
 Your validator key already lives in the node's keyring (you created it in
 step 4). The oracle just needs that key exported into its own environment.
@@ -435,10 +422,11 @@ step 4). The oracle just needs that key exported into its own environment.
    > Prefer not to export a raw key? Set `ORACLE_MNEMONIC="word1 … word24"` (the
    > mnemonic from step 4) instead of `ORACLE_PRIVATE_KEY`.
 
-3. **Start (or restart) the stack** — the oracle comes up with the node:
+3. **Start (or restart) the stack**, bringing up ONE oracle client alongside
+   the node (never more than one at a time against the same key):
 
    ```sh
-   docker compose up -d
+   docker compose --profile go up -d       # or: --profile python / --profile js
    ```
 
 The oracle reaches your node at `http://steemvm:26657` over the compose network,
@@ -446,19 +434,21 @@ polls Steem's **last irreversible block** every minute, scans transfers to
 the gateway account, and broadcasts the matching deposit / name-registration
 attestations automatically (fee-exempt for bonded validators). Its scan cursor
 persists in the `oracle-data` volume; it idles harmlessly while your key is not
-a bonded validator, and catches up automatically after downtime.
+a bonded validator, and catches up automatically after downtime. Set
+`ORACLE_GAS_PRICES` (and, optionally, `ORACLE_CMC_API_KEY`) in `oracle/.env` to
+also activate its price feed — see [`oracle/PROTOCOL.md`](../oracle/PROTOCOL.md).
 
 Follow it:
 
 ```sh
-docker compose logs -f oracle
+docker compose logs -f oracle-go     # or oracle-python / oracle-js
 ```
 
 ### Manual attestation (fallback)
 
 ```sh
-docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge submit-steem-deposit \
-  <txid> <op-index> <steem-block> <steem-timestamp> <steem-sender> <gateway-account> <amount-millisteem> <memo> \
+docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
+  <txid> <op-index> <steem-block> <steem-timestamp> <steem-sender> <gateway-account> <amount-millisteem> <memo> <asset> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
   --chain-id steemvm --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
@@ -468,8 +458,8 @@ Example — Steem tx `bce1dd3184e39bcd9bdd7886b22681268a708e03` where `alice`
 sent `1000.000 STEEM` to the gateway with an EVM address as the memo:
 
 ```sh
-docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge submit-steem-deposit \
-  bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a \
+docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
+  bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a BRIDGE_ASSET_STEEM \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
   --chain-id steemvm --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
@@ -484,12 +474,17 @@ Field-by-field:
 | `steem-block` | Steem block number the transaction was included in |
 | `steem-timestamp` | The Steem block timestamp, exactly as Steem reports it |
 | `steem-sender` | Steem account that sent the transfer |
-| `gateway-account` | The gateway account the transfer was sent to — must match the on-chain param (`svm.bank`) or the tx is rejected |
+| `gateway-account` | The gateway account the transfer was sent to — must match the hardcoded chain constant (`svm.bank`) or the tx is rejected |
 | `amount-millisteem` | Amount in millisteem: STEEM × 1000, so `1000.000 STEEM` = `1000000` |
 | `memo` | The transfer's memo, verbatim — a `steem...` bech32 address or a `0x...` EVM address; this decides who receives the minted `asteem` |
+| `asset` | Which Steem asset was transferred: `BRIDGE_ASSET_STEEM` or `BRIDGE_ASSET_SBD` |
 
-(For a name registration, the same fields go to
+(For a name registration, the same fields minus `asset` go to
 `tx steembridge submit-name-registration` instead.)
+
+For the full command reference — every bridge and price-feed duty, plus query
+commands for verification — see
+[`Instructions/ORACLE_COMMANDS.md`](ORACLE_COMMANDS.md).
 
 Rules that matter:
 
@@ -505,7 +500,7 @@ Rules that matter:
   are fee-exempt (up to 100 per validator per block), so the tx succeeds even
   with a zero fee. Submissions that would be rejected pay normal fees.
 - A pending deposit that doesn't reach the threshold within
-  `deposit_timeout_blocks` (~7 days) expires and can be submitted fresh.
+  `deposit_timeout_blocks` (~3.5 days) expires and can be submitted fresh.
 
 Track deposit status:
 
@@ -679,13 +674,13 @@ certificates with [certbot](https://certbot.eff.org/).
 **Node / staking**
 
 - **New node halts during sync with `wrong Block.Header.AppHash` / an app-hash
-  mismatch**: you skipped state-sync (step 2a). A fresh node can't replay across
-  the chain's upgrade. Wipe the node's (empty) chain volume — and *only* that
-  one — then bootstrap from a snapshot:
+  mismatch**: your `genesis.json` doesn't match the running network's (or your
+  node home has stale state from a different genesis). Make sure
+  `Instructions/genesis.json` is the network's genesis, then wipe the node's
+  chain volume — and *only* that one — and restart:
   ```sh
   docker compose down
   docker volume rm "$(docker volume ls -q | grep 'steemvm-home$')"
-  bash scripts/statesync.sh
   docker compose up -d
   ```
 - **Any tx fails with `Cannot encode unregistered concrete type ethsecp256k1.PubKey`**:

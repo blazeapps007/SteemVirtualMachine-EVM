@@ -11,7 +11,7 @@ import "steemvm/steembridge/v1/name_registration.proto";
 import "steemvm/steembridge/v1/params.proto";
 import "steemvm/steembridge/v1/withdrawal.proto";
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // Query defines the gRPC querier service.
 service Query {
@@ -53,6 +53,11 @@ service Query {
   // RequestedWithdrawals Queries the list of bridge-out request records.
   rpc RequestedWithdrawals(QueryRequestedWithdrawalsRequest) returns (QueryRequestedWithdrawalsResponse) {
     option (google.api.http).get = "/steemvm/steembridge/v1/requested_withdrawals";
+  }
+
+  // ProcessedWithdrawals Queries the list of paid-out (PROCESSED) withdrawals.
+  rpc ProcessedWithdrawals(QueryProcessedWithdrawalsRequest) returns (QueryProcessedWithdrawalsResponse) {
+    option (google.api.http).get = "/steemvm/steembridge/v1/processed_withdrawals";
   }
 
   // DepositByTxid Queries a list of DepositByTxid items.
@@ -193,6 +198,17 @@ message QueryRequestedWithdrawalsRequest {
 
 // QueryRequestedWithdrawalsResponse defines the QueryRequestedWithdrawalsResponse message.
 message QueryRequestedWithdrawalsResponse {
+  repeated Withdrawal withdrawals = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryProcessedWithdrawalsRequest defines the QueryProcessedWithdrawalsRequest message.
+message QueryProcessedWithdrawalsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryProcessedWithdrawalsResponse defines the QueryProcessedWithdrawalsResponse message.
+message QueryProcessedWithdrawalsResponse {
   repeated Withdrawal withdrawals = 1 [(gogoproto.nullable) = false];
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
 }

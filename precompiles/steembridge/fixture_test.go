@@ -14,7 +14,7 @@ import (
 	"cosmossdk.io/collections"
 	"cosmossdk.io/core/address"
 	"cosmossdk.io/math"
-	storetypes "cosmossdk.io/store/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 
 	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	"github.com/cosmos/cosmos-sdk/runtime"
@@ -25,9 +25,9 @@ import (
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	precompile "steemvm/precompiles/steembridge"
-	"steemvm/x/steembridge/keeper"
-	module "steemvm/x/steembridge/module"
-	"steemvm/x/steembridge/types"
+	"steemvm/x/oracle/bridge/keeper"
+	module "steemvm/x/oracle/bridge/module"
+	"steemvm/x/oracle/bridge/types"
 )
 
 // fakeBankKeeper is a minimal in-memory bank sufficient for the bridge-out
@@ -84,6 +84,20 @@ func (f *fakeBankKeeper) SendCoinsFromModuleToAccount(_ context.Context, moduleN
 	return nil
 }
 
+func (f *fakeBankKeeper) GetAllBalances(_ context.Context, addr sdk.AccAddress) sdk.Coins {
+	return f.balances[addr.String()]
+}
+
+func (f *fakeBankKeeper) SendCoinsFromModuleToModule(_ context.Context, sender, recipient string, amt sdk.Coins) error {
+	newBal, negative := f.balances[sender].SafeSub(amt...)
+	if negative {
+		return fmt.Errorf("insufficient module balance")
+	}
+	f.balances[sender] = newBal
+	f.balances[recipient] = f.balances[recipient].Add(amt...)
+	return nil
+}
+
 // The following methods satisfy the precompile common.BankKeeper interface;
 // they are never called by Execute-level tests (the balance handler only
 // runs inside RunNativeAction, which is out of scope here).
@@ -137,11 +151,15 @@ func initFixture(t *testing.T) *fixture {
 	authority := authtypes.NewModuleAddress(types.GovModuleName)
 	bankKeeper := newFakeBankKeeper()
 
-	k := keeper.NewKeeper(storeService, encCfg.Codec, addressCodec, authority, bankKeeper, nil)
+	k := keeper.NewKeeper(storeService, encCfg.Codec, addressCodec, authority, bankKeeper, nil, nil, nil)
 
 	params := types.DefaultParams()
 	params.NameServiceEnabled = true
 	params.BridgeOutEnabled = true
+	// Exercise the precompile paths with a zero bridge fee so the amount
+	// assertions read the whole gross; the fee split is covered by the keeper's
+	// dedicated fee tests.
+	params.BridgeFeeBps = 0
 	params.GatewayAccount = "gateway-account"
 	require.NoError(t, k.Params.Set(ctx, params))
 	require.NoError(t, k.Totals.Set(ctx, types.BridgeTotals{

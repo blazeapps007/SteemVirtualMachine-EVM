@@ -12,7 +12,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	precompile "steemvm/precompiles/steembridge"
-	"steemvm/x/steembridge/types"
+	"steemvm/x/oracle/bridge/types"
 )
 
 var (

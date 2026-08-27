@@ -12,15 +12,15 @@ import (
 	cosmosante "github.com/cosmos/evm/ante/cosmos"
 	vmante "github.com/cosmos/evm/ante/evm"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
-	ibcante "github.com/cosmos/ibc-go/v10/modules/core/ante"
+	ibcante "github.com/cosmos/ibc-go/v11/modules/core/ante"
 
-	steembridgekeeper "steemvm/x/steembridge/keeper"
-	steembridgetypes "steemvm/x/steembridge/types"
+	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
+	steembridgetypes "steemvm/x/oracle/bridge/types"
 )
 
 // newSteembridgeAnteHandler builds the app's top-level ante dispatcher.
 //
-// cosmos/evm@v0.6.0's ante.HandlerOptions/NewAnteHandler exposes no
+// cosmos/evm@v0.7.0's ante.HandlerOptions/NewAnteHandler still exposes no
 // extension point for adding a custom decorator to its Cosmos-tx decorator
 // chain (the chain is hardcoded inside the unexported newCosmosAnteHandler
 // in cosmos/evm's ante/cosmos.go). This function reproduces that same
@@ -36,6 +36,15 @@ import (
 // Ethereum and dynamic-fee-extension txs are untouched and delegate to
 // cosmos/evm's own handler unchanged, since neither tx type can ever carry
 // steembridge messages.
+//
+// Re-diffed against cosmos/evm v0.7.0's ante/cosmos.go: the chain is
+// otherwise decorator-for-decorator identical to the v0.6.0 fork this was
+// built from, with one upstream removal — the trailing
+// vmante.NewGasWantedDecorator(...) is gone (cosmos/evm v0.7.0 dropped the
+// feemarket transient store it accumulated gas-wanted into; see
+// x/feemarket's TransientKey removal). That decorator carried no
+// steembridge-specific logic, so its removal doesn't touch the
+// fee-exemption or identity-gate behavior below.
 func newSteembridgeAnteHandler(
 	options evmante.HandlerOptions,
 	bridgeKeeper steembridgekeeper.Keeper,
@@ -96,7 +105,6 @@ func newSteembridgeCosmosAnteHandler(
 		stdante.NewSigVerificationDecorator(options.AccountKeeper, options.SignModeHandler),
 		stdante.NewIncrementSequenceDecorator(options.AccountKeeper),
 		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
-		vmante.NewGasWantedDecorator(options.EvmKeeper, options.FeeMarketKeeper, &feemarketParams),
 	)
 }
 
@@ -105,7 +113,7 @@ func newSteembridgeCosmosAnteHandler(
 // every message is one of the module's three fee-exempt kinds, each
 // individually qualifying:
 //
-//   - MsgSubmitSteemDeposit: signed by a currently bonded validator, would be
+//   - MsgAttestDeposit: signed by a currently bonded validator, would be
 //     accepted by the keeper (Keeper.ValidateDepositAcceptance), and within
 //     the shared per-validator per-block attestation cap.
 //   - MsgSubmitNameRegistration: same rules, sharing the same attestation cap
@@ -166,9 +174,16 @@ func (d steembridgeFeeExemptionDecorator) qualifiesForFeeExemption(ctx sdk.Conte
 	seenConfirmIDs := make(map[uint64]bool)
 	for _, msg := range msgs {
 		switch m := msg.(type) {
-		case *steembridgetypes.MsgSubmitSteemDeposit:
+		case *steembridgetypes.MsgAttestDeposit:
 			if !d.qualifiesAsValidatorAttestation(ctx, m.Validator, func() error {
 				return d.bridgeKeeper.ValidateDepositAcceptance(ctx, m)
+			}) {
+				return false
+			}
+
+		case *steembridgetypes.MsgAttestWithdrawalPayout:
+			if !d.qualifiesAsValidatorAttestation(ctx, m.Validator, func() error {
+				return d.bridgeKeeper.ValidateWithdrawalProcessedAcceptance(ctx, m)
 			}) {
 				return false
 			}
@@ -207,7 +222,7 @@ func (d steembridgeFeeExemptionDecorator) qualifiesForFeeExemption(ctx sdk.Conte
 }
 
 // qualifiesAsValidatorAttestation applies the shared attestation rules for
-// MsgSubmitSteemDeposit and MsgSubmitNameRegistration: signer parses, is a
+// MsgAttestDeposit and MsgSubmitNameRegistration: signer parses, is a
 // currently bonded validator, the message would be accepted by the keeper,
 // and the validator's shared per-block free-attestation budget is not
 // exhausted.

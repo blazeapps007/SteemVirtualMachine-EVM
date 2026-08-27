@@ -1,0 +1,15 @@
+syntax = "proto3";
+package steemvm.oracle.data.module.v1;
+
+import "cosmos/app/v1alpha1/module.proto";
+
+option go_package = "steemvm/x/oracle/data/types";
+
+// Module is the config object for the x/oracle/data module.
+message Module {
+  option (cosmos.app.v1alpha1.module) = {go_import: "steemvm/x/oracle/data"};
+
+  // authority defines the custom module authority.
+  // If not set, defaults to the governance module.
+  string authority = 1;
+}

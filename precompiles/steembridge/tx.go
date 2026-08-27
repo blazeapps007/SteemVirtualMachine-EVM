@@ -13,7 +13,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"steemvm/x/steembridge/types"
+	"steemvm/x/oracle/bridge/types"
 )
 
 const (

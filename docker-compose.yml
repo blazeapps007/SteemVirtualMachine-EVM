@@ -1,16 +1,43 @@
 services:
   steemvm:
-    image: golang:1.26.5-trixie
+    # Pre-built image (see Dockerfile) — no more `make install` inside the
+    # container on every start. Defaults to this repo's own placeholder tag;
+    # override with STEEMVM_IMAGE (env var or repo-root .env) once you've
+    # pushed your own build to a registry: STEEMVM_IMAGE=you/steemvmd:tag
+    #
+    # `docker compose up -d` alone still works with zero setup: if the image
+    # named below isn't already pulled, compose falls back to building it
+    # locally from ./Dockerfile (same as always, just now cached properly
+    # instead of rebuilding from scratch every start). To actually use a
+    # published image instead of building locally: `docker compose pull
+    # steemvm` first, then `up -d` (compose won't rebuild an image it just
+    # pulled unless you pass --build).
+    image: ${STEEMVM_IMAGE:-steemvm/steemvmd:v0.0.3-Beta-2}
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: steemvm-node
     working_dir: /workspace
+    restart: unless-stopped
     environment:
-      GOPATH: /root/go
-      CGO_ENABLED: "1"
+      # cosmovisor: run the node under cosmovisor so it auto-swaps to a staged
+      # upgrade binary exactly at a future governance upgrade height (no manual
+      # action at the block, ~no downtime).
+      DAEMON_HOME: /root/.steemvm
+      DAEMON_NAME: steemvmd
+      DAEMON_RESTART_AFTER_UPGRADE: "true"
+      DAEMON_ALLOW_DOWNLOAD_BINARIES: "false"
+      UNSAFE_SKIP_BACKUP: "true"
     volumes:
       - .:/workspace
-      - steemvm-home:/root/.steemvm
-      - gopath:/root/go
-      - go-build-cache:/root/.cache/go-build
+      # Bind-mounts your REAL node home (default $HOME/.steemvm, override with
+      # STEEMVM_HOME) instead of a Docker-managed volume. This is a
+      # single-validator chain: the running node's priv_validator_key.json
+      # MUST be the exact key whose consensus pubkey is bonded in the genesis
+      # gentx (see Instructions/GENESIS_VALIDATOR_SETUP.md). A fresh identity
+      # generated inside an isolated volume would never match that gentx and
+      # could never sign/produce a block on this chain.
+      - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
     ports:
       - "8545:8545"   # EVM JSON-RPC (http)
       - "8546:8546"   # EVM JSON-RPC (websocket)
@@ -18,68 +45,65 @@ services:
       - "26657:26657" # CometBFT RPC
       - "1317:1317"   # Cosmos REST API
       - "9090:9090"   # gRPC
-    command:
-      - sh
-      - -ec
-      - |
-        git config --global --add safe.directory /workspace
-        make install
-        if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
-          /root/go/bin/steemvmd init node --chain-id steemvm --home /root/.steemvm
-        fi
-        # app.toml/config.toml are per-validator (gitignored). Seed them from the
-        # tracked *.example templates on first run; your local edits persist after.
-        # (No shell vars here — docker compose would substitute variables before
-        # the container runs; explicit paths sidestep that entirely.)
-        [ -f /workspace/Instructions/app.toml ]   || cp /workspace/Instructions/app.toml.example   /workspace/Instructions/app.toml
-        [ -f /workspace/Instructions/config.toml ] || cp /workspace/Instructions/config.toml.example /workspace/Instructions/config.toml
-        rm -f /root/.steemvm/config/app.toml /root/.steemvm/config/config.toml /root/.steemvm/config/client.toml /root/.steemvm/config/genesis.json
-        cp /workspace/Instructions/app.toml /workspace/Instructions/config.toml /workspace/Instructions/client.toml /root/.steemvm/config/
-        cp /workspace/Instructions/genesis.json /root/.steemvm/config/genesis.json
-        exec /root/go/bin/steemvmd start \
-          --home /root/.steemvm \
-          --json-rpc.enable \
-          --json-rpc.address "0.0.0.0:8545" \
-          --json-rpc.api "eth,net,web3,txpool,debug" \
-          --json-rpc.enable-indexer
 
-  # Standalone Steem bridge oracle. Starts by default alongside the node:
-  #     cp oracle/.env.example oracle/.env    # then edit oracle/.env (your key)
-  #     docker compose up -d
+  # Standalone Steem bridge oracle — pick ONE language and bring it up with its
+  # profile (never more than one at a time; they'd race on the same signing key
+  # and scan cursor):
   #
-  # All oracle config (incl. your validator key) comes from oracle/.env — see
-  # oracle/.env.example. That file is gitignored; NEVER commit it. Only a bonded
-  # validator's attestations count and are fee-exempt. If oracle/.env has no key,
-  # the oracle just restart-loops harmlessly ("provide the signing key") until you
-  # add one — the node is unaffected.
-  oracle:
-    image: golang:1.26.5-trixie
-    container_name: steemvm-oracle
-    working_dir: /workspace
+  #     cp oracle/.env.example oracle/.env    # then edit oracle/.env (your key)
+  #     docker compose --profile go up -d       # or --profile python / --profile js
+  #
+  # All oracle config (incl. your validator key, CoinMarketCap key, and the
+  # Steem RPC used for both bridge scanning and price feeds) comes from
+  # oracle/.env — see oracle/.env.example. That file is gitignored; NEVER
+  # commit it. Bridge-attestation txs are fee-exempt for bonded validators;
+  # price-feed txs are NOT (see oracle/PROTOCOL.md) and need a funded account.
+  # If oracle/.env has no key, the client just restart-loops harmlessly
+  # ("provide the signing key") until you add one — the node is unaffected.
+  oracle-go:
+    build:
+      context: .
+      dockerfile: oracle/go/Dockerfile
+    container_name: steemvm-oracle-go
     depends_on:
       - steemvm
     restart: unless-stopped
     env_file:
       - path: oracle/.env
         required: false
-    environment:
-      GOPATH: /root/go
-      CGO_ENABLED: "1"
     volumes:
-      - .:/workspace
       - oracle-data:/oracle-data
-      - gopath:/root/go
-      - go-build-cache:/root/.cache/go-build
-    command:
-      - sh
-      - -ec
-      - |
-        git config --global --add safe.directory /workspace
-        go build -o /usr/local/bin/steem-oracle ./oracle
-        exec steem-oracle
+    profiles: ["go"]
+
+  oracle-python:
+    build:
+      context: ./oracle/python
+      dockerfile: Dockerfile
+    container_name: steemvm-oracle-python
+    depends_on:
+      - steemvm
+    restart: unless-stopped
+    env_file:
+      - path: oracle/.env
+        required: false
+    volumes:
+      - oracle-data:/oracle-data
+    profiles: ["python"]
+
+  oracle-js:
+    build:
+      context: ./oracle/js
+      dockerfile: Dockerfile
+    container_name: steemvm-oracle-js
+    depends_on:
+      - steemvm
+    restart: unless-stopped
+    env_file:
+      - path: oracle/.env
+        required: false
+    volumes:
+      - oracle-data:/oracle-data
+    profiles: ["js"]
 
 volumes:
-  steemvm-home:
   oracle-data:
-  gopath:
-  go-build-cache:

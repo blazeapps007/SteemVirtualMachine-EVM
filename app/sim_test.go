@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"cosmossdk.io/log"
-	"cosmossdk.io/store"
-	storetypes "cosmossdk.io/store/types"
-	"cosmossdk.io/x/feegrant"
-	upgradetypes "cosmossdk.io/x/upgrade/types"
+	"cosmossdk.io/log/v2"
+	"github.com/cosmos/cosmos-sdk/store/v2"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	"github.com/cosmos/cosmos-sdk/x/feegrant"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -84,7 +84,7 @@ func BenchmarkSimulation(b *testing.B) {
 	appOptions := make(simtestutil.AppOptionsMap, 0)
 	appOptions[flags.FlagHome] = DefaultNodeHome
 
-	bApp := New(logger, db, nil, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
+	bApp := New(logger, db, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
 	require.Equal(b, Name, bApp.Name())
 
 	// run randomized simulation
@@ -128,7 +128,7 @@ func TestFullAppSimulation(t *testing.T) {
 	appOptions := make(simtestutil.AppOptionsMap, 0)
 	appOptions[flags.FlagHome] = DefaultNodeHome
 
-	app := New(logger, db, nil, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
+	app := New(logger, db, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
 	if !simcli.FlagSigverifyTxValue {
 		app.SetNotSigverifyTx()
 	}
@@ -175,7 +175,7 @@ func TestAppImportExport(t *testing.T) {
 	appOptions := make(simtestutil.AppOptionsMap, 0)
 	appOptions[flags.FlagHome] = DefaultNodeHome
 
-	bApp := New(logger, db, nil, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
+	bApp := New(logger, db, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
 	require.Equal(t, Name, bApp.Name())
 
 	// Run randomized simulation
@@ -215,7 +215,7 @@ func TestAppImportExport(t *testing.T) {
 		require.NoError(t, os.RemoveAll(newDir))
 	}()
 
-	newApp := New(log.NewNopLogger(), newDB, nil, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
+	newApp := New(log.NewNopLogger(), newDB, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
 	require.Equal(t, Name, newApp.Name())
 
 	var genesisState GenesisState
@@ -295,7 +295,7 @@ func TestAppSimulationAfterImport(t *testing.T) {
 	appOptions := make(simtestutil.AppOptionsMap, 0)
 	appOptions[flags.FlagHome] = DefaultNodeHome
 
-	bApp := New(logger, db, nil, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
+	bApp := New(logger, db, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
 	require.Equal(t, Name, bApp.Name())
 
 	// Run randomized simulation
@@ -340,7 +340,7 @@ func TestAppSimulationAfterImport(t *testing.T) {
 		require.NoError(t, os.RemoveAll(newDir))
 	}()
 
-	newApp := New(log.NewNopLogger(), newDB, nil, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
+	newApp := New(log.NewNopLogger(), newDB, true, appOptions, fauxMerkleModeOpt, baseapp.SetChainID(SimAppChainID))
 	require.Equal(t, Name, newApp.Name())
 
 	_, err = newApp.InitChain(&abci.RequestInitChain{
@@ -417,7 +417,6 @@ func TestAppStateDeterminism(t *testing.T) {
 			bApp := New(
 				logger,
 				db,
-				nil,
 				true,
 				appOptions,
 				interBlockCacheOpt(),

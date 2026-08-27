@@ -7,7 +7,7 @@ ifeq (,$(VERSION))
   # Fixed release version so every node stamps the SAME steemvmd version,
   # independent of git branch/commit. Bump this per release. Override at build
   # time with `make install VERSION=x.y.z` if ever needed.
-  VERSION := 0.0.2-Beta1
+  VERSION := v0.0.3-Beta-2
 endif
 
 # Update the ldflags with the app, client & server names
@@ -102,3 +102,21 @@ govulncheck:
 	@govulncheck ./...
 
 .PHONY: govet govulncheck
+
+##############
+### Docker ###
+##############
+
+# Pre-built image consumed by docker-compose.yml's `steemvm` service (see
+# Dockerfile). Override DOCKER_IMAGE with your own registry namespace:
+#   make docker-push DOCKER_IMAGE=youruser/steemvmd
+DOCKER_IMAGE ?= steemvm/steemvmd
+DOCKER_TAG   ?= $(VERSION)
+
+docker-build:
+	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
+docker-push: docker-build
+	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
+
+.PHONY: docker-build docker-push

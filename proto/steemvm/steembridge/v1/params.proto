@@ -4,7 +4,7 @@ package steemvm.steembridge.v1;
 import "amino/amino.proto";
 import "gogoproto/gogo.proto";
 
-option go_package = "steemvm/x/steembridge/types";
+option go_package = "steemvm/x/oracle/bridge/types";
 
 // Params defines the parameters for the module.
 message Params {
@@ -13,6 +13,10 @@ message Params {
 
   bool bridge_enabled = 1;
   bool bridge_out_enabled = 2;
+  // gateway_account is DEPRECATED and no longer read by consensus logic —
+  // the gateway account is a hardcoded Go constant (x/oracle/bridge/types.
+  // GatewayAccount = "svm.bank"), never governance-settable. Kept on the
+  // wire only so existing genesis/query output stays informative.
   string gateway_account = 3;
   string bridge_confirmation_threshold = 4 [
     (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
@@ -39,4 +43,14 @@ message Params {
   // consensus logic never reads it. Governance may move it forward to spare
   // newly joining validators a long backfill.
   uint64 relayer_start_block = 11;
+  // bridge_fee_bps is the bridge fee in basis points (25 = 0.25%), applied to
+  // both deposits and bridge-outs, for both assets. The fee is routed to the
+  // staking reward pool. Must be <= 10000.
+  uint32 bridge_fee_bps = 12;
+  // withdrawal_timeout_blocks bounds how long a bridge-out withdrawal may sit
+  // REQUESTED before it is automatically refunded (net amount re-minted and
+  // returned to sender) with no validator attestation required — see
+  // Keeper.RefundExpiredWithdrawals. Must be positive while bridge_out is
+  // enabled.
+  uint64 withdrawal_timeout_blocks = 13;
 }

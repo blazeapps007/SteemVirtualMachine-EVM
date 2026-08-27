@@ -1,0 +1,18 @@
+syntax = "proto3";
+package steemvm.oracle.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "steemvm/oracle/v1/params.proto";
+
+option go_package = "steemvm/x/oracle/types";
+
+// GenesisState defines the parent x/oracle module's genesis state. Per-window
+// tallies are transient and intentionally not exported — a fresh window starts
+// after any genesis/upgrade.
+message GenesisState {
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}

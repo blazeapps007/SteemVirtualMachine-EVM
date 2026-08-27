@@ -1,0 +1,19 @@
+syntax = "proto3";
+package steemvm.oracle.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/oracle/types";
+
+// ValidatorTally is a validator's accumulated participation across the current
+// slash window, for both oracle duties. It is keyed by the validator operator
+// address and reset after each evaluation. Opportunities count events/periods
+// the validator was eligible for (bonded); hits count the ones it fulfilled.
+message ValidatorTally {
+  option (gogoproto.equal) = true;
+
+  uint64 price_opportunities = 1;
+  uint64 price_hits = 2;
+  uint64 bridge_opportunities = 3;
+  uint64 bridge_hits = 4;
+}

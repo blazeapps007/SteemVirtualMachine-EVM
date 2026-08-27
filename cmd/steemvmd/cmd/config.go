@@ -17,6 +17,11 @@ func initCometBFTConfig() *cmtcfg.Config {
 	// cfg.P2P.MaxNumInboundPeers = 100
 	// cfg.P2P.MaxNumOutboundPeers = 40
 
+	// cosmos/evm's EVM mempool takes over tx handling from CometBFT's default
+	// flood-gossip mempool; boot refuses to start ("EVM mempool enabled, but
+	// comet-bft has invalid config.toml:mempool.type") unless this is "app".
+	cfg.Mempool.Type = cmtcfg.MempoolTypeApp
+
 	return cfg
 }
 
@@ -53,6 +58,14 @@ func initAppConfig() (string, interface{}) {
 	//
 	// In tests, we set the min gas prices to 0.
 	// srvCfg.MinGasPrices = "0stake"
+	//
+	// 1e9 asteem/gas matches both the EVM feemarket's starting base_fee (see
+	// app_state.feemarket.params.base_fee in genesis) and the --gas-prices
+	// value already documented for non-fee-exempt oracledata txs
+	// (Instructions/ORACLE_COMMANDS.md) -- so this floor never binds tighter
+	// than what those txs already pay, it just stops `steemvmd start` from
+	// refusing to boot when a validator's app.toml leaves MinGasPrices unset.
+	srvCfg.MinGasPrices = "1000000000asteem"
 
 	evmCfg := cosmosevmserverconfig.DefaultEVMConfig()
 	evmCfg.EVMChainID = app.EVMChainID

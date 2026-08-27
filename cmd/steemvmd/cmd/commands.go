@@ -2,12 +2,11 @@ package cmd
 
 import (
 	"errors"
-	"io"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	confixcmd "cosmossdk.io/tools/confix/cmd"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -33,8 +32,11 @@ func initRootCmd(
 	txConfig client.TxConfig,
 	basicManager module.BasicManager,
 ) {
+	initCmd := genutilcli.InitCmd(basicManager, app.DefaultNodeHome)
+	wrapInitCmdWithChainDefaults(initCmd)
+
 	rootCmd.AddCommand(
-		genutilcli.InitCmd(basicManager, app.DefaultNodeHome),
+		initCmd,
 		NewInPlaceTestnetCmd(),
 		NewTestnetMultiNodeCmd(basicManager, banktypes.GenesisBalancesIterator{}),
 		debug.Cmd(),
@@ -44,8 +46,8 @@ func initRootCmd(
 	)
 	cosmosevmserver.AddCommands(
 		rootCmd,
-		cosmosevmserver.NewDefaultStartOptions(func(l log.Logger, d dbm.DB, w io.Writer, ao servertypes.AppOptions) cosmosevmserver.Application {
-			return newApp(l, d, w, ao).(cosmosevmserver.Application)
+		cosmosevmserver.NewDefaultStartOptions(func(l log.Logger, d dbm.DB, ao servertypes.AppOptions) cosmosevmserver.Application {
+			return newApp(l, d, ao).(cosmosevmserver.Application)
 		}, app.DefaultNodeHome),
 		appExport,
 		addModuleInitFlags,
@@ -120,13 +122,12 @@ func txCommand() *cobra.Command {
 func newApp(
 	logger log.Logger,
 	db dbm.DB,
-	traceStore io.Writer,
 	appOpts servertypes.AppOptions,
 ) servertypes.Application {
 	baseappOptions := server.DefaultBaseappOptions(appOpts)
 
 	return app.New(
-		logger, db, traceStore, true,
+		logger, db, true,
 		appOpts,
 		baseappOptions...,
 	)
@@ -136,7 +137,6 @@ func newApp(
 func appExport(
 	logger log.Logger,
 	db dbm.DB,
-	traceStore io.Writer,
 	height int64,
 	forZeroHeight bool,
 	jailAllowedAddrs []string,
@@ -159,12 +159,12 @@ func appExport(
 
 	appOpts = viperAppOpts
 	if height != -1 {
-		bApp = app.New(logger, db, traceStore, false, appOpts)
+		bApp = app.New(logger, db, false, appOpts)
 		if err := bApp.LoadHeight(height); err != nil {
 			return servertypes.ExportedApp{}, err
 		}
 	} else {
-		bApp = app.New(logger, db, traceStore, true, appOpts)
+		bApp = app.New(logger, db, true, appOpts)
 	}
 
 	return bApp.ExportAppStateAndValidators(forZeroHeight, jailAllowedAddrs, modulesToExport)

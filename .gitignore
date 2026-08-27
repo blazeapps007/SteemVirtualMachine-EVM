@@ -1,5 +1,10 @@
 vue/node_modules
 vue/dist
+oracle/js/node_modules
+oracle/js/dist
+oracle/python/**/__pycache__
+oracle/python/.venv
+oracle/python/*.egg-info
 release/
 .idea/
 .vscode/
@@ -33,3 +38,6 @@ AGENTS.md
 .specstory/
 .github/copilot-instructions.md
 validator.json
+validator-address.txt
+validator-mnemonic.txt
+steemvmd-exporttest

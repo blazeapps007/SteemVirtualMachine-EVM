@@ -1,0 +1,12 @@
+.git
+oracle/go/node_modules
+oracle/js/node_modules
+oracle/js/dist
+oracle/python/.venv
+oracle/python/__pycache__
+**/__pycache__
+*.log
+validator.json
+validator-address.txt
+validator-mnemonic.txt
+oracle/.env

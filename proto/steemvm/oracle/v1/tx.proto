@@ -1,0 +1,36 @@
+syntax = "proto3";
+package steemvm.oracle.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+import "steemvm/oracle/v1/params.proto";
+
+option go_package = "steemvm/x/oracle/types";
+
+// Msg defines the parent x/oracle Msg service. The only tx is a gov-authority
+// params update; all participation reporting is internal (module-to-module) and
+// carries no external messages.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+}
+
+// MsgUpdateParams updates the parent x/oracle module parameters.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "steemvm/x/oracle/MsgUpdateParams";
+
+  // authority is the address that controls the module (defaults to x/gov).
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // params defines the module parameters to update. All fields must be supplied.
+  Params params = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+message MsgUpdateParamsResponse {}

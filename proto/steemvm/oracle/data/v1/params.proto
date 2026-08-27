@@ -1,0 +1,40 @@
+syntax = "proto3";
+package steemvm.oracle.data.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "steemvm/x/oracle/data/types";
+
+// Params defines the parameters for the x/oracle/data (price-feed) module.
+// Slashing/reward params live in the parent x/oracle module, not here.
+message Params {
+  option (amino.name) = "steemvm/x/oracle/data/Params";
+  option (gogoproto.equal) = true;
+
+  // vote_period is the number of blocks between exchange-rate tallies. A
+  // commit-reveal cycle spans (at least) one vote_period: a prevote in period
+  // P is revealed in a later period.
+  uint64 vote_period = 1;
+  // vote_threshold is the minimum fraction of total bonded power that must
+  // vote for a pair before its median is accepted as the on-chain rate.
+  string vote_threshold = 2 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // reward_band is the ± fraction around the weighted median within which a
+  // vote is considered accurate ("in-band"); the parent x/oracle module reads
+  // this participation to distribute rewards.
+  string reward_band = 3 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // miss_band is the ± fraction around the weighted median outside which a
+  // vote is counted as a price-duty miss by the parent x/oracle module.
+  string miss_band = 4 [
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  // whitelist is the set of currency pairs validators must vote on.
+  repeated string whitelist = 5;
+}

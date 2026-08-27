@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+// codegen_shim exists ONLY to pull cosmos-sdk/cosmos-evm dependency proto
+// files that no steemvm-authored .proto imports directly (this repo's own
+// modules never construct a raw Cosmos SDK Tx or an ethsecp256k1 PubKey Any
+// in proto — that only happens client-side) into the dependency graph, so
+// `buf generate --include-imports` emits generated code for them too. The
+// off-chain oracle clients (oracle/python, oracle/js) hand-roll
+// SIGN_MODE_DIRECT tx signing and need these message types:
+//   - cosmos.tx.v1beta1: TxBody, AuthInfo, SignDoc, TxRaw, Fee, SignerInfo,
+//     ModeInfo (tx assembly + signing, see oracle/PROTOCOL.md §2)
+//   - cosmos.evm.crypto.v1.ethsecp256k1: PubKey (the signer's pubkey Any,
+//     see oracle/PROTOCOL.md §1)
+//   - google.protobuf.Any (every Msg/pubkey wrapper)
+//
+// This package is NOT part of the chain's wire protocol: it registers no
+// service, defines no message, and go_package intentionally does not point
+// into steemvm/x/... so `make proto-gen` (ignite, gogo-flavored) skips it
+// cleanly alongside everything else under proto/steemvm/ — only the Python
+// (and future JS) client codegen targets it.
+package steemvm.oracle_client.v1;
+
+import "cosmos/tx/v1beta1/tx.proto";
+import "cosmos/evm/crypto/v1/ethsecp256k1/keys.proto";
+import "google/protobuf/any.proto";
+
+option go_package = "steemvm/oracle_client_shim";

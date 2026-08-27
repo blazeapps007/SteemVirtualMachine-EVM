@@ -1,0 +1,16 @@
+version: v2
+# Generates Python protobuf classes (+ .pyi stubs) for every message this
+# client needs: this repo's own steembridge/oracledata/oracle proto packages,
+# plus every cosmos-sdk/cosmos-evm dependency type they and the hand-rolled
+# SIGN_MODE_DIRECT signer touch (cosmos.tx.v1beta1.{TxBody,AuthInfo,SignDoc,
+# TxRaw}, cosmos.auth.v1beta1.BaseAccount, cosmos.evm.crypto.v1.ethsecp256k1,
+# google.protobuf.Any, etc).
+#
+# Run from the repo root (see oracle/python/README or CLAUDE.md task notes):
+#   docker run --rm -v "<repo>:/workspace" -w /workspace bufbuild/buf:latest \
+#     generate --template oracle/python/buf.gen.yaml --include-imports --include-wkt proto
+plugins:
+  - remote: buf.build/protocolbuffers/python:v29.3
+    out: oracle/python/src/steemvm_oracle/proto_gen
+  - remote: buf.build/protocolbuffers/pyi:v29.3
+    out: oracle/python/src/steemvm_oracle/proto_gen

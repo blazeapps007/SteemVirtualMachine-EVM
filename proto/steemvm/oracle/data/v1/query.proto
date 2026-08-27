@@ -1,0 +1,87 @@
+syntax = "proto3";
+package steemvm.oracle.data.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "steemvm/oracle/data/v1/exchange_rate.proto";
+import "steemvm/oracle/data/v1/params.proto";
+
+option go_package = "steemvm/x/oracle/data/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Params queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/steemvm/oracle/data/v1/params";
+  }
+
+  // ExchangeRate queries the finalized rate for a single pair.
+  rpc ExchangeRate(QueryExchangeRateRequest) returns (QueryExchangeRateResponse) {
+    option (google.api.http).get = "/steemvm/oracle/data/v1/exchange_rate/{pair}";
+  }
+
+  // ExchangeRates queries all finalized rates.
+  rpc ExchangeRates(QueryExchangeRatesRequest) returns (QueryExchangeRatesResponse) {
+    option (google.api.http).get = "/steemvm/oracle/data/v1/exchange_rates";
+  }
+
+  // AggregatePrevote queries a validator's current prevote.
+  rpc AggregatePrevote(QueryAggregatePrevoteRequest) returns (QueryAggregatePrevoteResponse) {
+    option (google.api.http).get = "/steemvm/oracle/data/v1/aggregate_prevote/{validator}";
+  }
+
+  // AggregateVote queries a validator's current revealed vote.
+  rpc AggregateVote(QueryAggregateVoteRequest) returns (QueryAggregateVoteResponse) {
+    option (google.api.http).get = "/steemvm/oracle/data/v1/aggregate_vote/{validator}";
+  }
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// QueryExchangeRateRequest is request type for the Query/ExchangeRate RPC method.
+message QueryExchangeRateRequest {
+  string pair = 1;
+}
+
+// QueryExchangeRateResponse is response type for the Query/ExchangeRate RPC method.
+message QueryExchangeRateResponse {
+  ExchangeRate exchange_rate = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryExchangeRatesRequest is request type for the Query/ExchangeRates RPC method.
+message QueryExchangeRatesRequest {}
+
+// QueryExchangeRatesResponse is response type for the Query/ExchangeRates RPC method.
+message QueryExchangeRatesResponse {
+  repeated ExchangeRate exchange_rates = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAggregatePrevoteRequest is request type for the Query/AggregatePrevote RPC method.
+message QueryAggregatePrevoteRequest {
+  string validator = 1;
+}
+
+// QueryAggregatePrevoteResponse is response type for the Query/AggregatePrevote RPC method.
+message QueryAggregatePrevoteResponse {
+  AggregateExchangeRatePrevote aggregate_prevote = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAggregateVoteRequest is request type for the Query/AggregateVote RPC method.
+message QueryAggregateVoteRequest {
+  string validator = 1;
+}
+
+// QueryAggregateVoteResponse is response type for the Query/AggregateVote RPC method.
+message QueryAggregateVoteResponse {
+  AggregateExchangeRateVote aggregate_vote = 1 [(gogoproto.nullable) = false];
+}

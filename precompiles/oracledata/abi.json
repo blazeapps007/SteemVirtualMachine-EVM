@@ -1,0 +1,31 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "IOracleData",
+  "sourceName": "precompiles/oracledata/IOracleData.sol",
+  "abi": [
+    {
+      "type": "function",
+      "name": "getPrice",
+      "stateMutability": "view",
+      "inputs": [
+        { "name": "pair", "type": "string", "internalType": "string" }
+      ],
+      "outputs": [
+        { "name": "rate", "type": "uint256", "internalType": "uint256" },
+        { "name": "updateEpoch", "type": "uint256", "internalType": "uint256" },
+        { "name": "updateTime", "type": "uint256", "internalType": "uint256" }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "getPrices",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        { "name": "pairs", "type": "string[]", "internalType": "string[]" },
+        { "name": "rates", "type": "uint256[]", "internalType": "uint256[]" },
+        { "name": "updateTimes", "type": "uint256[]", "internalType": "uint256[]" }
+      ]
+    }
+  ]
+}

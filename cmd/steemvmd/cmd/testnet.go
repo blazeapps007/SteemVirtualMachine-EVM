@@ -3,13 +3,12 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"cosmossdk.io/math"
-	storetypes "cosmossdk.io/store/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -59,9 +58,9 @@ it enables developers to configure their local environments to reflect mainnet c
 
 // newTestnetApp starts by running the normal newApp method. From there, the app interface returned is modified in order
 // for a testnet to be created from the provided app.
-func newTestnetApp(logger log.Logger, db dbm.DB, traceStore io.Writer, appOpts servertypes.AppOptions) servertypes.Application {
+func newTestnetApp(logger log.Logger, db dbm.DB, appOpts servertypes.AppOptions) servertypes.Application {
 	// Create an app and type cast to an App
-	newApp := newApp(logger, db, traceStore, appOpts)
+	newApp := newApp(logger, db, appOpts)
 	testApp, ok := newApp.(*app.App)
 	if !ok {
 		panic("app created from newApp is not of type App")
