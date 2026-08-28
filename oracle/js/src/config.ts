@@ -23,8 +23,11 @@ export interface Config {
   maxBlocksPerPoll: number;
   startBlock: number;
   startBlockIsLatest: boolean;
+  priceSource: string;
   cmcApiKey: string;
   cmcBaseUrl: string;
+  coingeckoApiKey: string;
+  coingeckoBaseUrl: string;
   gasPrices: string;
 }
 
@@ -71,8 +74,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxBlocksPerPoll,
     startBlock,
     startBlockIsLatest,
+    priceSource: (env.ORACLE_PRICE_SOURCE || "cmc").trim(),
     cmcApiKey: (env.ORACLE_CMC_API_KEY || "").trim(),
     cmcBaseUrl: (env.ORACLE_CMC_BASE_URL || "").trim(),
+    coingeckoApiKey: (env.ORACLE_COINGECKO_API_KEY || "").trim(),
+    coingeckoBaseUrl: (env.ORACLE_COINGECKO_BASE_URL || "").trim(),
     // Price-feed txs are NOT fee-exempt (unlike bridge attestations — see
     // oracle/PROTOCOL.md §3), so this must be non-empty for the feeder to
     // activate. Defaults to 1000000000asteem (matches

@@ -435,8 +435,9 @@ the gateway account, and broadcasts the matching deposit / name-registration
 attestations automatically (fee-exempt for bonded validators). Its scan cursor
 persists in the `oracle-data` volume; it idles harmlessly while your key is not
 a bonded validator, and catches up automatically after downtime. Set
-`ORACLE_GAS_PRICES` (and, optionally, `ORACLE_CMC_API_KEY`) in `oracle/.env` to
-also activate its price feed — see [`oracle/PROTOCOL.md`](../oracle/PROTOCOL.md).
+`ORACLE_GAS_PRICES` in `oracle/.env` to also activate its price feed —
+`ORACLE_PRICE_SOURCE` picks CoinMarketCap (default, needs `ORACLE_CMC_API_KEY`) or CoinGecko
+(`ORACLE_COINGECKO_API_KEY` is fully optional) — see [`oracle/PROTOCOL.md`](../oracle/PROTOCOL.md).
 
 Follow it:
 

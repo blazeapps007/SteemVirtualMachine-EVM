@@ -12,7 +12,6 @@ import {
   TYPE_URL_MSG_AGGREGATE_EXCHANGE_RATE_VOTE,
   type EncodeObject,
 } from "./broadcast";
-import { CMCClient } from "./priceSources/cmc";
 import { SteemPriceSource } from "./priceSources/steemPrices";
 
 /** A price source prices whichever whitelisted pairs it can; pairs it
@@ -23,14 +22,22 @@ export interface PriceSource {
   fetchPrices(pairs: string[]): Promise<Record<string, string>>;
 }
 
+/** Satisfied by both CMCClient and CoinGeckoClient — CompositePriceSource
+ * dispatches to whichever one the operator selected via ORACLE_PRICE_SOURCE
+ * (see main.ts), never both at once. */
+export interface ExternalPriceClient {
+  fetchUsdPrices(symbols: string[]): Promise<Record<string, string>>;
+}
+
 /** Dispatches each whitelisted pair to the source that actually prices it:
- * CoinMarketCap for STEEM/USD_External and SBD/USD_External, the Steem RPC
- * node for STEEM/SBD_Internal and Price_Feed — see oracle/PROTOCOL.md §7's
- * price source → pair mapping. Mirrors oracle/go/relayer/pricesource.go's
+ * the operator-selected external client (CoinMarketCap or CoinGecko) for
+ * STEEM/USD_External and SBD/USD_External, the Steem RPC node for
+ * STEEM/SBD_Internal and Price_Feed — see oracle/PROTOCOL.md §7's price
+ * source → pair mapping. Mirrors oracle/go/relayer/pricesource.go's
  * CompositePriceSource. */
 export class CompositePriceSource implements PriceSource {
   constructor(
-    private readonly cmc: CMCClient | undefined,
+    private readonly external: ExternalPriceClient | undefined,
     private readonly steem: SteemPriceSource | undefined,
   ) {}
 
@@ -38,12 +45,12 @@ export class CompositePriceSource implements PriceSource {
     const want = new Set(pairs);
     const out: Record<string, string> = {};
 
-    if (this.cmc && (want.has("STEEM/USD_External") || want.has("SBD/USD_External"))) {
+    if (this.external && (want.has("STEEM/USD_External") || want.has("SBD/USD_External"))) {
       const symbols: string[] = [];
       if (want.has("STEEM/USD_External")) symbols.push("STEEM");
       if (want.has("SBD/USD_External")) symbols.push("SBD");
       try {
-        const prices = await this.cmc.fetchUsdPrices(symbols);
+        const prices = await this.external.fetchUsdPrices(symbols);
         if (want.has("STEEM/USD_External") && prices.STEEM !== undefined) out["STEEM/USD_External"] = prices.STEEM;
         if (want.has("SBD/USD_External") && prices.SBD !== undefined) out["SBD/USD_External"] = prices.SBD;
       } catch {

@@ -126,7 +126,7 @@ Price_Feed:0.245000000000000000,SBD/USD_External:1.010000000000000000,STEEM/SBD_
 ```
 
 Whitelist: `STEEM/USD_External`, `STEEM/SBD_Internal`, `SBD/USD_External`, `Price_Feed`. The
-`_External`/`_Internal` suffixes mark market pairs by source (external CoinMarketCap price vs.
+`_External`/`_Internal` suffixes mark market pairs by source (external CoinMarketCap-or-CoinGecko price vs.
 Steem's own internal market); `Price_Feed` isn't pair-shaped at all — it's Steem's own
 witness-median feed price (a single blockchain-native value, not a tradeable rate).
 

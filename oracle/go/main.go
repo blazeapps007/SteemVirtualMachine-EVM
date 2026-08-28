@@ -158,15 +158,32 @@ func run(logger log.Logger) error {
 	gasPrices := envOr("ORACLE_GAS_PRICES", "1000000000asteem")
 	var priceSource relayer.PriceSource
 	if gasPrices != "" {
-		var cmc *relayer.CMCClient
-		if cmcKey := strings.TrimSpace(os.Getenv("ORACLE_CMC_API_KEY")); cmcKey != "" {
-			cmc = relayer.NewCMCClient(cmcKey, strings.TrimSpace(os.Getenv("ORACLE_CMC_BASE_URL")))
-		} else {
-			logger.Info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD_External and SBD/USD_External will be skipped")
+		// ORACLE_PRICE_SOURCE picks which external client prices
+		// STEEM/USD_External + SBD/USD_External — "cmc" (default, for
+		// existing operators whose .env predates this option) or
+		// "coingecko". Unlike CMC's key, CoinGecko's is optional: its
+		// public /simple/price endpoint works keyless, just at a lower
+		// rate limit.
+		var external relayer.ExternalPriceClient
+		switch source := strings.TrimSpace(envOr("ORACLE_PRICE_SOURCE", "cmc")); source {
+		case "cmc":
+			if cmcKey := strings.TrimSpace(os.Getenv("ORACLE_CMC_API_KEY")); cmcKey != "" {
+				external = relayer.NewCMCClient(cmcKey, strings.TrimSpace(os.Getenv("ORACLE_CMC_BASE_URL")))
+			} else {
+				logger.Info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD_External and SBD/USD_External will be skipped")
+			}
+		case "coingecko":
+			cgKey := strings.TrimSpace(os.Getenv("ORACLE_COINGECKO_API_KEY"))
+			if cgKey == "" {
+				logger.Info("price feeder: ORACLE_COINGECKO_API_KEY not set, using CoinGecko's public rate limit")
+			}
+			external = relayer.NewCoinGeckoClient(cgKey, strings.TrimSpace(os.Getenv("ORACLE_COINGECKO_BASE_URL")))
+		default:
+			return fmt.Errorf("unknown ORACLE_PRICE_SOURCE %q: must be \"cmc\" or \"coingecko\"", source)
 		}
 		priceSource = relayer.CompositePriceSource{
-			CMC:   cmc,
-			Steem: relayer.NewSteemClient(steemRPC),
+			External: external,
+			Steem:    relayer.NewSteemClient(steemRPC),
 		}
 		logger.Info("price feeder enabled", "gas_prices", gasPrices)
 	} else {

@@ -16,9 +16,15 @@ Configuration is entirely from environment variables (see ``oracle/.env.example`
                            (default 0 = use the chain's relayer_start_block anchor)
     ORACLE_SBD_SYMBOL     Steem symbol that counts as bridgeable SBD (default "SBD");
                            set to "" to disable SBD bridging
-    ORACLE_CMC_API_KEY    CoinMarketCap API key, prices STEEM/USD_External + SBD/USD_External.
-                           Empty skips those two pairs (see oracle/PROTOCOL.md SS7).
+    ORACLE_PRICE_SOURCE   "cmc" (default) or "coingecko" -- which external client prices
+                           STEEM/USD_External + SBD/USD_External (see oracle/PROTOCOL.md SS7)
+    ORACLE_CMC_API_KEY    CoinMarketCap API key. Required when ORACLE_PRICE_SOURCE=cmc;
+                           empty skips those two pairs.
     ORACLE_CMC_BASE_URL   CoinMarketCap API base URL (default the production API)
+    ORACLE_COINGECKO_API_KEY   CoinGecko API key. Optional when ORACLE_PRICE_SOURCE=coingecko --
+                                empty just uses CoinGecko's public rate limit.
+    ORACLE_COINGECKO_BASE_URL  CoinGecko API base URL (default the public API; set to
+                                https://pro-api.coingecko.com for a pro-tier key)
     ORACLE_GAS_PRICES     price-feed txs are NOT fee-exempt, unlike bridge attestations
                            (default "1000000000asteem"; see oracle/PROTOCOL.md SS3)
 """
@@ -37,6 +43,7 @@ from .config import Config, parse_duration_seconds
 from .keys import Keypair, from_mnemonic, from_private_key_hex
 from .pricefeeder import CompositePriceSource
 from .pricesources.cmc import CMCClient
+from .pricesources.coingecko import CoinGeckoClient
 from .pricesources.steem_prices import SteemPriceSource
 from .relayer import run
 from .steem_client import SteemClient
@@ -121,16 +128,30 @@ def build_price_source(env: dict, steem_rpc: str) -> tuple[Optional[CompositePri
     it any other way."""
     gas_prices = _env(env, "ORACLE_GAS_PRICES", "1000000000asteem")
 
-    cmc = None
-    cmc_key = _env(env, "ORACLE_CMC_API_KEY")
-    if cmc_key:
-        cmc = CMCClient(cmc_key, _env(env, "ORACLE_CMC_BASE_URL"))
+    # ORACLE_PRICE_SOURCE picks which external client prices
+    # STEEM/USD_External + SBD/USD_External -- "cmc" (default, for existing
+    # operators whose .env predates this option) or "coingecko". Unlike
+    # CMC's key, CoinGecko's is optional: its public /simple/price endpoint
+    # works keyless, just at a lower rate limit.
+    external = None
+    source = _env(env, "ORACLE_PRICE_SOURCE", "cmc")
+    if source == "cmc":
+        cmc_key = _env(env, "ORACLE_CMC_API_KEY")
+        if cmc_key:
+            external = CMCClient(cmc_key, _env(env, "ORACLE_CMC_BASE_URL"))
+        else:
+            logger.info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD_External and SBD/USD_External will be skipped")
+    elif source == "coingecko":
+        cg_key = _env(env, "ORACLE_COINGECKO_API_KEY")
+        if not cg_key:
+            logger.info("price feeder: ORACLE_COINGECKO_API_KEY not set, using CoinGecko's public rate limit")
+        external = CoinGeckoClient(cg_key, _env(env, "ORACLE_COINGECKO_BASE_URL"))
     else:
-        logger.info("price feeder: ORACLE_CMC_API_KEY not set, STEEM/USD_External and SBD/USD_External will be skipped")
+        raise SystemExit(f'unknown ORACLE_PRICE_SOURCE {source!r}: must be "cmc" or "coingecko"')
 
     steem_source = SteemPriceSource(SteemClient(steem_rpc))
     logger.info("price feeder enabled: gas_prices=%s", gas_prices)
-    return CompositePriceSource(cmc=cmc, steem=steem_source), gas_prices
+    return CompositePriceSource(external=external, steem=steem_source), gas_prices
 
 
 def main() -> None:
