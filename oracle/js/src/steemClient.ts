@@ -22,13 +22,19 @@ export interface Transfer {
 }
 
 /** A gateway→user payout of a bridge-out on Steem, identified by its
- * "svm-withdrawal <id>" memo. */
+ * "svm-withdrawal <id>" memo. amountMillisteem/asset are what was ACTUALLY
+ * observed paid out on Steem (not the expected value from the on-chain
+ * Withdrawal record) — the chain cross-checks these against its own record,
+ * so a manual relay that sent the wrong asset or amount can't be confirmed
+ * as a valid payout. */
 export interface Payout {
   withdrawalId: bigint;
   txid: string;
   opIndex: number;
   steemBlock: number;
   steemTimestamp: string;
+  amountMillisteem: bigint;
+  asset: BridgeAsset;
 }
 
 interface SteemBlock {
@@ -244,10 +250,19 @@ export function extractGatewayTransfers(
 
 /** Scans a block for transfer operations sent FROM the gateway account
  * whose memo is "svm-withdrawal <id>" — the gateway's on-Steem payout of a
- * bridge-out. The amount/symbol is deliberately not checked: the chain
- * already knows the withdrawal's net payout, validators only report where
- * the payout landed. */
-export function extractGatewayPayouts(blockNum: number, block: SteemBlock, gateway: string): Payout[] {
+ * bridge-out. The observed amount/asset ARE parsed and reported (unlike the
+ * chain's own knowledge of the expected payout, this is what lets the
+ * keeper's on-chain check catch a wrong-asset/wrong-amount manual relay
+ * instead of trusting txid/opIndex alone). An operation whose amount doesn't
+ * parse as either configured symbol is skipped — a payout the oracle can't
+ * identify the asset of isn't reported as a fact. */
+export function extractGatewayPayouts(
+  blockNum: number,
+  block: SteemBlock,
+  gateway: string,
+  steemSymbol: string,
+  sbdSymbol: string,
+): Payout[] {
   const payouts: Payout[] = [];
   block.transactions.forEach((tx, txNum) => {
     const txid = tx.transaction_id || block.transaction_ids?.[txNum];
@@ -258,12 +273,30 @@ export function extractGatewayPayouts(blockNum: number, block: SteemBlock, gatew
       if (!parsed || parsed.from !== gateway) return;
       const id = parseWithdrawalMemo(parsed.memo);
       if (id === undefined) return;
+
+      let amount: bigint | undefined;
+      let asset: BridgeAsset;
+      const steemAmount = parseSteemAmount(parsed.amount, steemSymbol);
+      if (steemAmount !== undefined) {
+        amount = steemAmount;
+        asset = BridgeAsset.BRIDGE_ASSET_STEEM;
+      } else if (sbdSymbol !== "") {
+        const sbdAmount = parseSteemAmount(parsed.amount, sbdSymbol);
+        if (sbdAmount === undefined) return;
+        amount = sbdAmount;
+        asset = BridgeAsset.BRIDGE_ASSET_SBD;
+      } else {
+        return;
+      }
+
       payouts.push({
         withdrawalId: id,
         txid,
         opIndex,
         steemBlock: blockNum,
         steemTimestamp: block.timestamp,
+        amountMillisteem: amount,
+        asset,
       });
     });
   });

@@ -109,11 +109,13 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(withdrawalID, 10)),
 			sdk.NewAttribute(types.AttributeKeyDestination, msg.DestinationSteemAccount),
 			sdk.NewAttribute(types.AttributeKeyAmount, netAsteem.String()),
+			sdk.NewAttribute(types.AttributeKeyAsset, denom),
 		),
 		sdk.NewEvent(
 			types.EventTypeWithdrawalBurned,
 			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(withdrawalID, 10)),
 			sdk.NewAttribute(types.AttributeKeyAmount, netAsteem.String()),
+			sdk.NewAttribute(types.AttributeKeyAsset, denom),
 		),
 	})
 

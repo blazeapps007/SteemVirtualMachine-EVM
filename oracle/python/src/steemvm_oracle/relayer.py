@@ -210,7 +210,7 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
         # Withdrawal payouts: optimistic, no per-validator dedup query
         # needed (chain benign-no-ops duplicates at 2/3 threshold).
         if bridge_out_enabled:
-            for payout in extract_gateway_payouts(block_num, block, gateway):
+            for payout in extract_gateway_payouts(block_num, block, gateway, cycle.cfg.steem_symbol, cycle.cfg.sbd_symbol):
                 block_msgs.append(build_payout_any(payout, cycle.keypair.address))
                 logger.info(
                     "attesting withdrawal payout: withdrawal_id=%d steem_txid=%s op_index=%d",

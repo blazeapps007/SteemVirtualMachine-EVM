@@ -220,15 +220,17 @@ func TestExtractGatewayPayouts(t *testing.T) {
 	var block *steemBlock
 	require.NoError(t, json.Unmarshal([]byte(raw), &block))
 
-	payouts := ExtractGatewayPayouts(500, block, "blaze.apps")
+	payouts := ExtractGatewayPayouts(500, block, "blaze.apps", "STEEM", "SBD")
 	require.Len(t, payouts, 1, "only gateway-sent transfers with a svm-withdrawal memo count")
 	require.Equal(t, uint64(7), payouts[0].WithdrawalID)
 	require.Equal(t, "bbbb111111111111111111111111111111111111", payouts[0].Txid)
 	require.Equal(t, uint32(1), payouts[0].OpIndex, "op index counts all ops in the tx")
 	require.Equal(t, uint64(500), payouts[0].SteemBlock)
 	require.Equal(t, "2026-07-14T14:00:00", payouts[0].SteemTimestamp)
+	require.Equal(t, uint64(10000), payouts[0].AmountMillisteem, "10.000 STEEM -> 10000 millisteem")
+	require.Equal(t, types.BridgeAsset_BRIDGE_ASSET_STEEM, payouts[0].Asset)
 
-	require.Nil(t, ExtractGatewayPayouts(1, nil, "blaze.apps"))
+	require.Nil(t, ExtractGatewayPayouts(1, nil, "blaze.apps", "STEEM", "SBD"))
 }
 
 func TestStateRoundTrip(t *testing.T) {

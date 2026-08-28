@@ -73,6 +73,13 @@ type Precompile struct {
 // PrecompiledContract interface. The bank keeper is only used by the shared
 // balance handler, which replays bank events (bridgeOut's burn) into the EVM
 // stateDB so the caller's native balance stays consistent.
+//
+// This means BridgeOut debits the caller's balance through the same shared
+// cmn.BalanceHandler -> StateDB.SubBalance path as every other
+// balance-touching precompile (staking, distribution, bank, ics20, gov) — the
+// exact code path that had a wraparound-on-underflow bug fixed in cosmos/evm
+// v0.7.2 (already used to drain balances on other chains via a crafted
+// delegate call). Worth knowing if this precompile is ever extended.
 func NewPrecompile(
 	keeper steembridgekeeper.Keeper,
 	msgServer steembridgetypes.MsgServer,

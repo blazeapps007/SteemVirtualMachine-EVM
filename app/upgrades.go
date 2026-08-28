@@ -24,6 +24,17 @@ import (
 // chain ever upgrades in-place.
 const UpgradeName = "v0.0.3"
 
+// UpgradeNameV004 is the coordinated security-patch upgrade: bumps
+// cosmos/evm to v0.7.2 (SubBalance underflow fix — see
+// precompiles/steembridge/steembridge.go's doc comment) and cosmos-sdk to
+// v0.54.4, plus on-chain enforcement that MsgAttestWithdrawalPayout's
+// observed amount/asset actually match the withdrawal record (see
+// AttestWithdrawalPayout in x/oracle/bridge/keeper). MUST exactly match both
+// the Makefile's VERSION (cosmovisor stages the built binary under
+// cosmovisor/upgrades/v$(steemvmd version)/bin/) and the Plan.Name used in
+// the governance MsgSoftwareUpgrade proposal that schedules it.
+const UpgradeNameV004 = "v0.0.4"
+
 // RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On
 // the IN-PLACE upgrade path this: runs module migrations, registers the native
 // SBD coin (bank metadata + ERC20 precompile, via the same registerSBD helper the
@@ -67,6 +78,17 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			return vm, nil
+		},
+	)
+
+	// v0.0.4: cosmos/evm v0.7.2 + cosmos-sdk v0.54.4 security patches, plus
+	// withdrawal-payout asset/amount enforcement. Logic-only — neither diff
+	// adds a new store key, so no StoreUpgrades/SetStoreLoader block is
+	// needed for this name (unlike v0.0.3 above).
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV004,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 		},
 	)
 

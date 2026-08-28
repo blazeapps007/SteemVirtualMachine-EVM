@@ -45,6 +45,12 @@ import (
 // x/feemarket's TransientKey removal). That decorator carried no
 // steembridge-specific logic, so its removal doesn't touch the
 // fee-exemption or identity-gate behavior below.
+//
+// Re-diffed against cosmos/evm v0.7.2's ante/cosmos.go (the v0.7.1->v0.7.2
+// security bump, github.com/cosmos/evm/compare/v0.7.1...v0.7.2): no change —
+// that release's diff (11 files: x/vm/statedb, x/feemarket/keeper/abci,
+// precompiles/common/utils, evmd/mempool, plus tests) doesn't touch
+// ante/cosmos.go at all. This fork needs no update for that bump.
 func newSteembridgeAnteHandler(
 	options evmante.HandlerOptions,
 	bridgeKeeper steembridgekeeper.Keeper,

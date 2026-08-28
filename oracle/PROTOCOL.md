@@ -115,6 +115,13 @@ From the reference relayer (`oracle/go/relayer/router.go`):
   for SBD).
 - Outbound transfer FROM the gateway account with memo `svm-withdrawal <id>` → withdrawal payout
   attestation (`MsgAttestWithdrawalPayout`), where `<id>` is the withdrawal record ID.
+  `amount_millisteem`/`asset` on this message MUST be parsed from the ACTUAL Steem transfer operation
+  being attested (same amount/symbol parsing as an inbound deposit transfer — see the amount-parsing
+  rules in this section), never copied from the on-chain `Withdrawal` record's expected value. The
+  keeper independently compares the two and rejects (benign no-op, no confirmation recorded) any
+  attestation whose reported amount/asset doesn't match what the withdrawal actually expects — a
+  client that echoes the expected value back instead of reporting what it observed defeats this
+  check entirely and must not do so.
 
 ## 6. Dedup / idempotency
 

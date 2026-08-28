@@ -313,14 +313,16 @@ func runCycle(
 		// withdrawal REQUESTED→PROCESSED at 2/3, so no per-validator dedup query is
 		// needed here. Gated on bridge-out being enabled (the v0.0.3 payout path).
 		if params.Params.BridgeOutEnabled {
-			for _, payout := range ExtractGatewayPayouts(nb.Num, nb.Block, gateway) {
+			for _, payout := range ExtractGatewayPayouts(nb.Num, nb.Block, gateway, cfg.SteemSymbol, cfg.SbdSymbol) {
 				blockMsgs = append(blockMsgs, &types.MsgAttestWithdrawalPayout{
-					Validator:      signerAddr.String(),
-					WithdrawalId:   payout.WithdrawalID,
-					SteemTxid:      payout.Txid,
-					OpIndex:        payout.OpIndex,
-					SteemBlock:     payout.SteemBlock,
-					SteemTimestamp: payout.SteemTimestamp,
+					Validator:        signerAddr.String(),
+					WithdrawalId:     payout.WithdrawalID,
+					SteemTxid:        payout.Txid,
+					OpIndex:          payout.OpIndex,
+					SteemBlock:       payout.SteemBlock,
+					SteemTimestamp:   payout.SteemTimestamp,
+					AmountMillisteem: payout.AmountMillisteem,
+					Asset:            payout.Asset,
 				})
 				logger.Info("attesting withdrawal payout",
 					"withdrawal_id", payout.WithdrawalID, "steem_txid", payout.Txid, "op_index", payout.OpIndex)

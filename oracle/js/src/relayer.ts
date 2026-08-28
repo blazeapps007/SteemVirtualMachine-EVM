@@ -6,6 +6,7 @@
 
 import { toBech32, fromBech32 } from "@cosmjs/encoding";
 import type { Registry } from "@cosmjs/proto-signing";
+import Long from "long";
 
 import type { Config } from "./config";
 import type { EthSecp256k1DirectSigner } from "./signer";
@@ -349,7 +350,7 @@ async function runCycle(
     }
 
     if (params.bridge_out_enabled) {
-      for (const payout of extractGatewayPayouts(nb.num, nb.block, gateway)) {
+      for (const payout of extractGatewayPayouts(nb.num, nb.block, gateway, cfg.steemSymbol, cfg.sbdSymbol)) {
         blockMsgs.push({
           typeUrl: TYPE_URL_MSG_ATTEST_WITHDRAWAL_PAYOUT,
           value: {
@@ -359,6 +360,11 @@ async function runCycle(
             opIndex: payout.opIndex,
             steemBlock: payout.steemBlock,
             steemTimestamp: payout.steemTimestamp,
+            // Observed amount/asset — NOT the expected value from the
+            // Withdrawal record — so the chain's cross-check actually means
+            // something. See extractGatewayPayouts's doc comment.
+            amountMillisteem: Long.fromString(payout.amountMillisteem.toString(), true),
+            asset: payout.asset,
           },
         });
         logger.info("attesting withdrawal payout", {

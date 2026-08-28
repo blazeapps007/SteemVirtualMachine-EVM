@@ -1,0 +1,142 @@
+# Upgrade v0.0.4 — security patch (cosmos/evm + cosmos-sdk) + withdrawal-payout hardening
+
+## What this upgrade is and why it's urgent
+
+Cosmos Labs disclosed that chains running `cosmos/evm` older than v0.6.2/v0.7.2 should immediately
+upgrade. The bug is a balance **underflow** in the EVM `StateDB.SubBalance`: subtracting more than an
+account's balance silently wraps around to ~2^256 instead of erroring. It has already been used to
+drain MANTRA, TAC, and KiiChain (Aug 20–22, 2026) via a crafted vesting-account contract calling a
+balance-modifying precompile (originally reported via the staking precompile, but the same
+`cmn.BalanceHandler` code path is shared by every precompile that touches account balances —
+staking, distribution, bank, ics20, gov, and this chain's own `steembridge` `BridgeOut`). Exploitable
+by any user via a crafted transaction; no malicious validator required. This chain was pinned to the
+vulnerable `cosmos/evm v0.7.1`.
+
+This upgrade bundles three changes into one coordinated event:
+
+1. **`cosmos/evm` v0.7.1 → v0.7.2** — the underflow fix (`SubBalance` now panics on underflow instead
+   of wrapping), a `ParseAmount` fix (no-op for this chain — base/extended EVM denom are both
+   `asteem`), a `feemarket` gas-overflow clamp, and a `ProcessProposal` handler addition mirrored into
+   `app/evm.go`.
+2. **`cosmos-sdk` v0.54.3 → v0.54.4** — a separate security release ("important security fixes...
+   recommend all chains upgrade using a coordinated upgrade," no public advisory detail available at
+   time of writing). Bundled here rather than as a second separate upgrade event.
+3. **On-chain enforcement that a withdrawal payout's observed amount/asset match the withdrawal
+   record** — `MsgAttestWithdrawalPayout` previously only cross-checked `(steem_txid, op_index)`
+   across validators, never the actual amount/asset paid out on Steem. A validator manually relaying
+   a payout who sent the wrong asset or amount could previously have that payout confirmed as valid
+   anyway. Now the keeper independently compares the validator-reported `amount_millisteem`/`asset`
+   against the withdrawal record and rejects a mismatch (benign no-op, no confirmation recorded, audit
+   event emitted) rather than silently trusting it.
+
+This is a **state-breaking, coordinated upgrade** — every validator must switch to the new binary at
+the exact same block height. It is not safe to update ad hoc or at your own pace.
+
+## What changed (for anyone reviewing the diff)
+
+- `go.mod` / `go.sum` — the two version bumps above.
+- `app/upgrades.go` — new `UpgradeNameV004 = "v0.0.4"` handler, additive alongside the existing
+  (dormant, never-fired) `v0.0.3` one. No store migrations — neither dependency bump nor the payout
+  change adds a new store key.
+- `app/evm.go` — `SetProcessProposal` wired in alongside the existing `SetPrepareProposal`.
+- `app/ante_steembridge.go` — re-diffed against upstream `ante/cosmos.go` at v0.7.2: confirmed no
+  changes needed (that release's diff doesn't touch the ante chain).
+- `Makefile` — `VERSION` changed from `v0.0.3-Beta-2` to `0.0.4` (dropped the leading `v`). This
+  fixes a latent, previously-unexercised bug: `docker-entrypoint.sh` stages the cosmovisor upgrade
+  binary at `cosmovisor/upgrades/v$(steemvmd version)/bin/`, prepending its own `v` — a `VERSION`
+  value that already started with `v` produced a double-`v` directory that could never match an
+  on-chain `Plan.Name`. Verified via a real throwaway-container devnet boot that `steemvmd version`
+  now prints `0.0.4` and stages at `cosmovisor/upgrades/v0.0.4/bin/steemvmd`.
+- `precompiles/steembridge/steembridge.go` — doc comment noting `BridgeOut`'s shared exposure to the
+  patched code path.
+- `proto/steemvm/steembridge/v1/tx.proto`, `x/oracle/bridge/types/tx.pb.go` — new
+  `amount_millisteem` (field 7) / `asset` (field 8) fields on `MsgAttestWithdrawalPayout`.
+- `x/oracle/bridge/keeper/msg_server_attest_withdrawal_payout.go` — the new amount/asset validation,
+  mirrored into the fee-exemption ante-decorator acceptance check.
+- `x/oracle/bridge/types/events.go`, `msg_server_bridge_out.go`, `msg_server_submit_steem_deposit.go`,
+  `deposit.go` — a new `asset` attribute on withdrawal/deposit created/minted/burned events (so an
+  event consumer can tell STEEM from SBD without a follow-up query), and a new
+  `withdrawal_payout_asset_mismatch` audit event.
+- `oracle/go/relayer/`, `oracle/python/src/steemvm_oracle/`, `oracle/js/src/` — all three oracle
+  client implementations updated in lockstep: the payout-detection logic now parses the actually
+  observed amount/asset from the Steem transfer operation and reports it (never echoes back the
+  expected value — that would defeat the on-chain check). See `oracle/PROTOCOL.md` §5 for the spec.
+
+Verified via throwaway Docker containers (not assumed): `go build`/`go vet`/`go test ./...` all clean;
+a real devnet boot (init → gentx → collect-gentxs → start) produced blocks with zero panics; the Go,
+Python, and JS oracle clients all build/type-check and pass their test suites.
+
+**Not yet done, and blocking before this should be considered fully verified**: a live exploit-replay
+test (deploy a vesting-account contract via EVM, trigger the underflow through a precompile, confirm
+it's cleanly rejected post-upgrade without crashing the node) — this needs real EVM/Solidity tooling
+that hasn't been set up yet.
+
+## Validator upgrade instructions
+
+### If you run via Docker Compose + cosmovisor (the default `docker compose up` path)
+
+Cosmovisor auto-swaps the binary at the exact upgrade height — but only if the new binary is already
+**staged** before that height arrives. Staging happens automatically on container start
+(`docker-entrypoint.sh` copies the freshly-built binary into `cosmovisor/upgrades/v0.0.4/bin/` every
+time the container starts, as long as `cosmovisor/current` hasn't already moved past `genesis`).
+
+1. Pull this branch and rebuild **before** the upgrade height:
+   ```sh
+   git pull
+   git checkout release/v0.0.4-security-upgrade   # or whatever this lands as after merge/tag
+   docker compose down
+   docker compose up -d --build
+   ```
+2. Confirm the binary staged correctly:
+   ```sh
+   docker exec <container> /root/go/bin/steemvmd version
+   # must print: 0.0.4
+   docker exec <container> ls /root/.steemvm/cosmovisor/upgrades/v0.0.4/bin/
+   # must show: steemvmd
+   ```
+3. Do this well before the target height — don't wait until the last minute. If the binary isn't
+   staged when the chain reaches the upgrade height, your node will halt at that height (cosmovisor
+   can't swap to a binary that isn't there) until you rebuild and restart it.
+4. At the upgrade height, cosmovisor halts the old process, swaps `current` to point at
+   `cosmovisor/upgrades/v0.0.4/`, and restarts automatically. Watch your logs
+   (`docker compose logs -f steemvm`) around the target height to confirm the swap and continued
+   block production.
+5. **No automatic backup is taken** — `docker-compose.yml` sets `UNSAFE_SKIP_BACKUP: "true"`. If you
+   want a rollback point, snapshot your node's data directory manually before the upgrade height.
+
+### If you run the bare `steemvmd` binary directly (no Docker/cosmovisor)
+
+Cosmovisor's auto-swap does **not** apply to you — you must swap the binary manually, timed to the
+exact upgrade height:
+
+1. Pull this branch and build ahead of time: `git pull && git checkout <branch> && make install`.
+2. Confirm `steemvmd version` prints `0.0.4`.
+3. Watch your node's height approaching the target height (see below). When your node reaches that
+   height, it will halt on its own (the running v0.0.3-era binary has no `v0.0.4` upgrade handler
+   registered... actually it does, since this same binary carries both — the halt/panic risk is
+   specifically for anyone who has NOT rebuilt at all by the target height, since an old binary
+   without ANY `v0.0.4` handler would panic trying to apply an unknown-to-it upgrade plan). Stop the
+   old process, replace the binary with the new one, restart with the same `--home` you already use.
+4. Consider migrating to the cosmovisor-managed Docker Compose path before the *next* upgrade, so
+   this manual step isn't needed again.
+
+### Sanity checks after the upgrade (all operators)
+
+```sh
+steemvmd status | grep catching_up   # should be false, node producing/following blocks
+steemvmd query upgrade applied v0.0.4 --home <your-home>   # should show the height it applied at
+```
+
+## Governance proposal — how the upgrade is scheduled
+
+Standard cosmos-sdk software-upgrade governance flow: a proposal embeds an `x/upgrade` `Plan` with
+`name = "v0.0.4"` (must exactly match the `UpgradeNameV004` constant in `app/upgrades.go`, and the
+`0.0.4` staged by every operator's build) and a target `height`. Once the proposal passes (this
+chain's voting period is 48h; blazed007's bonded power alone is decisive but every operator should
+still get advance notice — a security patch is not the moment to let speed mean "others find out
+after the fact"), `x/upgrade`'s own logic halts every node at that exact height and, for
+cosmovisor-managed nodes with the binary already staged, resumes automatically on the new binary.
+
+See the main session record / operator channel for the exact `submit-proposal`/`vote` commands and
+target height used for this specific rollout — the height is time-sensitive (computed from the live
+chain's current block rate) and should not be treated as a fixed constant in this document.
