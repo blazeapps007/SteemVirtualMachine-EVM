@@ -17,13 +17,14 @@ import logging
 import secrets
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 logger = logging.getLogger("steemvm_oracle.pricefeeder")
 
 from . import _protopath  # noqa: F401
 from .decimal_fmt import legacy_dec_string
 from .pricesources.cmc import CMCClient
+from .pricesources.coingecko import CoinGeckoClient
 from .pricesources.steem_prices import PAIR_PRICE_FEED, PAIR_STEEM_SBD_INTERNAL, SteemPriceSource
 from .signing import (
     TYPE_URL_AGGREGATE_EXCHANGE_RATE_PREVOTE,
@@ -44,30 +45,31 @@ AGGREGATE_VOTE_HASH_LEN = 40
 
 class CompositePriceSource:
     """Dispatches each whitelisted pair to the source that actually prices
-    it: CoinMarketCap for STEEM/USD_External and SBD/USD_External, the Steem
-    RPC node for STEEM/SBD_Internal and Price_Feed. Never raises: a source
-    being ``None`` (not configured) or failing for a given pair just omits that pair from the
+    it: the operator-selected external client (CoinMarketCap or CoinGecko --
+    see ORACLE_PRICE_SOURCE) for STEEM/USD_External and SBD/USD_External, the
+    Steem RPC node for STEEM/SBD_Internal and Price_Feed. Never raises: a
+    source being ``None`` (not configured) or failing for a given pair just omits that pair from the
     result -- one flaky upstream should never block the others, and a
     whole-cycle miss is already meaningful on its own (the unified slashing
     engine counts it as a price-duty miss)."""
 
-    def __init__(self, cmc: Optional[CMCClient], steem: Optional[SteemPriceSource]):
-        self.cmc = cmc
+    def __init__(self, external: Optional[Union[CMCClient, CoinGeckoClient]], steem: Optional[SteemPriceSource]):
+        self.external = external
         self.steem = steem
 
     def fetch_prices(self, pairs: Sequence[str]) -> dict[str, Decimal]:
         want = set(pairs)
         out: dict[str, Decimal] = {}
 
-        if self.cmc is not None and (PAIR_STEEM_USD in want or PAIR_SBD_USD in want):
+        if self.external is not None and (PAIR_STEEM_USD in want or PAIR_SBD_USD in want):
             symbols = []
             if PAIR_STEEM_USD in want:
                 symbols.append("STEEM")
             if PAIR_SBD_USD in want:
                 symbols.append("SBD")
             try:
-                prices = self.cmc.fetch_usd_prices(symbols)
-            except Exception:  # noqa: BLE001 - CMC failure never blocks Steem-sourced pairs
+                prices = self.external.fetch_usd_prices(symbols)
+            except Exception:  # noqa: BLE001 - external-source failure never blocks Steem-sourced pairs
                 prices = {}
             if "STEEM" in prices and PAIR_STEEM_USD in want:
                 out[PAIR_STEEM_USD] = prices["STEEM"]

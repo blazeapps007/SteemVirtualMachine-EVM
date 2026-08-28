@@ -53,7 +53,7 @@ services:
   #     cp oracle/.env.example oracle/.env    # then edit oracle/.env (your key)
   #     docker compose --profile go up -d       # or --profile python / --profile js
   #
-  # All oracle config (incl. your validator key, CoinMarketCap key, and the
+  # All oracle config (incl. your validator key, price-source API key, and the
   # Steem RPC used for both bridge scanning and price feeds) comes from
   # oracle/.env — see oracle/.env.example. That file is gitignored; NEVER
   # commit it. Bridge-attestation txs are fee-exempt for bonded validators;
