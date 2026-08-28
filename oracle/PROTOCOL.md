@@ -160,16 +160,28 @@ From the reference relayer (`oracle/go/relayer/router.go`):
 
 | Pair | Source |
 |---|---|
-| `STEEM/USD_External` | CoinMarketCap |
-| `SBD/USD_External` | CoinMarketCap |
+| `STEEM/USD_External` | CoinMarketCap or CoinGecko (operator-selected via `ORACLE_PRICE_SOURCE`) |
+| `SBD/USD_External` | CoinMarketCap or CoinGecko (operator-selected via `ORACLE_PRICE_SOURCE`) |
 | `STEEM/SBD_Internal` | Steem `condenser_api.get_ticker`, latest-trade field (internal market) |
 | `Price_Feed` | Steem `condenser_api.get_feed_history`, witness median (`current_median_history`) |
 
+`ORACLE_PRICE_SOURCE` (default `cmc`) is a per-validator choice — the two aren't required to agree
+across the validator set, since the on-chain `PAIR:price` value never encodes which source produced
+it, and the commit-reveal feed's reward-band/miss-band tolerance already absorbs small cross-source
+price divergence.
+
 CoinMarketCap: batch `STEEM`+`SBD` into one `quotes/latest?symbol=STEEM,SBD&convert=USD` call
-rather than two separate calls. Missing/failed pairs are dropped, not fatal — a partial price map
-is valid (the chain-side feeder contract treats "fewer pairs than the whitelist" as fine; an empty
-map for a whole cycle just means "no vote this period," which the unified slashing engine counts as
-a price-duty miss, not a crash).
+rather than two separate calls.
+
+CoinGecko: batch `steem`+`steem-dollars` (CoinGecko's own coin ids for STEEM/SBD) into one
+`simple/price?ids=steem,steem-dollars&vs_currencies=usd` call. Unlike CMC, the API key is optional —
+the endpoint works keyless (public rate limit); a demo key (`x-cg-demo-api-key` header) or pro key
+(`x-cg-pro-api-key` header, `https://pro-api.coingecko.com` base) only raises the limit.
+
+Both sources: missing/failed pairs are dropped, not fatal — a partial price map is valid (the
+chain-side feeder contract treats "fewer pairs than the whitelist" as fine; an empty map for a whole
+cycle just means "no vote this period," which the unified slashing engine counts as a price-duty
+miss, not a crash).
 
 ## 8. State-file schemas
 

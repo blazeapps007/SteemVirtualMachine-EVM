@@ -2,7 +2,7 @@
 #
 # new-validator.sh — interactive validator + oracle setup.
 #
-# Steps: username -> Steem pubkeys -> CMC key -> fetch genesis -> start node
+# Steps: username -> Steem pubkeys -> price source -> fetch genesis -> start node
 # -> new SteemVM key -> Steem name registration -> faucet + stake -> create
 # validator -> start oracle.
 #
@@ -335,12 +335,22 @@ fi
 [ -n "$OWNER_KEY" ] && [ -n "$ACTIVE_KEY" ] && [ -n "$POSTING_KEY" ] || die "owner, active, and posting keys are all required."
 DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
 
-# ── 3. CoinMarketCap API key — required for price-feed duty ───────────────
-CMC_KEY=""
-while [ -z "$CMC_KEY" ]; do
-  read -rp "CoinMarketCap API key (REQUIRED — free at coinmarketcap.com/api): " CMC_KEY < /dev/tty
-  [ -z "$CMC_KEY" ] && warn "required — without it your oracle misses price-feed duty and risks jailing."
-done
+# ── 3. Price source for the STEEM/USD + SBD/USD feed ────────────────────────
+read -rp "Price source — CoinMarketCap or CoinGecko? [cmc/coingecko] (default: cmc): " PRICE_SOURCE < /dev/tty
+PRICE_SOURCE="${PRICE_SOURCE:-cmc}"
+case "$PRICE_SOURCE" in
+  cmc)
+    CMC_KEY=""
+    while [ -z "$CMC_KEY" ]; do
+      read -rp "CoinMarketCap API key (REQUIRED — free at coinmarketcap.com/api): " CMC_KEY < /dev/tty
+      [ -z "$CMC_KEY" ] && warn "required — without it your oracle misses price-feed duty and risks jailing."
+    done
+    ;;
+  coingecko)
+    read -rp "CoinGecko API key (optional — press Enter to skip, uses the public rate limit): " COINGECKO_KEY < /dev/tty
+    ;;
+  *) die "unknown price source '$PRICE_SOURCE' — must be 'cmc' or 'coingecko'." ;;
+esac
 
 # ── 4. fetch the network's live genesis.json ───────────────────────────────
 # Fetched live (not from Instructions/genesis.json) so it can't go stale vs the running network.
@@ -629,7 +639,12 @@ PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail 
   echo "ORACLE_PRIVATE_KEY=$PRIVKEY"
   echo "ORACLE_START_BLOCK=latest"
   echo "ORACLE_STEEM_RPC=https://api.steemit.com"
-  echo "ORACLE_CMC_API_KEY=$CMC_KEY"
+  echo "ORACLE_PRICE_SOURCE=$PRICE_SOURCE"
+  if [ "$PRICE_SOURCE" = "cmc" ]; then
+    echo "ORACLE_CMC_API_KEY=$CMC_KEY"
+  elif [ -n "${COINGECKO_KEY:-}" ]; then
+    echo "ORACLE_COINGECKO_API_KEY=$COINGECKO_KEY"
+  fi
   echo "ORACLE_SBD_SYMBOL=SBD"
 } > oracle/.env
 ok "oracle/.env written."

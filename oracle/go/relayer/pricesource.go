@@ -10,24 +10,32 @@ import (
 	"cosmossdk.io/math"
 )
 
+// ExternalPriceClient is satisfied by both CMCClient and CoinGeckoClient —
+// CompositePriceSource dispatches to whichever one the operator selected via
+// ORACLE_PRICE_SOURCE (see main.go), never both at once.
+type ExternalPriceClient interface {
+	FetchUSDPrices(symbols []string) (map[string]math.LegacyDec, error)
+}
+
 // CompositePriceSource implements PriceSource by dispatching each whitelisted
-// pair to the source that actually prices it: CoinMarketCap for
-// STEEM/USD_External and SBD/USD_External (Steem has no native USD market),
-// and the SAME Steem RPC node used for bridge scanning for
-// STEEM/SBD_Internal (internal market) and Price_Feed (Steem's own
-// witness-median feed price — deliberately not pair-shaped, since it isn't a
-// tradeable market rate) — see oracle/PROTOCOL.md §7 for the exact mapping.
+// pair to the source that actually prices it: the operator-selected external
+// client (CoinMarketCap or CoinGecko) for STEEM/USD_External and
+// SBD/USD_External (Steem has no native USD market), and the SAME Steem RPC
+// node used for bridge scanning for STEEM/SBD_Internal (internal market) and
+// Price_Feed (Steem's own witness-median feed price — deliberately not
+// pair-shaped, since it isn't a tradeable market rate) — see
+// oracle/PROTOCOL.md §7 for the exact mapping.
 //
 // FetchPrices never returns an error: a source being nil (not configured) or
 // failing for a given pair just omits that pair from the result, matching
 // Feeder.Step's existing "partial/empty map is fine" contract — one flaky
-// upstream (say, CoinMarketCap rate-limiting) should never block the
+// upstream (say, a price-source rate-limiting) should never block the
 // Steem-sourced pairs, and a whole-cycle miss is already meaningful on its
 // own (the unified slashing engine counts it as a price-duty miss) without
 // needing a distinct error path.
 type CompositePriceSource struct {
-	CMC   *CMCClient   // nil disables STEEM/USD_External and SBD/USD_External
-	Steem *SteemClient // nil disables STEEM/SBD_Internal and Price_Feed
+	External ExternalPriceClient // nil disables STEEM/USD_External and SBD/USD_External
+	Steem    *SteemClient        // nil disables STEEM/SBD_Internal and Price_Feed
 }
 
 func (s CompositePriceSource) FetchPrices(pairs []string) (map[string]math.LegacyDec, error) {
@@ -37,7 +45,7 @@ func (s CompositePriceSource) FetchPrices(pairs []string) (map[string]math.Legac
 	}
 	out := make(map[string]math.LegacyDec, len(pairs))
 
-	if s.CMC != nil && (want["STEEM/USD_External"] || want["SBD/USD_External"]) {
+	if s.External != nil && (want["STEEM/USD_External"] || want["SBD/USD_External"]) {
 		var symbols []string
 		if want["STEEM/USD_External"] {
 			symbols = append(symbols, "STEEM")
@@ -45,7 +53,7 @@ func (s CompositePriceSource) FetchPrices(pairs []string) (map[string]math.Legac
 		if want["SBD/USD_External"] {
 			symbols = append(symbols, "SBD")
 		}
-		if prices, err := s.CMC.FetchUSDPrices(symbols); err == nil {
+		if prices, err := s.External.FetchUSDPrices(symbols); err == nil {
 			if p, ok := prices["STEEM"]; ok && want["STEEM/USD_External"] {
 				out["STEEM/USD_External"] = p
 			}
