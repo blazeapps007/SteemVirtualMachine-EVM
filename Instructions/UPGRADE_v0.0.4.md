@@ -127,21 +127,67 @@ Instead, pre-stage the binary with a **one-off service that never touches your r
    This isn't required for the upgrade itself to work (cosmovisor already swapped using the staged
    binary) — it just means your next ordinary restart won't rebuild from source.
 
-### If you run the bare `steemvmd` binary directly (no Docker/cosmovisor)
+### If you run the bare `steemvmd` binary directly (no Docker)
 
-Cosmovisor's auto-swap does **not** apply to you — you must swap the binary manually, timed to the
-exact upgrade height:
+You don't need Docker to get cosmovisor's auto-swap — install cosmovisor as a sibling binary and run
+under it instead of running `steemvmd` directly. This is the **recommended** path: build ahead of
+time, cosmovisor swaps automatically at the exact height, same as the Docker Compose path, no manual
+timing required. A **fully manual, precisely-timed** fallback is also given below for anyone who
+genuinely doesn't want cosmovisor.
+
+#### Recommended: install cosmovisor, then build prior and let it auto-swap
+
+1. Install cosmovisor once (matches the exact version this repo's own Docker image uses — its
+   dependency graph needs an older Go toolchain than this repo's own `steemvmd` build, hence the
+   pinned `GOTOOLCHAIN`):
+   ```sh
+   GOTOOLCHAIN=go1.25.10 go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.0
+   ```
+2. Set the env vars cosmovisor needs (put these in your shell profile or systemd unit's
+   `Environment=` lines — whatever currently launches `steemvmd`):
+   ```sh
+   export DAEMON_HOME=<your existing --home, e.g. $HOME/.steemvm>
+   export DAEMON_NAME=steemvmd
+   export DAEMON_RESTART_AFTER_UPGRADE=true
+   export DAEMON_ALLOW_DOWNLOAD_BINARIES=false
+   export UNSAFE_SKIP_BACKUP=true
+   ```
+3. **Point cosmovisor's `genesis/bin` at your CURRENT (already-running, pre-upgrade) binary — not
+   the new one.** This is the same trap the Docker path had to be fixed for: if you initialize
+   cosmovisor with the new v0.0.4 binary here, it becomes what cosmovisor runs on its very next
+   start, ahead of the coordinated height.
+   ```sh
+   which steemvmd   # or wherever your currently-running binary actually is
+   cosmovisor init /path/to/your/CURRENTLY-RUNNING/steemvmd
+   ```
+4. Build the new binary **into a separate checkout or temp location** so it doesn't overwrite the
+   binary you just pointed `genesis/bin` at, then stage it into cosmovisor's upgrade slot directly —
+   never run it yet:
+   ```sh
+   git pull && git checkout release/v0.0.4-security-upgrade   # or wherever this lands
+   make install   # builds to $GOBIN (or $GOPATH/bin if GOBIN is unset), NOT your live binary's path
+   NEWBIN="$(go env GOBIN)"; [ -z "$NEWBIN" ] && NEWBIN="$(go env GOPATH)/bin"
+   "$NEWBIN/steemvmd" version   # confirm: 0.0.4
+   mkdir -p "$DAEMON_HOME/cosmovisor/upgrades/v0.0.4/bin"
+   cp "$NEWBIN/steemvmd" "$DAEMON_HOME/cosmovisor/upgrades/v0.0.4/bin/steemvmd"
+   ```
+5. Switch whatever supervises your node (systemd `ExecStart=`, a screen/tmux command, etc.) from
+   `steemvmd start ...` to `cosmovisor run start ...` (same flags), then restart once. This restart
+   is a no-op in terms of behavior — cosmovisor's `current` still points at `genesis`, so it launches
+   the exact same binary you were already running, just supervised by cosmovisor now instead of
+   directly.
+6. At the coordinated height, cosmovisor halts the old process, swaps to the staged v0.0.4 binary,
+   and restarts automatically — same as the Docker Compose path's step 4.
+
+#### Alternative: fully manual swap, precisely timed (no cosmovisor)
 
 1. Pull this branch and build ahead of time: `git pull && git checkout <branch> && make install`.
 2. Confirm `steemvmd version` prints `0.0.4`.
-3. Watch your node's height approaching the target height (see below). When your node reaches that
-   height, it will halt on its own (the running v0.0.3-era binary has no `v0.0.4` upgrade handler
-   registered... actually it does, since this same binary carries both — the halt/panic risk is
-   specifically for anyone who has NOT rebuilt at all by the target height, since an old binary
-   without ANY `v0.0.4` handler would panic trying to apply an unknown-to-it upgrade plan). Stop the
-   old process, replace the binary with the new one, restart with the same `--home` you already use.
-4. Consider migrating to the cosmovisor-managed Docker Compose path before the *next* upgrade, so
-   this manual step isn't needed again.
+3. Watch your node's height approaching the target height (see below). When it reaches that height,
+   the old binary halts on its own (`x/upgrade`'s graceful stop, not a crash — see "will it keep the
+   current binary running?" note earlier in this doc). Stop the old process, replace the binary with
+   the new one, restart with the same `--home` you already use — timed as close to the halt as you
+   can manage, since there's no automation here to do it for you.
 
 ### Sanity checks after the upgrade (all operators)
 
