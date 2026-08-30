@@ -1,18 +1,22 @@
 services:
   steemvm:
     # Pre-built image (see Dockerfile) — no more `make install` inside the
-    # container on every start. Defaults to this repo's own placeholder tag;
-    # override with STEEMVM_IMAGE (env var or repo-root .env) once you've
-    # pushed your own build to a registry: STEEMVM_IMAGE=you/steemvmd:tag
+    # container on every start. Defaults to the published v0.0.4 image
+    # (cosmos/evm + cosmos-sdk security patches, withdrawal-payout
+    # enforcement, CoinGecko price source — see
+    # Instructions/UPGRADE_v0.0.4.md) so other validators can just `docker
+    # compose pull && docker compose up -d` for this upgrade without
+    # building locally. Override with STEEMVM_IMAGE (env var or repo-root
+    # .env) to point at a different tag: STEEMVM_IMAGE=you/steemvmd:tag
     #
     # `docker compose up -d` alone still works with zero setup: if the image
     # named below isn't already pulled, compose falls back to building it
     # locally from ./Dockerfile (same as always, just now cached properly
-    # instead of rebuilding from scratch every start). To actually use a
+    # instead of rebuilding from scratch every start). To actually use the
     # published image instead of building locally: `docker compose pull
     # steemvm` first, then `up -d` (compose won't rebuild an image it just
     # pulled unless you pass --build).
-    image: ${STEEMVM_IMAGE:-steemvm/steemvmd:v0.0.3-Beta-2}
+    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.4}
     build:
       context: .
       dockerfile: Dockerfile
