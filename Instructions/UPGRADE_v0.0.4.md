@@ -76,33 +76,56 @@ that hasn't been set up yet.
 ### If you run via Docker Compose + cosmovisor (the default `docker compose up` path)
 
 Cosmovisor auto-swaps the binary at the exact upgrade height — but only if the new binary is already
-**staged** before that height arrives. Staging happens automatically on container start
-(`docker-entrypoint.sh` copies the freshly-built binary into `cosmovisor/upgrades/v0.0.4/bin/` every
-time the container starts, as long as `cosmovisor/current` hasn't already moved past `genesis`).
+**staged** before that height arrives.
 
-1. Pull this branch and rebuild **before** the upgrade height:
+**Do NOT `docker compose pull && docker compose up -d` (or `--build`) onto your already-running
+validator before the upgrade height actually arrives.** `docker-entrypoint.sh` refreshes
+`cosmovisor/genesis/bin/` on every container start whenever `cosmovisor/current` still points at
+`genesis` — true for every validator on this chain right now, since no coordinated upgrade has fired
+yet. Restarting your live container on the v0.0.4 image early would silently promote v0.0.4 to
+`genesis/bin`, and cosmovisor would start running it immediately, ahead of every other validator —
+an AppHash-divergence risk, not a safe pre-stage.
+
+Instead, pre-stage the binary with a **one-off service that never touches your running container**:
+
+1. Pull this branch (to get the compose file's `stage-v0.0.4` service — you do NOT need to rebuild
+   or restart your live node for this step):
    ```sh
    git pull
    git checkout release/v0.0.4-security-upgrade   # or whatever this lands as after merge/tag
-   docker compose down
-   docker compose up -d --build
+   docker compose --profile stage run --rm stage-v0.0.4
    ```
+   This pulls the published `steemblazer/steemvmd:v0.0.4` image, copies its binary straight into
+   `cosmovisor/upgrades/v0.0.4/bin/steemvmd`, and exits — it never touches `cosmovisor/genesis/bin`
+   and never runs cosmovisor, so your live node keeps running exactly what it's running now,
+   completely undisturbed.
 2. Confirm the binary staged correctly:
    ```sh
-   docker exec <container> /root/go/bin/steemvmd version
-   # must print: 0.0.4
    docker exec <container> ls /root/.steemvm/cosmovisor/upgrades/v0.0.4/bin/
    # must show: steemvmd
+   docker exec <container> /root/.steemvm/cosmovisor/upgrades/v0.0.4/bin/steemvmd version
+   # must print: 0.0.4
    ```
 3. Do this well before the target height — don't wait until the last minute. If the binary isn't
    staged when the chain reaches the upgrade height, your node will halt at that height (cosmovisor
-   can't swap to a binary that isn't there) until you rebuild and restart it.
+   can't swap to a binary that isn't there) until you stage it and restart.
 4. At the upgrade height, cosmovisor halts the old process, swaps `current` to point at
    `cosmovisor/upgrades/v0.0.4/`, and restarts automatically. Watch your logs
    (`docker compose logs -f steemvm`) around the target height to confirm the swap and continued
    block production.
 5. **No automatic backup is taken** — `docker-compose.yml` sets `UNSAFE_SKIP_BACKUP: "true"`. If you
    want a rollback point, snapshot your node's data directory manually before the upgrade height.
+6. **Only after** the swap is confirmed (`docker exec <container> /root/go/bin/steemvmd query
+   upgrade applied v0.0.4 --home /root/.steemvm` succeeds) is it safe to also update your live
+   `steemvm` service onto the published image for future restarts — at that point `cosmovisor/current`
+   points at `upgrades/v0.0.4`, not `genesis`, so `docker-entrypoint.sh`'s genesis-refresh no longer
+   applies and `docker compose pull && docker compose up -d` is safe again:
+   ```sh
+   docker compose pull steemvm
+   docker compose up -d steemvm
+   ```
+   This isn't required for the upgrade itself to work (cosmovisor already swapped using the staged
+   binary) — it just means your next ordinary restart won't rebuild from source.
 
 ### If you run the bare `steemvmd` binary directly (no Docker/cosmovisor)
 

@@ -4,18 +4,27 @@ services:
     # container on every start. Defaults to the published v0.0.4 image
     # (cosmos/evm + cosmos-sdk security patches, withdrawal-payout
     # enforcement, CoinGecko price source — see
-    # Instructions/UPGRADE_v0.0.4.md) so other validators can just `docker
-    # compose pull && docker compose up -d` for this upgrade without
-    # building locally. Override with STEEMVM_IMAGE (env var or repo-root
-    # .env) to point at a different tag: STEEMVM_IMAGE=you/steemvmd:tag
+    # Instructions/UPGRADE_v0.0.4.md). Override with STEEMVM_IMAGE (env var
+    # or repo-root .env) to point at a different tag: STEEMVM_IMAGE=you/steemvmd:tag
+    #
+    # DO NOT `docker compose pull && up -d` this onto an already-running
+    # validator before the coordinated v0.0.4 upgrade height actually
+    # arrives. docker-entrypoint.sh refreshes cosmovisor/genesis/bin on
+    # every start whenever cosmovisor's `current` symlink still points at
+    # genesis — true for every validator on this chain right now, since no
+    # coordinated upgrade has fired yet. Pulling this image early would
+    # silently promote v0.0.4 to genesis/bin and cosmovisor would start
+    # running it immediately, ahead of every other validator — an AppHash
+    # divergence risk, not a safe pre-stage. Use the `stage-v0.0.4` service
+    # below to pre-stage the binary without running it; only switch this
+    # service's live image to v0.0.4 once the upgrade has actually applied
+    # (steemvmd query upgrade applied v0.0.4 succeeds) or you're setting up
+    # a genuinely brand-new validator after that point.
     #
     # `docker compose up -d` alone still works with zero setup: if the image
     # named below isn't already pulled, compose falls back to building it
     # locally from ./Dockerfile (same as always, just now cached properly
-    # instead of rebuilding from scratch every start). To actually use the
-    # published image instead of building locally: `docker compose pull
-    # steemvm` first, then `up -d` (compose won't rebuild an image it just
-    # pulled unless you pass --build).
+    # instead of rebuilding from scratch every start).
     image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.4}
     build:
       context: .
@@ -49,6 +58,30 @@ services:
       - "26657:26657" # CometBFT RPC
       - "1317:1317"   # Cosmos REST API
       - "9090:9090"   # gRPC
+
+  # One-off: pre-stages the v0.0.4 binary into cosmovisor's upgrade slot
+  # WITHOUT ever running it — bypasses docker-entrypoint.sh entirely (its own
+  # inline entrypoint/command only copies the binary and exits), so it never
+  # touches cosmovisor/genesis/bin and never execs cosmovisor. Safe to run at
+  # any time before the upgrade height, no matter what the live `steemvm`
+  # service above is currently running — cosmovisor (still running your
+  # current binary) will find this already staged and swap automatically
+  # the moment the chain reaches the coordinated height.
+  #
+  #     docker compose run --rm stage-v0.0.4
+  #
+  stage-v0.0.4:
+    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.4}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mkdir -p /root/.steemvm/cosmovisor/upgrades/v0.0.4/bin
+        cp /root/go/bin/steemvmd /root/.steemvm/cosmovisor/upgrades/v0.0.4/bin/steemvmd
+        echo "staged: $(/root/go/bin/steemvmd version)"
+    volumes:
+      - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
+    profiles: ["stage"]
 
   # Standalone Steem bridge oracle — pick ONE language and bring it up with its
   # profile (never more than one at a time; they'd race on the same signing key
