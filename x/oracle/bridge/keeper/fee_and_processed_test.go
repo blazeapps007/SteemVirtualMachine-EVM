@@ -92,12 +92,14 @@ func TestAttestWithdrawalPayout_MarksProcessed(t *testing.T) {
 
 	const payoutTxid = "payouttxid00000000000000000000000000000000"
 	_, err = ms.AttestWithdrawalPayout(f.ctx, &types.MsgAttestWithdrawalPayout{
-		Validator:      v1.AccAddr,
-		WithdrawalId:   0,
-		SteemTxid:      payoutTxid,
-		OpIndex:        0,
-		SteemBlock:     123,
-		SteemTimestamp: "2026-01-01T00:00:00",
+		Validator:        v1.AccAddr,
+		WithdrawalId:     0,
+		SteemTxid:        payoutTxid,
+		OpIndex:          0,
+		SteemBlock:       123,
+		SteemTimestamp:   "2026-01-01T00:00:00",
+		AmountMillisteem: 1000,
+		Asset:            types.BridgeAsset_BRIDGE_ASSET_STEEM,
 	})
 	require.NoError(t, err)
 
@@ -107,4 +109,88 @@ func TestAttestWithdrawalPayout_MarksProcessed(t *testing.T) {
 	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_PROCESSED, w.Status)
 	require.Equal(t, payoutTxid, w.SteemPayoutTxid)
 	require.Len(t, w.ValidatorConfirmations, 1)
+}
+
+// TestAttestWithdrawalPayout_AmountMismatch verifies a validator reporting the
+// wrong observed amount is a benign no-op: no confirmation recorded, the
+// withdrawal stays REQUESTED, and the mismatch is auditable via the emitted
+// event — this is what stops a wrong-amount manual relay on Steem from ever
+// being confirmed as a valid payout.
+func TestAttestWithdrawalPayout_AmountMismatch(t *testing.T) {
+	f := initFixtureWithFakes(t)
+	enableBridgeOut(t, f)
+	ms := keeper.NewMsgServerImpl(f.keeper)
+
+	sender := sdk.AccAddress(make([]byte, 20))
+	fundSender(t, f, sender, types.MillisteemToAsteem(5000))
+	_, err := ms.BridgeOut(f.ctx, &types.MsgBridgeOut{
+		Sender:                  sender.String(),
+		DestinationSteemAccount: "alice",
+		AmountAsteem:            types.MillisteemToAsteem(1000),
+		Memo:                    "svm-out",
+	})
+	require.NoError(t, err) // creates withdrawal id 0, REQUESTED, expects 1000 millisteem STEEM
+
+	v1 := newTestValidator(t, 1)
+	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
+
+	_, err = ms.AttestWithdrawalPayout(f.ctx, &types.MsgAttestWithdrawalPayout{
+		Validator:        v1.AccAddr,
+		WithdrawalId:     0,
+		SteemTxid:        "payouttxid00000000000000000000000000000000",
+		OpIndex:          0,
+		SteemBlock:       123,
+		SteemTimestamp:   "2026-01-01T00:00:00",
+		AmountMillisteem: 1, // wrong: withdrawal expects 1000
+		Asset:            types.BridgeAsset_BRIDGE_ASSET_STEEM,
+	})
+	require.NoError(t, err, "a mismatch is a benign no-op for the tx, not a hard failure")
+
+	genesis, err := f.keeper.ExportGenesis(f.ctx)
+	require.NoError(t, err)
+	w := genesis.WithdrawalList[0]
+	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED, w.Status, "stays REQUESTED")
+	require.Empty(t, w.SteemPayoutTxid, "payout facts never fixed by a mismatched attestation")
+	require.Empty(t, w.ValidatorConfirmations, "mismatch doesn't count toward confirmation")
+}
+
+// TestAttestWithdrawalPayout_AssetMismatch mirrors the amount-mismatch case
+// for the asset field — a validator reporting SBD paid out for a
+// STEEM-denominated withdrawal (or vice versa) is equally rejected.
+func TestAttestWithdrawalPayout_AssetMismatch(t *testing.T) {
+	f := initFixtureWithFakes(t)
+	enableBridgeOut(t, f)
+	ms := keeper.NewMsgServerImpl(f.keeper)
+
+	sender := sdk.AccAddress(make([]byte, 20))
+	fundSender(t, f, sender, types.MillisteemToAsteem(5000))
+	_, err := ms.BridgeOut(f.ctx, &types.MsgBridgeOut{
+		Sender:                  sender.String(),
+		DestinationSteemAccount: "alice",
+		AmountAsteem:            types.MillisteemToAsteem(1000),
+		Memo:                    "svm-out",
+		Asset:                   types.BridgeAsset_BRIDGE_ASSET_STEEM,
+	})
+	require.NoError(t, err) // creates withdrawal id 0, REQUESTED, expects STEEM
+
+	v1 := newTestValidator(t, 1)
+	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
+
+	_, err = ms.AttestWithdrawalPayout(f.ctx, &types.MsgAttestWithdrawalPayout{
+		Validator:        v1.AccAddr,
+		WithdrawalId:     0,
+		SteemTxid:        "payouttxid00000000000000000000000000000000",
+		OpIndex:          0,
+		SteemBlock:       123,
+		SteemTimestamp:   "2026-01-01T00:00:00",
+		AmountMillisteem: 1000,
+		Asset:            types.BridgeAsset_BRIDGE_ASSET_SBD, // wrong: withdrawal expects STEEM
+	})
+	require.NoError(t, err, "a mismatch is a benign no-op for the tx, not a hard failure")
+
+	genesis, err := f.keeper.ExportGenesis(f.ctx)
+	require.NoError(t, err)
+	w := genesis.WithdrawalList[0]
+	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED, w.Status, "stays REQUESTED")
+	require.Empty(t, w.ValidatorConfirmations, "mismatch doesn't count toward confirmation")
 }

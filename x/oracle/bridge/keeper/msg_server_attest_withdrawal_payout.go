@@ -64,6 +64,27 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
 	}
 
+	// The chain already knows the correct payout amount/asset from the
+	// Withdrawal record itself (it was fixed at bridge-out time, not
+	// externally observed like a deposit) — so unlike txid/op_index, this
+	// isn't "first attestation wins," it's a hard check against ground truth.
+	// A validator reporting a payout with the wrong observed amount/asset
+	// doesn't get to fix the record or count toward confirmation: this is
+	// exactly what stops a wrong-asset/wrong-amount manual relay on Steem
+	// from ever being confirmed as a valid payout.
+	if withdrawal.AmountMillisteem != msg.AmountMillisteem || withdrawal.Asset != msg.Asset {
+		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeWithdrawalPayoutAssetMismatch,
+			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(msg.WithdrawalId, 10)),
+			sdk.NewAttribute(types.AttributeKeyValidator, msg.Validator),
+			sdk.NewAttribute(types.AttributeKeyStoredAmount, strconv.FormatUint(withdrawal.AmountMillisteem, 10)),
+			sdk.NewAttribute(types.AttributeKeySubmittedAmount, strconv.FormatUint(msg.AmountMillisteem, 10)),
+			sdk.NewAttribute(types.AttributeKeyStoredAsset, types.DenomForAsset(withdrawal.Asset)),
+			sdk.NewAttribute(types.AttributeKeySubmittedAsset, types.DenomForAsset(msg.Asset)),
+		))
+		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
+	}
+
 	confirmedKey := collections.Join(msg.WithdrawalId, validatorAddr)
 	already, err := k.WithdrawalConfirmedBy.Has(ctx, confirmedKey)
 	if err != nil {
@@ -146,7 +167,8 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 // bridge-out is enabled, the withdrawal exists and is REQUESTED, this validator
 // has not already attested it, and (if payout facts are already recorded) they
 // match. Benign outcomes (already processed / duplicate) still qualify; a fact
-// mismatch does not (it stays fee-paying, like a deposit mismatch).
+// mismatch does not (it stays fee-paying, like a deposit mismatch) — and
+// neither does an asset/amount mismatch against the withdrawal record.
 func (k Keeper) ValidateWithdrawalProcessedAcceptance(ctx context.Context, msg *types.MsgAttestWithdrawalPayout) error {
 	params, err := k.Params.Get(ctx)
 	if err != nil {
@@ -180,6 +202,9 @@ func (k Keeper) ValidateWithdrawalProcessedAcceptance(ctx context.Context, msg *
 		return types.ErrDuplicateWithdrawalConfirmation
 	}
 	if withdrawal.SteemPayoutTxid != "" && (withdrawal.SteemPayoutTxid != msg.SteemTxid || withdrawal.PayoutOpIndex != msg.OpIndex) {
+		return types.ErrWithdrawalPayoutMismatch
+	}
+	if withdrawal.AmountMillisteem != msg.AmountMillisteem || withdrawal.Asset != msg.Asset {
 		return types.ErrWithdrawalPayoutMismatch
 	}
 	return nil

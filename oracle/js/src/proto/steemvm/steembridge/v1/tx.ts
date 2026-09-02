@@ -37,6 +37,15 @@ export interface MsgAttestWithdrawalPayout {
   opIndex: number;
   steemBlock: Long;
   steemTimestamp: string;
+  /**
+   * amount_millisteem is the amount the validator observed actually paid out
+   * on Steem (not the expected amount from the Withdrawal record) — the
+   * keeper cross-checks this against the record so a wrong-asset/wrong-amount
+   * manual relay can't be confirmed as a valid payout.
+   */
+  amountMillisteem: Long;
+  /** asset is the asset the validator observed actually paid out on Steem. */
+  asset: BridgeAsset;
 }
 
 /**
@@ -307,6 +316,8 @@ function createBaseMsgAttestWithdrawalPayout(): MsgAttestWithdrawalPayout {
     opIndex: 0,
     steemBlock: Long.UZERO,
     steemTimestamp: "",
+    amountMillisteem: Long.UZERO,
+    asset: 0,
   };
 }
 
@@ -329,6 +340,12 @@ export const MsgAttestWithdrawalPayout: MessageFns<MsgAttestWithdrawalPayout> = 
     }
     if (message.steemTimestamp !== "") {
       writer.uint32(50).string(message.steemTimestamp);
+    }
+    if (!message.amountMillisteem.equals(Long.UZERO)) {
+      writer.uint32(56).uint64(message.amountMillisteem.toString());
+    }
+    if (message.asset !== 0) {
+      writer.uint32(64).int32(message.asset);
     }
     return writer;
   },
@@ -388,6 +405,22 @@ export const MsgAttestWithdrawalPayout: MessageFns<MsgAttestWithdrawalPayout> = 
           message.steemTimestamp = reader.string();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.amountMillisteem = Long.fromString(reader.uint64().toString(), true);
+          continue;
+        }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.asset = reader.int32() as any;
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -425,6 +458,12 @@ export const MsgAttestWithdrawalPayout: MessageFns<MsgAttestWithdrawalPayout> = 
         : isSet(object.steem_timestamp)
         ? globalThis.String(object.steem_timestamp)
         : "",
+      amountMillisteem: isSet(object.amountMillisteem)
+        ? Long.fromValue(object.amountMillisteem)
+        : isSet(object.amount_millisteem)
+        ? Long.fromValue(object.amount_millisteem)
+        : Long.UZERO,
+      asset: isSet(object.asset) ? bridgeAssetFromJSON(object.asset) : 0,
     };
   },
 
@@ -448,6 +487,12 @@ export const MsgAttestWithdrawalPayout: MessageFns<MsgAttestWithdrawalPayout> = 
     if (message.steemTimestamp !== "") {
       obj.steemTimestamp = message.steemTimestamp;
     }
+    if (!message.amountMillisteem.equals(Long.UZERO)) {
+      obj.amountMillisteem = (message.amountMillisteem || Long.UZERO).toString();
+    }
+    if (message.asset !== 0) {
+      obj.asset = bridgeAssetToJSON(message.asset);
+    }
     return obj;
   },
 
@@ -466,6 +511,10 @@ export const MsgAttestWithdrawalPayout: MessageFns<MsgAttestWithdrawalPayout> = 
       ? Long.fromValue(object.steemBlock)
       : Long.UZERO;
     message.steemTimestamp = object.steemTimestamp ?? "";
+    message.amountMillisteem = (object.amountMillisteem !== undefined && object.amountMillisteem !== null)
+      ? Long.fromValue(object.amountMillisteem)
+      : Long.UZERO;
+    message.asset = object.asset ?? 0;
     return message;
   },
 };

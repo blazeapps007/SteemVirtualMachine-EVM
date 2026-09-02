@@ -39,13 +39,19 @@ class Transfer:
 @dataclass(frozen=True)
 class Payout:
     """A gateway->user payout of a bridge-out on Steem, identified by its
-    "svm-withdrawal <id>" memo."""
+    "svm-withdrawal <id>" memo. amount_millisteem/asset are what was ACTUALLY
+    observed paid out on Steem (not the expected value from the on-chain
+    Withdrawal record) -- the chain cross-checks these against its own record,
+    so a manual relay that sent the wrong asset or amount can't be confirmed
+    as a valid payout."""
 
     withdrawal_id: int
     txid: str
     op_index: int
     steem_block: int
     steem_timestamp: str
+    amount_millisteem: int
+    asset: str  # ASSET_STEEM or ASSET_SBD
 
 
 class SteemRpcError(RuntimeError):
@@ -232,9 +238,21 @@ def extract_gateway_transfers(
     return transfers
 
 
-def extract_gateway_payouts(block_num: int, block: dict, gateway: str) -> list[Payout]:
+def extract_gateway_payouts(
+    block_num: int,
+    block: dict,
+    gateway: str,
+    steem_symbol: str,
+    sbd_symbol: str,
+) -> list[Payout]:
     """Scans a block for transfer operations sent FROM the gateway account
-    whose memo is "svm-withdrawal <id>". Mirrors
+    whose memo is "svm-withdrawal <id>" -- the gateway's on-Steem payout of
+    bridge-out #id. The observed amount/asset ARE parsed and reported (unlike
+    the chain's own knowledge of the expected payout, this is what lets the
+    keeper's on-chain check catch a wrong-asset/wrong-amount manual relay
+    instead of trusting txid/op_index alone). An operation whose amount
+    doesn't parse as either configured symbol is skipped -- a payout the
+    oracle can't identify the asset of isn't reported as a fact. Mirrors
     oracle/go/relayer/steem.go's ExtractGatewayPayouts."""
     if not block:
         return []
@@ -258,6 +276,19 @@ def extract_gateway_payouts(block_num: int, block: dict, gateway: str) -> list[P
             withdrawal_id = parse_withdrawal_memo(body.get("memo", ""))
             if withdrawal_id is None:
                 continue
+
+            amount_str = body.get("amount", "")
+            amount = parse_steem_amount(amount_str, steem_symbol)
+            if amount is not None:
+                asset = ASSET_STEEM
+            elif sbd_symbol:
+                amount = parse_steem_amount(amount_str, sbd_symbol)
+                if amount is None:
+                    continue
+                asset = ASSET_SBD
+            else:
+                continue
+
             payouts.append(
                 Payout(
                     withdrawal_id=withdrawal_id,
@@ -265,6 +296,8 @@ def extract_gateway_payouts(block_num: int, block: dict, gateway: str) -> list[P
                     op_index=op_index,
                     steem_block=block_num,
                     steem_timestamp=timestamp,
+                    amount_millisteem=amount,
+                    asset=asset,
                 )
             )
     return payouts

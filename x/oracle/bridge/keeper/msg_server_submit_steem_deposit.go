@@ -94,6 +94,7 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 			sdk.NewAttribute(types.AttributeKeyDepositID, strconv.FormatUint(depositID, 10)),
 			sdk.NewAttribute(types.AttributeKeyTxid, msg.Txid),
 			sdk.NewAttribute(types.AttributeKeyOpIndex, strconv.FormatUint(uint64(msg.OpIndex), 10)),
+			sdk.NewAttribute(types.AttributeKeyAsset, types.DenomForAsset(msg.Asset)),
 		))
 	} else {
 		deposit, err = k.Deposit.Get(ctx, depositID)

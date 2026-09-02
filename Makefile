@@ -7,7 +7,14 @@ ifeq (,$(VERSION))
   # Fixed release version so every node stamps the SAME steemvmd version,
   # independent of git branch/commit. Bump this per release. Override at build
   # time with `make install VERSION=x.y.z` if ever needed.
-  VERSION := v0.0.3-Beta-2
+  #
+  # NO leading "v": docker-entrypoint.sh stages the cosmovisor upgrade binary
+  # under cosmovisor/upgrades/v$(steemvmd version)/bin/, prepending its own
+  # "v". A VERSION value that already starts with "v" (e.g. the old
+  # "v0.0.3-Beta-2") produces a double-"v" directory that can never match an
+  # on-chain x/upgrade Plan.Name — found while wiring the first real
+  # coordinated upgrade this chain has attempted.
+  VERSION := 0.0.4
 endif
 
 # Update the ldflags with the app, client & server names

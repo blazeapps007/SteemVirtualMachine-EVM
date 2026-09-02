@@ -103,6 +103,13 @@ message MsgAttestWithdrawalPayout {
   uint32 op_index = 4;
   uint64 steem_block = 5;
   string steem_timestamp = 6;
+  // amount_millisteem is the amount the validator observed actually paid out
+  // on Steem (not the expected amount from the Withdrawal record) — the
+  // keeper cross-checks this against the record so a wrong-asset/wrong-amount
+  // manual relay can't be confirmed as a valid payout.
+  uint64 amount_millisteem = 7;
+  // asset is the asset the validator observed actually paid out on Steem.
+  BridgeAsset asset = 8;
 }
 
 // MsgAttestWithdrawalPayoutResponse defines the MsgAttestWithdrawalPayout response.

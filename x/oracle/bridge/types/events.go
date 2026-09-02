@@ -12,7 +12,14 @@ const (
 	EventTypeWithdrawalBurned            = "withdrawal_burned"
 	EventTypeWithdrawalConfirmed         = "withdrawal_confirmed"
 	EventTypeWithdrawalPayoutMismatch    = "withdrawal_payout_mismatch"
-	EventTypeWithdrawalProcessed         = "withdrawal_processed"
+	// EventTypeWithdrawalPayoutAssetMismatch fires when a validator's
+	// MsgAttestWithdrawalPayout reports an observed amount/asset that doesn't
+	// match the Withdrawal record — a benign no-op for the tx (the
+	// confirmation isn't recorded, doesn't count toward the threshold), but a
+	// loud audit signal that a manually-relayed payout may have sent the
+	// wrong asset or amount.
+	EventTypeWithdrawalPayoutAssetMismatch = "withdrawal_payout_asset_mismatch"
+	EventTypeWithdrawalProcessed           = "withdrawal_processed"
 	// EventTypeWithdrawalRefunded is emitted by the EndBlock timeout sweep
 	// (Keeper.RefundExpiredWithdrawals) — no validator attestation involved.
 	EventTypeWithdrawalRefunded = "withdrawal_refunded"
@@ -46,6 +53,7 @@ const (
 	AttributeKeyDestination     = "destination"
 	AttributeKeyDestinationType = "destination_type"
 	AttributeKeyAmount          = "amount"
+	AttributeKeyAsset           = "asset"
 	AttributeKeySteemTxid       = "steem_txid"
 	AttributeKeyStoredTxid      = "stored_steem_txid"
 	AttributeKeySubmittedTxid   = "submitted_steem_txid"
@@ -58,6 +66,8 @@ const (
 	AttributeKeySubmittedSender     = "submitted_steem_sender"
 	AttributeKeyStoredAmount        = "stored_amount_millisteem"
 	AttributeKeySubmittedAmount     = "submitted_amount_millisteem"
+	AttributeKeyStoredAsset         = "stored_asset"
+	AttributeKeySubmittedAsset      = "submitted_asset"
 	AttributeKeyStoredGateway       = "stored_gateway_account"
 	AttributeKeySubmittedGateway    = "submitted_gateway_account"
 	AttributeKeyStoredMemo          = "stored_memo"

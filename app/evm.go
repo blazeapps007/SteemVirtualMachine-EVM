@@ -253,15 +253,19 @@ func (app *App) configureEVMMempool(appOpts servertypes.AppOptions, logger log.L
 
 	app.EVMMempool = mempool
 
-	prepareProposalHandler := baseapp.
-		NewDefaultProposalHandler(mempool, NewNoCheckProposalTxVerifier(app.BaseApp)).
-		PrepareProposalHandler()
+	proposalHandler := baseapp.
+		NewDefaultProposalHandler(mempool, NewNoCheckProposalTxVerifier(app.BaseApp))
 
 	insertTxHandler := mempool.NewInsertTxHandler(app.TxDecode)
 	reapTxsHandler := mempool.NewReapTxsHandler()
 	checkTxHandler := mempool.NewCheckTxHandler(app.TxDecode, checkTxTimeout)
 
-	app.SetPrepareProposal(prepareProposalHandler)
+	// ProcessProposal alongside PrepareProposal matches cosmos/evm's own
+	// evmd/mempool.go reference wiring (added upstream in v0.7.2) — this file
+	// otherwise mirrors that reference "almost exactly" per the comments
+	// below, so keep it that way.
+	app.SetPrepareProposal(proposalHandler.PrepareProposalHandler())
+	app.SetProcessProposal(proposalHandler.ProcessProposalHandler())
 	app.SetInsertTxHandler(insertTxHandler)
 	app.SetReapTxsHandler(reapTxsHandler)
 	app.SetCheckTxHandler(checkTxHandler)

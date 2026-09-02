@@ -1,18 +1,25 @@
 services:
   steemvm:
     # Pre-built image (see Dockerfile) — no more `make install` inside the
-    # container on every start. Defaults to this repo's own placeholder tag;
-    # override with STEEMVM_IMAGE (env var or repo-root .env) once you've
-    # pushed your own build to a registry: STEEMVM_IMAGE=you/steemvmd:tag
+    # container on every start. Defaults to the published v0.0.4 image
+    # (cosmos/evm + cosmos-sdk security patches, withdrawal-payout
+    # enforcement, CoinGecko price source — see
+    # Instructions/UPGRADE_v0.0.4.md). Override with STEEMVM_IMAGE (env var
+    # or repo-root .env) to point at a different tag: STEEMVM_IMAGE=you/steemvmd:tag
+    #
+    # The v0.0.4 coordinated upgrade has already applied on-chain (confirmed
+    # live: blazed007 et al. report version "0.0.4") — this is now simply
+    # THE current image, safe for any validator (new or recovering-from-jail)
+    # to `docker compose pull && up -d` normally, no special timing needed.
+    # If/when the NEXT coordinated upgrade is prepared, re-add the "don't
+    # pull early" guidance + a stage-vX.Y.Z one-off service (see git history
+    # around the v0.0.4 rollout for the pattern) before bumping this default.
     #
     # `docker compose up -d` alone still works with zero setup: if the image
     # named below isn't already pulled, compose falls back to building it
     # locally from ./Dockerfile (same as always, just now cached properly
-    # instead of rebuilding from scratch every start). To actually use a
-    # published image instead of building locally: `docker compose pull
-    # steemvm` first, then `up -d` (compose won't rebuild an image it just
-    # pulled unless you pass --build).
-    image: ${STEEMVM_IMAGE:-steemvm/steemvmd:v0.0.3-Beta-2}
+    # instead of rebuilding from scratch every start).
+    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.4}
     build:
       context: .
       dockerfile: Dockerfile
@@ -34,7 +41,7 @@ services:
       # STEEMVM_HOME) instead of a Docker-managed volume. This is a
       # single-validator chain: the running node's priv_validator_key.json
       # MUST be the exact key whose consensus pubkey is bonded in the genesis
-      # gentx (see Instructions/GENESIS_VALIDATOR_SETUP.md). A fresh identity
+      # gentx. A fresh identity
       # generated inside an isolated volume would never match that gentx and
       # could never sign/produce a block on this chain.
       - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm

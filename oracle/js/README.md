@@ -22,7 +22,7 @@ src/
   router.ts                    memo classification -> attestation message
   relayer.ts                     main scan/attest + price-feeder loop
   priceFeeder.ts                   commit-reveal state machine
-  priceSources/{cmc,steemPrices}.ts  price sourcing
+  priceSources/{cmc,coingecko,steemPrices}.ts  price sourcing
   decimalFmt.ts                       LegacyDec.String()-compatible decimal formatter (highest-risk piece)
   state.ts                              JSON state-file load/save (atomic writes)
   proto/                                   ts-proto generated types (committed, not gitignored)

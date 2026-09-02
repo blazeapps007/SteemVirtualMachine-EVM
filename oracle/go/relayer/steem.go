@@ -228,24 +228,31 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, steemS
 
 // Payout is a gateway→user payout of a bridge-out on Steem, identified by its
 // "svm-withdrawal <id>" memo, that a validator attests to flip the withdrawal
-// REQUESTED→PROCESSED. Only the raw facts consensus needs are carried — the net
-// amount and destination live in the on-chain Withdrawal record, keyed by id.
+// REQUESTED→PROCESSED. AmountMillisteem/Asset are what was ACTUALLY observed
+// paid out on Steem (not the expected value from the Withdrawal record) — the
+// chain cross-checks these against its own record, so a manual relay that
+// sent the wrong asset or amount can't be confirmed as a valid payout.
 type Payout struct {
-	WithdrawalID   uint64
-	Txid           string
-	OpIndex        uint32
-	SteemBlock     uint64
-	SteemTimestamp string
+	WithdrawalID     uint64
+	Txid             string
+	OpIndex          uint32
+	SteemBlock       uint64
+	SteemTimestamp   string
+	AmountMillisteem uint64
+	Asset            steembridgetypes.BridgeAsset
 }
 
 // ExtractGatewayPayouts scans a block for transfer operations sent FROM the
 // gateway account whose memo is "svm-withdrawal <id>" — the gateway's on-Steem
-// payout of bridge-out #id. The amount/symbol is deliberately not checked here:
-// the chain already knows the withdrawal's net payout from its record, so
-// validators only report where the payout landed (txid, op_index). OpIndex
-// matches the module's (txid, op_index) dedup key; the block timestamp is used
+// payout of bridge-out #id. The observed amount/asset ARE parsed and reported
+// (unlike the chain's own knowledge of the expected payout, this is what lets
+// AttestWithdrawalPayout's on-chain check catch a wrong-asset/wrong-amount
+// manual relay instead of trusting txid/op_index alone). An operation whose
+// amount doesn't parse as either configured symbol is skipped — a payout the
+// oracle can't identify the asset of isn't reported as a fact. OpIndex matches
+// the module's (txid, op_index) dedup key; the block timestamp is used
 // verbatim so all validators submit byte-identical facts.
-func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway string) []Payout {
+func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway, steemSymbol, sbdSymbol string) []Payout {
 	if block == nil {
 		return nil
 	}
@@ -280,12 +287,29 @@ func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway string) [
 			if !ok {
 				continue
 			}
+
+			var amount uint64
+			var asset steembridgetypes.BridgeAsset
+			if a, ok := ParseSteemAmount(op.Amount, steemSymbol); ok {
+				amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_STEEM
+			} else if sbdSymbol != "" {
+				a, ok := ParseSteemAmount(op.Amount, sbdSymbol)
+				if !ok {
+					continue
+				}
+				amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_SBD
+			} else {
+				continue
+			}
+
 			payouts = append(payouts, Payout{
-				WithdrawalID:   id,
-				Txid:           txid,
-				OpIndex:        uint32(opIndex), //nolint:gosec // ops per tx are tiny
-				SteemBlock:     blockNum,
-				SteemTimestamp: block.Timestamp,
+				WithdrawalID:     id,
+				Txid:             txid,
+				OpIndex:          uint32(opIndex), //nolint:gosec // ops per tx are tiny
+				SteemBlock:       blockNum,
+				SteemTimestamp:   block.Timestamp,
+				AmountMillisteem: amount,
+				Asset:            asset,
 			})
 		}
 	}

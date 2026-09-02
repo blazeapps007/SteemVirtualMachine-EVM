@@ -164,6 +164,7 @@ func (k Keeper) resolveDeposit(ctx context.Context, deposit *types.Deposit, para
 		sdk.NewAttribute(types.AttributeKeyDepositID, strconv.FormatUint(deposit.Id, 10)),
 		sdk.NewAttribute(types.AttributeKeyDestination, destAddrStr),
 		sdk.NewAttribute(types.AttributeKeyAmount, mintAmount.String()),
+		sdk.NewAttribute(types.AttributeKeyAsset, types.DenomForAsset(deposit.Asset)),
 	))
 	return nil
 }
