@@ -19,7 +19,41 @@ config from the templates in this directory (`app.toml.example`,
 > Steps 5 and 6 below do the linking; `create-validator` (step 9) is rejected
 > until they are done.
 
-**The whole path at a glance:**
+## Three ways to run a node
+
+Pick one before diving in — all three end up as the same bonded validator,
+they just differ in how much of the setup is automated and whether you run
+under Docker at all.
+
+- **Automated (`new-validator.sh`) — recommended for most people.** One
+  interactive script drives everything steps 1–10 below do by hand: it fetches
+  your Steem account's public keys, asks you to pick a price source
+  (CoinMarketCap or CoinGecko), fetches the live genesis and peer list, starts
+  the node and waits for it to sync (with automatic state-sync when the chain
+  is old enough to serve snapshots — see the state-sync note in step 3), makes
+  your key, walks the Steem-side name registration and confirmation with
+  retries, claims faucet coins, builds `validator.json`, creates the
+  validator, and wires up the oracle client. Still requires Docker. Run it
+  from the repository root:
+
+  ```sh
+  ./new-validator.sh
+  ```
+
+  See the script's own header comment for flags (`--cleanup`,
+  `--cleanup-full`, `--fix-config`) and env vars you can override
+  (`STAKE_AMOUNT`, `ORACLE_PROFILE`, etc.). If anything about your setup is
+  non-standard, or you'd rather understand/control each step yourself, use the
+  manual path below instead — it's exactly what the script automates.
+- **Manual Docker Compose** — steps 1–10 below, one command at a time. Use
+  this if the script doesn't fit your setup, or you want to understand what
+  each step actually does before trusting it to automation.
+- **Build from source / bare-metal (no Docker)** — see
+  [Running without Docker](#running-without-docker) below. Same validator
+  onboarding (key, name link, `validator.json`, staking) as the Docker path —
+  the only thing that differs is how you build and run `steemvmd` itself.
+
+**The manual Docker Compose path at a glance:**
 
 | Step | What |
 |---|---|
@@ -647,6 +681,111 @@ certificates with [certbot](https://certbot.eff.org/).
   `https://rpc.mychain.io/net_info`, etc.
 - **REST / LCD**: `https://api.mychain.io/cosmos/bank/v1beta1/...`.
 
+## Running without Docker
+
+Everything in steps 4–11 above (creating a key, linking your Steem name,
+`validator.json`, staking, attesting) is the same Cosmos CLI regardless of how
+`steemvmd` is running — only "how you run the node" differs. This section
+covers that part.
+
+### Build
+
+See the root [`readme.md`](../readme.md#building-from-source) for the exact
+prerequisites (Go 1.25.10+, a C compiler with `CGO_ENABLED=1` — cosmos/evm's
+secp256k1 bindings are cgo-based, so the binary can't be cross-compiled).
+From the repository root:
+
+```sh
+make install
+steemvmd version
+```
+
+This installs `steemvmd` to `$GOBIN` (or `$GOPATH/bin` if `GOBIN` is unset) —
+the same target every subsequent `make install` overwrites, regardless of
+which branch or checkout you build from.
+
+### Run under cosmovisor (recommended)
+
+Running directly with `steemvmd start` works, but every future coordinated
+upgrade then needs you to manually stop the process, swap the binary, and
+restart at the exact right block height. Running under
+[cosmovisor](https://docs.cosmos.network/main/build/tooling/cosmovisor)
+instead makes that automatic: stage the new binary ahead of time and
+cosmovisor halts the old process and swaps to the new one by itself, at the
+coordinated height, restarting on its own — no manual timing required.
+
+1. Install cosmovisor once (this repo's Docker image pins the same version):
+
+   ```sh
+   GOTOOLCHAIN=go1.25.10 go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.0
+   ```
+2. Set the env vars cosmovisor needs — put these wherever you currently
+   launch `steemvmd` (shell profile, systemd unit's `Environment=` lines):
+
+   ```sh
+   export DAEMON_HOME=<your --home, e.g. $HOME/.steemvm>
+   export DAEMON_NAME=steemvmd
+   export DAEMON_RESTART_AFTER_UPGRADE=true
+   export DAEMON_ALLOW_DOWNLOAD_BINARIES=false
+   export UNSAFE_SKIP_BACKUP=true
+   ```
+3. Point cosmovisor's `genesis/bin` at whatever binary you're currently
+   running:
+
+   ```sh
+   cosmovisor init "$(which steemvmd)"
+   ```
+4. Switch your supervisor (systemd `ExecStart=`, a screen/tmux command, etc.)
+   from `steemvmd start ...` to `cosmovisor run start ...` (same flags) and
+   restart once. This is a behavioral no-op — `cosmovisor/current` still
+   points at `genesis`, so it launches the exact same binary, just supervised
+   by cosmovisor now.
+5. **When a future upgrade is coordinated**, build the new binary
+   (`git pull && make install`), confirm `steemvmd version` prints the new
+   version, then stage it into cosmovisor's upgrade slot **without running
+   it**:
+
+   ```sh
+   mkdir -p "$DAEMON_HOME/cosmovisor/upgrades/<upgrade-name>/bin"
+   cp "$(go env GOBIN)/steemvmd" "$DAEMON_HOME/cosmovisor/upgrades/<upgrade-name>/bin/steemvmd"
+   ```
+
+   `<upgrade-name>` must exactly match the on-chain upgrade plan's name (announced
+   ahead of the coordinated height). At that height, cosmovisor halts the old
+   process, swaps `current` to the staged binary, and restarts automatically.
+
+A minimal systemd unit, once cosmovisor is initialized as above:
+
+```ini
+[Unit]
+Description=SteemVM node (cosmovisor)
+After=network-online.target
+
+[Service]
+User=steemvm
+Environment=DAEMON_HOME=/home/steemvm/.steemvm
+Environment=DAEMON_NAME=steemvmd
+Environment=DAEMON_RESTART_AFTER_UPGRADE=true
+Environment=DAEMON_ALLOW_DOWNLOAD_BINARIES=false
+Environment=UNSAFE_SKIP_BACKUP=true
+ExecStart=/home/steemvm/go/bin/cosmovisor run start --home /home/steemvm/.steemvm
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Fully manual (no cosmovisor)
+
+If you'd rather not run cosmovisor: build ahead of time
+(`git pull && make install`), confirm `steemvmd version` shows the new
+version, then watch your node's height approach the coordinated upgrade
+height. `x/upgrade` halts the old binary gracefully at that height (not a
+crash) — stop the process, replace the binary, restart with the same
+`--home` you already use. There's no automation here, so time it as close to
+the halt as you can manage.
+
 ## Troubleshooting
 
 **Identity / validator creation**
@@ -684,6 +823,9 @@ certificates with [certbot](https://certbot.eff.org/).
   docker volume rm "$(docker volume ls -q | grep 'steemvm-home$')"
   docker compose up -d
   ```
+  This replays from genesis, which is fine on a young chain but gets slower as
+  the chain grows — see **Faster resync via state-sync** below for a way to
+  skip most of the replay after a wipe.
 - **Any tx fails with `Cannot encode unregistered concrete type ethsecp256k1.PubKey`**:
   your binary predates the legacy-amino key registration, so `--gas auto` (which
   simulates the tx) panics for every Cosmos tx. Rebuild the node
@@ -698,3 +840,55 @@ certificates with [certbot](https://certbot.eff.org/).
 - **Validator jailed**: your node fell out of sync or was offline too long.
   Get it synced again, then unjail:
   `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id steemvm --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
+
+**Faster resync via state-sync**
+
+A full replay from genesis (the `docker volume rm` / `docker compose down -v`
+recovery above) gets slower as the chain grows. Once the chain is past its
+`snapshot-interval` (`Instructions/app.toml.example` ships
+`snapshot-interval = 1000`, and live peers need to actually be running with
+that set to have snapshots to serve), you can state-sync instead: fetch a
+recent trusted height/hash from a live peer and the node bootstraps from a
+snapshot instead of replaying every block. `new-validator.sh` already does
+this automatically for a brand-new validator (`fetch_statesync_trust` /
+`enable_statesync` in the script); this is the equivalent for an **existing**
+node after a manual wipe.
+
+1. Wipe the node's chain data (same as the app-hash-mismatch recovery above,
+   or `steemvmd comet unsafe-reset-all --home /root/.steemvm --keep-addr-book`
+   run against the stopped container's volume if you want to keep the address
+   book), but do **not** start the node yet.
+2. Fetch a trust anchor from a live, synced peer's RPC — a height comfortably
+   behind the tip (so a snapshot at/before it reliably exists) and that
+   height's block hash:
+
+   ```sh
+   SEED_RPC=http://<a-live-peer>:26657
+   LATEST=$(curl -fsS "$SEED_RPC/status" | jq -r '.result.sync_info.latest_block_height')
+   TRUST_HEIGHT=$((LATEST - 1000))
+   TRUST_HASH=$(curl -fsS "$SEED_RPC/commit?height=$TRUST_HEIGHT" | jq -r '.result.signed_header.commit.block_id.hash')
+   echo "trust_height=$TRUST_HEIGHT trust_hash=$TRUST_HASH"
+   ```
+3. Edit `Instructions/config.toml`'s `[statesync]` section:
+
+   ```toml
+   [statesync]
+   enable = true
+   rpc_servers = "http://<a-live-peer>:26657,http://<another-live-peer>:26657"
+   trust_height = <TRUST_HEIGHT from above>
+   trust_hash = "<TRUST_HASH from above>"
+   ```
+
+   `rpc_servers` needs **2 or more** witnesses — the light client cross-checks
+   them against each other. Two independent peers are stronger than reusing
+   the same one twice.
+4. `docker compose up -d` and follow the logs — you should see state-sync
+   discover and apply snapshot chunks instead of a block-by-block replay, then
+   fall through to normal following once caught up. Once synced, `enable` can
+   be left `true` or set back to `false`; it only affects the initial
+   bootstrap of an empty node home.
+
+If the chain is younger than one `snapshot-interval`, or no reachable peer has
+snapshots yet, state-sync's "discovering snapshots" phase hangs with nothing
+to discover — fall back to a plain replay from genesis instead (cheap at that
+age anyway).

@@ -41,7 +41,7 @@ services:
       # STEEMVM_HOME) instead of a Docker-managed volume. This is a
       # single-validator chain: the running node's priv_validator_key.json
       # MUST be the exact key whose consensus pubkey is bonded in the genesis
-      # gentx (see Instructions/GENESIS_VALIDATOR_SETUP.md). A fresh identity
+      # gentx. A fresh identity
       # generated inside an isolated volume would never match that gentx and
       # could never sign/produce a block on this chain.
       - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm

@@ -111,12 +111,16 @@ identical on any chain built on it:
 
 **→ See [`Instructions/README.md`](Instructions/README.md).**
 
-That guide is the authoritative path: Docker prerequisites, starting the node,
-creating a key, linking and confirming your Steem name, getting faucet coins,
-building `validator.json`, staking, and attesting transfers. The
-`Instructions/` directory also holds the canonical node configuration
-(`app.toml`, `config.toml`, `client.toml`, `genesis.json`) that the Docker setup
-copies into the node home on every start.
+That guide is the authoritative path and covers all three ways to run a node:
+the automated `new-validator.sh` script (recommended for most people), a
+manual Docker Compose walkthrough for anyone who wants control over each
+step, and building/running `steemvmd` from source without Docker. All three
+converge on the same validator-onboarding steps: creating a key, linking and
+confirming your Steem name, getting faucet coins, building `validator.json`,
+staking, and attesting transfers. The `Instructions/` directory also holds
+the canonical node configuration (`app.toml`, `config.toml`, `client.toml`,
+`genesis.json`) that the Docker setup copies into the node home on every
+start.
 
 The fastest way to get a node running is from the repository root:
 

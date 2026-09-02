@@ -38,8 +38,8 @@ var defaultActiveStaticPrecompiles = []string{
 
 // wrapInitCmdWithChainDefaults makes `steemvmd init`'s output genesis.json
 // launch-ready on its own, so the only steps left for a validator are
-// account funding and gentx (see Instructions/GENESIS_VALIDATOR_SETUP.md).
-// Without this, a bare `init` produces a generic empty-chain template that
+// account funding and gentx. Without this, a bare `init` produces a generic
+// empty-chain template that
 // requires several manual jq patches before it will even boot: this session
 // hit boot panics/CLI validation errors from exactly the gaps patched here
 // (missing asteem denom metadata, steembridge left disabled, EVM precompiles
