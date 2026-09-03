@@ -1,11 +1,18 @@
 services:
   steemvm:
     # Pre-built image (see Dockerfile) — no more `make install` inside the
-    # container on every start. Defaults to the published v0.0.4 image
+    # container on every start. Defaults to the published v0.0.4-1 image
     # (cosmos/evm + cosmos-sdk security patches, withdrawal-payout
     # enforcement, CoinGecko price source — see
     # Instructions/UPGRADE_v0.0.4.md). Override with STEEMVM_IMAGE (env var
     # or repo-root .env) to point at a different tag: STEEMVM_IMAGE=you/steemvmd:tag
+    #
+    # v0.0.4-1 is a DEPENDENCY-ONLY security rebuild of v0.0.4 — newer Go
+    # toolchain, cosmovisor v1.7.3, refreshed golang.org/x/* — with zero
+    # application or consensus changes. It still reports `version 0.0.4` on
+    # purpose (see SECURITY.md): the on-chain upgrade name must keep matching,
+    # and docker-entrypoint.sh stages by that version string. Tell the two
+    # apart with `steemvmd version --long`: go1.26.8 = patched, go1.26.5 = not.
     #
     # The v0.0.4 coordinated upgrade has already applied on-chain (confirmed
     # live: blazed007 et al. report version "0.0.4") — this is now simply
@@ -19,7 +26,7 @@ services:
     # named below isn't already pulled, compose falls back to building it
     # locally from ./Dockerfile (same as always, just now cached properly
     # instead of rebuilding from scratch every start).
-    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.4}
+    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.4-1}
     build:
       context: .
       dockerfile: Dockerfile
@@ -67,7 +74,12 @@ services:
   # price-feed txs are NOT (see oracle/PROTOCOL.md) and need a funded account.
   # If oracle/.env has no key, the client just restart-loops harmlessly
   # ("provide the signing key") until you add one — the node is unaffected.
+  # Each oracle service defaults to its published image (no local build unless
+  # that image can't be pulled — same pull-or-fallback-build pattern as the
+  # `steemvm` service above). Override with ORACLE_GO_IMAGE / ORACLE_PYTHON_IMAGE
+  # / ORACLE_JS_IMAGE (env var or repo-root .env) to point at a different tag.
   oracle-go:
+    image: ${ORACLE_GO_IMAGE:-steemblazer/steemvm-oracle-go:latest}
     build:
       context: .
       dockerfile: oracle/go/Dockerfile
@@ -83,6 +95,7 @@ services:
     profiles: ["go"]
 
   oracle-python:
+    image: ${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:latest}
     build:
       context: ./oracle/python
       dockerfile: Dockerfile
@@ -98,6 +111,7 @@ services:
     profiles: ["python"]
 
   oracle-js:
+    image: ${ORACLE_JS_IMAGE:-steemblazer/steemvm-oracle-js:latest}
     build:
       context: ./oracle/js
       dockerfile: Dockerfile

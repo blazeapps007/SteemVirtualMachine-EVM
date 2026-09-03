@@ -5,7 +5,7 @@
 # used to use — kept only for symmetry with the Python/JS clients, which need
 # a real image anyway). Build context is the REPO ROOT (not oracle/go/),
 # because this client imports the whole `steemvm` module (app/, x/oracle/...).
-FROM golang:1.26.5-trixie AS builder
+FROM golang:1.26.8-trixie AS builder
 WORKDIR /workspace
 ENV CGO_ENABLED=1
 COPY go.mod go.sum ./
