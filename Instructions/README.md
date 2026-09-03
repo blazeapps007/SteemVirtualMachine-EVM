@@ -714,11 +714,17 @@ instead makes that automatic: stage the new binary ahead of time and
 cosmovisor halts the old process and swaps to the new one by itself, at the
 coordinated height, restarting on its own — no manual timing required.
 
-1. Install cosmovisor once (this repo's Docker image pins the same version):
+1. Install cosmovisor once (this repo's Docker image uses the same version):
 
    ```sh
-   GOTOOLCHAIN=go1.25.10 go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.0
+   go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@v1.7.3
    ```
+
+   Older notes here pinned `GOTOOLCHAIN=go1.25.10` for this; v1.7.3 no longer
+   needs it. The Docker image goes one step further and rebuilds cosmovisor
+   against current `golang.org/x/*` and gRPC — see [`SECURITY.md`](../SECURITY.md)
+   — which a plain `go install` cannot do. That only affects vulnerability
+   scanning, not behaviour, so the plain install above is fine for running a node.
 2. Set the env vars cosmovisor needs — put these wherever you currently
    launch `steemvmd` (shell profile, systemd unit's `Environment=` lines):
 
