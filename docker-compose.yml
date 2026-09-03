@@ -67,7 +67,12 @@ services:
   # price-feed txs are NOT (see oracle/PROTOCOL.md) and need a funded account.
   # If oracle/.env has no key, the client just restart-loops harmlessly
   # ("provide the signing key") until you add one — the node is unaffected.
+  # Each oracle service defaults to its published image (no local build unless
+  # that image can't be pulled — same pull-or-fallback-build pattern as the
+  # `steemvm` service above). Override with ORACLE_GO_IMAGE / ORACLE_PYTHON_IMAGE
+  # / ORACLE_JS_IMAGE (env var or repo-root .env) to point at a different tag.
   oracle-go:
+    image: ${ORACLE_GO_IMAGE:-steemblazer/steemvm-oracle-go:latest}
     build:
       context: .
       dockerfile: oracle/go/Dockerfile
@@ -83,6 +88,7 @@ services:
     profiles: ["go"]
 
   oracle-python:
+    image: ${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:latest}
     build:
       context: ./oracle/python
       dockerfile: Dockerfile
@@ -98,6 +104,7 @@ services:
     profiles: ["python"]
 
   oracle-js:
+    image: ${ORACLE_JS_IMAGE:-steemblazer/steemvm-oracle-js:latest}
     build:
       context: ./oracle/js
       dockerfile: Dockerfile
