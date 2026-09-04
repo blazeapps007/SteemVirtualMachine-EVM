@@ -52,13 +52,27 @@ services:
       # generated inside an isolated volume would never match that gentx and
       # could never sign/produce a block on this chain.
       - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
+    # Everything binds to LOCALHOST ONLY except p2p. A validator has no reason
+    # to expose RPC/API/gRPC to the internet: those are query+tx surfaces and a
+    # DoS vector. p2p (26656) is the one port that MUST be world-reachable —
+    # it's how the node gossips blocks with other validators.
+    #
+    # To serve any of these publicly (public RPC provider), do NOT widen the
+    # bind here — put nginx in front as a TLS-terminating proxy to the
+    # 127.0.0.1 ports (Instructions/nginx.conf, and section 12 of
+    # Instructions/README.md).
+    #
+    # Oracle clients are unaffected: they reach the node at http://steemvm:26657
+    # over the compose network, which bypasses published ports entirely. So are
+    # new-validator.sh / update.sh / reset.sh, which query the local node with
+    # `docker exec`, not a host-side curl.
     ports:
-      - "8545:8545"   # EVM JSON-RPC (http)
-      - "8546:8546"   # EVM JSON-RPC (websocket)
-      - "26656:26656" # CometBFT p2p
-      - "26657:26657" # CometBFT RPC
-      - "1317:1317"   # Cosmos REST API
-      - "9090:9090"   # gRPC
+      - "127.0.0.1:8545:8545"    # EVM JSON-RPC (http)
+      - "127.0.0.1:8546:8546"    # EVM JSON-RPC (websocket)
+      - "26656:26656"            # CometBFT p2p — PUBLIC on purpose, do not narrow
+      - "127.0.0.1:26657:26657"  # CometBFT RPC
+      - "127.0.0.1:1317:1317"    # Cosmos REST API
+      - "127.0.0.1:9090:9090"    # gRPC
 
   # Standalone Steem bridge oracle — pick ONE language and bring it up with its
   # profile (never more than one at a time; they'd race on the same signing key

@@ -655,11 +655,18 @@ certificates with [certbot](https://certbot.eff.org/).
 
 ### Harden the exposure
 
-- **Bind the backends to localhost.** Once nginx is proxying, change the port
-  mappings in `docker-compose.yml` so the plaintext ports are only reachable by
-  nginx, e.g. `"127.0.0.1:8545:8545"` (and the same for `8546`, `26657`, `1317`).
-  Leave `26656:26656` public — p2p needs it. After that, only nginx on `443` is
-  internet-facing.
+- **The backends are already bound to localhost.** `docker-compose.yml` publishes
+  `8545`, `8546`, `26657`, `1317` and `9090` on `127.0.0.1` only; `26656` (p2p) is
+  the sole port on all interfaces, because p2p needs it. nginx on `443` is then
+  the only internet-facing service. Nothing to change here — and do not widen
+  those binds to expose an endpoint publicly, put nginx in front instead.
+
+  > **If you are a seed/RPC node for other validators**, note that binding
+  > `26657` to localhost makes your node invisible to the peer-discovery and
+  > state-sync helpers (`update_peers.sh`, `update.sh`, `new-validator.sh`),
+  > which read `http://<ip>:26657/status` across hosts. Either keep `26657`
+  > public on the designated seed nodes, or serve it over TLS via `rpc.<domain>`
+  > below and point those scripts' `SEED_RPC` at the `https://` URL.
 - **Drop the `debug` JSON-RPC namespace for a public endpoint.** The compose
   command starts the node with `--json-rpc.api "eth,net,web3,txpool,debug"`;
   `debug_*` methods (e.g. `debug_traceTransaction`) are expensive and a DoS
