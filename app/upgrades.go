@@ -35,6 +35,20 @@ const UpgradeName = "v0.0.3"
 // the governance MsgSoftwareUpgrade proposal that schedules it.
 const UpgradeNameV004 = "v0.0.4"
 
+// UpgradeNameV005 closes the remaining routes around the validator identity
+// gate and makes the EVM gas floor part of the chain:
+//   - authz: MsgCreateValidator/MsgEditValidator can no longer be wrapped in
+//     MsgExec or authorized via MsgGrant (ante_steembridge.go's limiter);
+//   - ICA host: interchain-account validator create/edit now runs the same
+//     identity check (ica_identity_router.go);
+//   - state: the handler enforces the 1 gwei EVM gas floor and the disabled
+//     staking precompile (enforceEVMPolicy), so both hold even if the earlier
+//     governance vote setting them never passed.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV005 = "v0.0.5"
+
 // RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On
 // the IN-PLACE upgrade path this: runs module migrations, registers the native
 // SBD coin (bank metadata + ERC20 precompile, via the same registerSBD helper the
@@ -89,6 +103,18 @@ func (app *App) RegisterUpgradeHandlers() {
 		UpgradeNameV004,
 		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+		},
+	)
+
+	// v0.0.5: validator-identity hardening + EVM gas floor. No new store keys.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV005,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			vm, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return vm, err
+			}
+			return vm, app.enforceEVMPolicy(sdk.UnwrapSDKContext(ctx))
 		},
 	)
 

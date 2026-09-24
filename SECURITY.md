@@ -83,3 +83,48 @@ validators are told they can apply at their own pace.
 `debian:trixie-slim` is already current, and every alternative tag it listed carries an identical
 vulnerability count, with `13`/`latest` being 49 MB against 30 MB. The real exposure was in the
 Go layer, which that subcommand does not summarize — use `docker scout cves` instead.
+
+---
+
+# Chain-level fixes in v0.0.5
+
+## Validator identity gate: three bypass routes
+
+Every validator must own an ACTIVE Steem name matching its moniker and publish its Steem public
+keys in `details`. That rule lived only in `steembridgeValidatorGateDecorator`
+(`app/ante_steembridge.go`), which sees a Cosmos tx's **top-level** messages and nothing else.
+Three routes reached x/staking without passing it:
+
+| Route | Why the gate missed it | Fix | Needs a halt? |
+|---|---|---|---|
+| EVM staking precompile `0x…0800` | EVM txs use cosmos/evm's own ante handler; the precompile calls x/staking's msg server directly | Precompile removed from `active_static_precompiles` (governance vote, enforced again by the v0.0.5 upgrade handler, and absent from fresh-chain defaults) | No |
+| authz | `MsgExec{MsgCreateValidator}` is a top-level `MsgExec` | `MsgCreateValidator`/`MsgEditValidator` added to the authz limiter, which also rejects `MsgGrant` for them and recurses into nested `MsgExec` | Yes (ante change) |
+| ICA host | The host executes packet messages through the router, never the ante handler; `allow_messages` is `["*"]` | `icaIdentityRouter` (`app/ica_identity_router.go`) runs the gate's own two keeper checks on create/edit; ICA stays fully on | Yes (execution change) |
+
+Gov-executed messages are not a route: `MsgCreateValidator` must be signed by the operator, which
+the gov module account cannot be.
+
+**Not exploited on the live chain.** All 12 validators were checked on 2026-09-24: each owns its
+moniker's Steem name and carries valid keys. The authz route was proven exploitable on a devnet
+running the live v0.0.4-1 binary: a grant plus `MsgExec` created a validator with no identity at
+all, while the same attempt after the v0.0.5 upgrade — including one reusing a grant made before
+it — is rejected.
+
+**Do not re-activate the staking precompile** without wrapping `createValidator`/`editValidator`
+in the same identity check. See `app.StakingPrecompileAddress`.
+
+## EVM gas floor: 1 gwei
+
+Before this, EVM transactions paid **zero** fees, so the 25% fee burn burned nothing (live
+`baseFeePerGas` and `eth_gasPrice` were both `0x0`). The feemarket `min_gas_price` floor was 0,
+and with unlimited block gas (`max_gas -1`) the EIP-1559 target is unreachable, so the base fee
+fell 12.5% every block until it hit that floor. The nodes' `app.toml` 1 gwei minimum did not
+help: cosmos/evm skips it for EVM txs once London is active.
+
+The floor is now 1 gwei (`app.EVMGasFloor`), set in three places so it cannot silently regress:
+the governance vote (live chain), the v0.0.5 upgrade handler (idempotent, never lowers a higher
+value), and fresh-chain genesis defaults.
+
+**It must not exceed 1 gwei**: all three oracle clients pay exactly 1 gwei for price-feed txs
+(which are not fee-exempt). A higher floor rejects them and gets validators slashed for missed
+duty. Bridge attestations and name confirmations are fee-exempt and unaffected.

@@ -93,10 +93,7 @@ func newSteembridgeCosmosAnteHandler(
 
 	return sdk.ChainAnteDecorators(
 		cosmosante.NewRejectMessagesDecorator(), // reject MsgEthereumTxs
-		cosmosante.NewAuthzLimiterDecorator( // disable the Msg types that cannot be included on an authz.MsgExec msgs field
-			sdk.MsgTypeURL(&evmtypes.MsgEthereumTx{}),
-			sdk.MsgTypeURL(&sdkvesting.MsgCreateVestingAccount{}),
-		),
+		cosmosante.NewAuthzLimiterDecorator(authzDisabledMsgTypes()...),
 		stdante.NewSetUpContextDecorator(),
 		stdante.NewExtensionOptionsDecorator(options.ExtensionOptionChecker),
 		stdante.NewValidateBasicDecorator(),
@@ -112,6 +109,23 @@ func newSteembridgeCosmosAnteHandler(
 		stdante.NewIncrementSequenceDecorator(options.AccountKeeper),
 		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
 	)
+}
+
+// authzDisabledMsgTypes are the Msg types that may never be granted via
+// authz.MsgGrant or executed inside authz.MsgExec (the limiter recurses into
+// nested MsgExec too).
+//
+// MsgCreateValidator/MsgEditValidator are on the list because the validator
+// identity gate (steembridgeValidatorGateDecorator) only sees a tx's top-level
+// messages: wrapped in MsgExec they would otherwise reach x/staking unchecked,
+// letting anyone register an anonymous validator or strip an identity.
+func authzDisabledMsgTypes() []string {
+	return []string{
+		sdk.MsgTypeURL(&evmtypes.MsgEthereumTx{}),
+		sdk.MsgTypeURL(&sdkvesting.MsgCreateVestingAccount{}),
+		sdk.MsgTypeURL(&stakingtypes.MsgCreateValidator{}),
+		sdk.MsgTypeURL(&stakingtypes.MsgEditValidator{}),
+	}
 }
 
 // steembridgeFeeExemptionDecorator waives BOTH of the chain's fee-charging
