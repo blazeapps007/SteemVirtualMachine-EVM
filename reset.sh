@@ -153,8 +153,27 @@ KEY_FILE="$STEEMVM_HOME/config/priv_validator_key.json"
 [ -f "$KEY_FILE" ] || die "$KEY_FILE not found — this isn't an existing validator home. Use new-validator.sh for a first-time setup instead."
 [ -f "$CONFIG_TOML" ] || die "$CONFIG_TOML not found."
 
+# During a coordinated upgrade (the branch carries a stage-vX.Y.Z service), which
+# binary cosmovisor must run after a reset depends on whether the upgrade has
+# already applied — update.sh works that out; this script doesn't.
+SERVICES="$($COMPOSE --profile stage config --services)" || die "docker-compose.yml does not parse."
+if printf '%s\n' "$SERVICES" | grep -q '^stage-v'; then
+  die "a coordinated upgrade is pending on this branch ($(printf '%s\n' "$SERVICES" | grep '^stage-v' | tr '\n' ' ')). Use ./update.sh --reset instead — it stages the new binary and points cosmovisor at the right one. Nothing was touched."
+fi
+
+# Fetch the trust anchor BEFORE touching anything. Replaying from genesis can't
+# cross a coordinated upgrade height with a single binary (this chain has had
+# at least one), so a wipe without state-sync can leave a node that never
+# resyncs — find that out while the data is still intact.
+if [ "$USE_STATESYNC" = "1" ]; then
+  fetch_statesync_trust || die "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — refusing to wipe data that could not be resynced. Nothing was touched. Try --seed-rpc <live peer>."
+  ok "State-sync trust anchor from $SEED_RPC: height $TRUST_HEIGHT."
+else
+  warn "--no-statesync: the node will replay from genesis. That only works on a chain that has never had a coordinated upgrade — this one has, so expect it to halt at the first upgrade height."
+fi
+
 log "This will wipe local chain data (blocks/state/tx-index) under $STEEMVM_HOME and"
-log "resync it, either via state-sync or a full replay from genesis."
+log "resync it via state-sync."
 log "NOT touched: config/priv_validator_key.json (your validator identity), your"
 log "account keyring, validator.json, genesis.json, and every other config file."
 warn "Stop here if you're not sure — your node will be briefly out of sync while it"
@@ -166,15 +185,7 @@ read -rp "Type YES to confirm: " CONFIRM < /dev/tty
 log "Stopping the node…"
 $COMPOSE down
 
-# ── 2. fetch a state-sync trust anchor + fresh peer list before wiping data ──
-if [ "$USE_STATESYNC" = "1" ]; then
-  if fetch_statesync_trust; then
-    ok "State-sync trust anchor from $SEED_RPC: height $TRUST_HEIGHT."
-  else
-    warn "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — falling back to a full replay from genesis."
-    USE_STATESYNC=0
-  fi
-fi
+# ── 2. fetch a fresh peer list before wiping data (trust anchor fetched above) ─
 if fetch_seed_peer; then
   ok "Live peer info fetched: $SEED_PEER"
 else
@@ -195,6 +206,16 @@ ok "Chain data wiped."
 
 [ -f "$KEY_FILE" ] || die "priv_validator_key.json is gone after reset — this should never happen. STOP and investigate before restarting; do not create a new key."
 ok "priv_validator_key.json still present — validator identity intact."
+
+# The node will state-sync to the chain tip, so cosmovisor must run the image's
+# binary (the chain's current version) — not whatever `current` pointed at before,
+# e.g. an old binary on a node that was offline through an upgrade. Pointing
+# `current` at genesis makes docker-entrypoint.sh refresh genesis/bin from the
+# image on start.
+$COMPOSE run --rm -T --entrypoint sh steemvm -c \
+  "[ -d $HOME_DIR/cosmovisor ] && ln -sfn genesis $HOME_DIR/cosmovisor/current || true" \
+  || die "could not point cosmovisor at the image's binary."
+ok "cosmovisor will run the image's binary."
 
 # ── 4. patch config.toml: fresh peers, state-sync (or explicit disable) ─────
 apply_seed_peer "$CONFIG_TOML" || true
