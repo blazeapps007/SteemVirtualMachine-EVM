@@ -155,9 +155,6 @@ fi
 # ══ Docker ═════════════════════════════════════════════════════════════════════
 command -v docker >/dev/null || die "docker not found on PATH"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
-command -v curl >/dev/null 2>&1 || die "curl is required."
-command -v jq   >/dev/null 2>&1 || die "jq is required."
-[ -f update_peers.sh ] || die "update_peers.sh not found next to this script."
 
 CONFIG_TOML="$STEEMVM_HOME/config/config.toml"
 KEY_FILE="$STEEMVM_HOME/config/priv_validator_key.json"
@@ -218,6 +215,11 @@ if [ "${#PENDING[@]}" -gt 0 ]; then
     fi
   done
 fi
+
+# Only the full flow needs these (staging above doesn't).
+command -v curl >/dev/null 2>&1 || die "curl is required."
+command -v jq   >/dev/null 2>&1 || die "jq is required."
+[ -f update_peers.sh ] || die "update_peers.sh not found next to this script."
 
 # ── 3. state-sync trust anchor — BEFORE touching anything ───────────────────
 # Replaying from genesis is no longer an option once a chain has been through a
