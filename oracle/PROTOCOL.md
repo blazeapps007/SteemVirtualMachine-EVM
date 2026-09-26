@@ -331,3 +331,26 @@ This closes the JS live-broadcast gap alongside Python's. The throwaway devnet (
 it existing. The shared `steemvm-build-gopath`/`steemvm-build-cache` build-cache volumes were reused
 (not created by this spike) and were left in place. **Go (`oracle/go`) is the one client that still
 hasn't re-run its own live-broadcast half of the spike** against the post-migration build.
+
+## 10. Duty gate: bonded and not jailed
+
+A client broadcasts **nothing** — no bridge attestation, no price prevote, no price vote — unless
+its validator can have those txs accepted: the REST/gRPC staking `validator` record exists, its
+`status` is `BOND_STATUS_BONDED`, **and** `jailed` is `false`. Any other state is rejected by the
+chain, and price-feed txs are not fee-exempt (§3), so broadcasting them anyway only pays gas for
+guaranteed failures every vote period.
+
+- **Bridge cycle:** checked every poll; idle while the gate is closed (logged once).
+- **Price feeder:** checked once per *new* vote period, **before** fetching prices or building
+  messages — so a jailed validator also makes no external price-API calls.
+  - A definitive answer (jailed / not bonded / not a validator) marks the period handled: skipped.
+  - A failed lookup (node unreachable) broadcasts nothing and does **not** mark the period
+    handled — it retries on the next poll.
+  - Idle and resume are each logged once per change, not every poll.
+- Skipping periods needs no special handling: the feeder only ever reveals the commit from the
+  period immediately before (§7), so a commit stranded by a jailed gap is abandoned, never
+  mis-revealed. After an unjail the feeder simply starts with a fresh prevote.
+
+Implementations: `oracle/go/relayer/validatorgate.go`,
+`oracle/python/src/steemvm_oracle/validator_gate.py`, `oracle/js/src/validatorGate.ts` — each with
+the same test table.

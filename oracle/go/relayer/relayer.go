@@ -76,6 +76,9 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 	// sentinel in practice (a chain's genesis-era period 0 sees at most a
 	// handful of redundant prevotes, harmless).
 	var lastHandledPeriod uint64
+	// Why the price feeder is currently idle ("" when active), so the idle and
+	// resume messages are logged once per change rather than every tick.
+	var priceIdleReason string
 
 	logger.Info("steem oracle started",
 		"steem_rpc", cfg.SteemRPCURL, "node_rpc", nodeRPC, "chain_id", chainID,
@@ -111,7 +114,7 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 		}
 
 		if priceSource != nil {
-			if err := runPriceFeederCycle(ctx, logger, clientCtx, oracledataQuery, feeder, gasPrices, stateDir, &lastHandledPeriod); err != nil {
+			if err := runPriceFeederCycle(ctx, logger, clientCtx, oracledataQuery, stakingQuery, valoperAddr, feeder, gasPrices, stateDir, &lastHandledPeriod, &priceIdleReason); err != nil {
 				logger.Error("price feeder cycle failed", "err", err)
 			}
 		}
@@ -128,10 +131,13 @@ func runPriceFeederCycle(
 	logger cycleLogger,
 	clientCtx client.Context,
 	oracledataQuery oracledatatypes.QueryClient,
+	stakingQuery stakingtypes.QueryClient,
+	valoperAddr string,
 	feeder Feeder,
 	gasPrices string,
 	stateDir string,
 	lastHandledPeriod *uint64,
+	idleReason *string,
 ) error {
 	paramsResp, err := oracledataQuery.Params(ctx, &oracledatatypes.QueryParamsRequest{})
 	if err != nil {
@@ -151,6 +157,27 @@ func runPriceFeederCycle(
 
 	if period == *lastHandledPeriod {
 		return nil // already acted this period; wait for the next boundary
+	}
+
+	// Only a bonded, unjailed validator's prevotes/votes can land. A jailed one
+	// would broadcast a failing — and fee-paying — tx every vote period, so
+	// broadcast nothing (and fetch no prices) until it's back. Skipping periods
+	// is safe: Step only ever reveals the commit from the period right before,
+	// so a commit stranded by a jailed gap is abandoned, never mis-revealed.
+	canSubmit, reason, lookupErr := queryValidatorCanSubmit(ctx, stakingQuery, valoperAddr)
+	if !canSubmit {
+		if *idleReason != reason {
+			logger.Info("price feeder idle: not broadcasting", "reason", reason, "valoper", valoperAddr)
+			*idleReason = reason
+		}
+		if lookupErr == nil {
+			*lastHandledPeriod = period // a definitive answer: skip this period
+		}
+		return nil
+	}
+	if *idleReason != "" {
+		logger.Info("price feeder resuming: validator is bonded and not jailed", "valoper", valoperAddr)
+		*idleReason = ""
 	}
 
 	prevState, err := LoadFeederState(stateDir)
@@ -227,12 +254,11 @@ func runCycle(
 		return nil
 	}
 
-	// Only bonded validators' attestations count (and only theirs are
-	// fee-exempt) — idle quietly otherwise.
-	valResp, err := stakingQuery.Validator(ctx, &stakingtypes.QueryValidatorRequest{ValidatorAddr: valoperAddr})
-	if err != nil || !valResp.Validator.IsBonded() {
+	// Only a bonded, unjailed validator's attestations count (and only theirs
+	// are fee-exempt) — idle quietly otherwise.
+	if canSubmit, reason, _ := queryValidatorCanSubmit(ctx, stakingQuery, valoperAddr); !canSubmit {
 		if !*notBondedLogged {
-			logger.Info("steem relayer idle: key is not a bonded validator", "valoper", valoperAddr)
+			logger.Info("steem relayer idle: not attesting", "reason", reason, "valoper", valoperAddr)
 			*notBondedLogged = true
 		}
 		return nil
