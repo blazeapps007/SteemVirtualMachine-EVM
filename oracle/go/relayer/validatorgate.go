@@ -4,6 +4,8 @@ import (
 	"context"
 
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // validatorCanSubmit reports whether a validator's duty txs — bridge
@@ -22,11 +24,15 @@ func validatorCanSubmit(v stakingtypes.Validator) (bool, string) {
 }
 
 // queryValidatorCanSubmit looks the validator up and applies
-// validatorCanSubmit. A lookup error (including "not a validator at all") is
-// returned as-is; callers must treat it as "do not broadcast".
+// validatorCanSubmit. "Not a validator" (gRPC NotFound) is a definitive answer
+// like jailed/not-bonded; any other lookup error is returned so callers
+// broadcast nothing and retry rather than skipping a period.
 func queryValidatorCanSubmit(ctx context.Context, q stakingtypes.QueryClient, valoper string) (bool, string, error) {
 	resp, err := q.Validator(ctx, &stakingtypes.QueryValidatorRequest{ValidatorAddr: valoper})
 	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return false, "not a validator", nil
+		}
 		return false, "validator lookup failed: " + err.Error(), err
 	}
 	ok, reason := validatorCanSubmit(resp.Validator)
