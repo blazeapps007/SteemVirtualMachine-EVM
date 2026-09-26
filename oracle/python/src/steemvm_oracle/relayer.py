@@ -21,6 +21,7 @@ from .broadcast import MAX_MSGS_PER_TX, NotFoundError, RestClient, broadcast_att
 from .config import Config
 from .keys import Keypair
 from .pricefeeder import CompositePriceSource, Feeder
+from .validator_gate import validator_can_submit
 from .router import GATEWAY_ACCOUNT, Intent, build_payout_any, build_transfer_any, derive_destination, route_memo
 from .state import FeederState, State, load_feeder_state, load_state, save_feeder_state, save_state
 from .steem_client import SteemClient, extract_gateway_payouts, extract_gateway_transfers
@@ -42,12 +43,18 @@ def query_oracledata_params(rest: RestClient) -> dict:
     return rest.get_json("/steemvm/oracle/data/v1/params")["params"]
 
 
-def query_validator_bonded(rest: RestClient, valoper_address: str) -> bool:
+def query_validator_can_submit(rest: RestClient, valoper_address: str) -> tuple[bool, str, bool]:
+    """Looks the validator up and applies validator_can_submit. Returns
+    (can_submit, reason, definitive): definitive is False when the lookup
+    itself failed, so callers retry next tick instead of skipping a period.
+    Mirrors oracle/go/relayer/validatorgate.go's queryValidatorCanSubmit."""
     try:
         resp = rest.get_json(f"/cosmos/staking/v1beta1/validators/{valoper_address}")
     except NotFoundError:
-        return False
-    return resp.get("validator", {}).get("status") == "BOND_STATUS_BONDED"
+        return (*validator_can_submit(None), True)
+    except Exception as e:  # noqa: BLE001 - node hiccup: don't broadcast, retry
+        return False, f"validator lookup failed: {e}", False
+    return (*validator_can_submit(resp.get("validator")), True)
 
 
 def query_deposit_by_txid(rest: RestClient, txid: str, op_index: int) -> Optional[dict]:
@@ -154,11 +161,12 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
         logger.debug("steem relayer idle: bridge and name service disabled")
         return state
 
-    # Only bonded validators' attestations count (and only theirs are
-    # fee-exempt) -- idle quietly otherwise.
-    if not query_validator_bonded(cycle.rest, cycle.keypair.valoper_address):
+    # Only a bonded, unjailed validator's attestations count (and only theirs
+    # are fee-exempt) -- idle quietly otherwise.
+    can_submit, reason, _ = query_validator_can_submit(cycle.rest, cycle.keypair.valoper_address)
+    if not can_submit:
         if not not_bonded_logged[0]:
-            logger.info("steem relayer idle: key is not a bonded validator (valoper=%s)", cycle.keypair.valoper_address)
+            logger.info("steem relayer idle: not attesting (%s, valoper=%s)", reason, cycle.keypair.valoper_address)
             not_bonded_logged[0] = True
         return state
     not_bonded_logged[0] = False
@@ -241,10 +249,13 @@ def run_price_feeder_cycle(
     feeder: Feeder,
     gas_prices: str,
     last_handled_period: list[int],
+    idle_reason: list[str],
 ) -> None:
     """Checks whether the chain has entered a new vote period since the
     last handled one and, if so, runs one Feeder.step. Mirrors
-    oracle/go/relayer/relayer.go's runPriceFeederCycle."""
+    oracle/go/relayer/relayer.go's runPriceFeederCycle. `idle_reason` holds
+    why the feeder is currently idle ("" when active), so idle/resume are
+    logged once per change rather than every tick."""
     oracle_params = query_oracledata_params(cycle.rest)
     vote_period = int(oracle_params.get("vote_period", 0))
     if vote_period == 0:
@@ -256,6 +267,23 @@ def run_price_feeder_cycle(
 
     if period == last_handled_period[0]:
         return  # already acted this period; wait for the next boundary
+
+    # Only a bonded, unjailed validator's prevotes/votes can land. A jailed one
+    # would broadcast a failing -- and fee-paying -- tx every vote period, so
+    # broadcast nothing (and fetch no prices) until it's back. Skipping periods
+    # is safe: step only ever reveals the commit from the period right before,
+    # so a commit stranded by a jailed gap is abandoned, never mis-revealed.
+    can_submit, reason, definitive = query_validator_can_submit(cycle.rest, cycle.keypair.valoper_address)
+    if not can_submit:
+        if idle_reason[0] != reason:
+            logger.info("price feeder idle: not broadcasting (%s, valoper=%s)", reason, cycle.keypair.valoper_address)
+            idle_reason[0] = reason
+        if definitive:
+            last_handled_period[0] = period  # a definitive answer: skip this period
+        return
+    if idle_reason[0]:
+        logger.info("price feeder resuming: validator is bonded and not jailed (valoper=%s)", cycle.keypair.valoper_address)
+        idle_reason[0] = ""
 
     prev_state: FeederState = load_feeder_state(cycle.state_dir)
     msgs, new_state = feeder.step(period, whitelist, prev_state)
@@ -317,6 +345,7 @@ def run(
         feeder = Feeder(validator=keypair.address, source=price_source)
         last_handled_period = [0]
         not_bonded_logged = [False]
+        price_idle_reason = [""]
 
         logger.info(
             "steem oracle started: steem_rpc=%s node_rest=%s chain_id=%s signer=%s valoper=%s "
@@ -345,7 +374,7 @@ def run(
 
             if price_source is not None:
                 try:
-                    run_price_feeder_cycle(cycle, feeder, gas_prices, last_handled_period)
+                    run_price_feeder_cycle(cycle, feeder, gas_prices, last_handled_period, price_idle_reason)
                 except Exception:  # noqa: BLE001
                     logger.exception("price feeder cycle failed")
 

@@ -16,6 +16,7 @@ import { broadcastAttestations, broadcastPriceFeedMsgs, type EncodeObject } from
 import { loadState, saveState, loadFeederState, saveFeederState } from "./state";
 import { Feeder, getAggregateVoteHash, type PriceSource } from "./priceFeeder";
 import { TYPE_URL_MSG_ATTEST_WITHDRAWAL_PAYOUT } from "./broadcast";
+import { validatorCanSubmit, type ValidatorRecord } from "./validatorGate";
 
 export interface CycleLogger {
   info(msg: string, meta?: Record<string, unknown>): void;
@@ -64,16 +65,25 @@ async function queryBridgeParams(restUrl: string): Promise<BridgeParams> {
   return resp.params;
 }
 
-async function queryValidatorBonded(restUrl: string, valoperAddr: string): Promise<boolean> {
+/**
+ * Looks the validator up and applies validatorCanSubmit. `definitive` is false
+ * when the lookup itself failed, so callers retry next tick instead of
+ * skipping a period. Mirrors oracle/go/relayer/validatorgate.go's
+ * queryValidatorCanSubmit.
+ */
+async function queryValidatorCanSubmit(
+  restUrl: string,
+  valoperAddr: string,
+): Promise<{ ok: boolean; reason: string; definitive: boolean }> {
   try {
-    const resp = await getJson<{ validator: { status: string } }>(
+    const resp = await getJson<{ validator: ValidatorRecord }>(
       restUrl,
       `/cosmos/staking/v1beta1/validators/${valoperAddr}`,
     );
-    return resp.validator.status === "BOND_STATUS_BONDED";
+    return { ...validatorCanSubmit(resp.validator), definitive: true };
   } catch (err) {
-    if ((err as any).notFound) return false;
-    throw err;
+    if ((err as any).notFound) return { ...validatorCanSubmit(undefined), definitive: true };
+    return { ok: false, reason: `validator lookup failed: ${String(err)}`, definitive: false };
   }
 }
 
@@ -207,6 +217,9 @@ export async function run(opts: {
   });
 
   let notBondedLogged = false;
+  // Why the price feeder is currently idle ("" when active), so the idle and
+  // resume messages are logged once per change rather than every tick.
+  const priceIdle = { reason: "" };
   // Heartbeat: the "idle"/"waiting" logs below are debug-level (filtered out
   // by default), so a quiet cycle -- no new transfers to attest, which is
   // most cycles most of the time -- produces zero output at all without
@@ -237,6 +250,8 @@ export async function run(opts: {
           feeder,
           stateDir,
           lastHandledPeriod,
+          valoperAddr,
+          priceIdle,
         );
       } catch (err) {
         logger.error("price feeder cycle failed", { err: String(err) });
@@ -288,10 +303,12 @@ async function runCycle(
     return { state, notBondedLogged };
   }
 
-  const bonded = await queryValidatorBonded(cfg.nodeRestUrl, valoperAddr);
-  if (!bonded) {
+  // Only a bonded, unjailed validator's attestations count (and only theirs
+  // are fee-exempt) — idle quietly otherwise.
+  const gate = await queryValidatorCanSubmit(cfg.nodeRestUrl, valoperAddr);
+  if (!gate.ok) {
     if (!notBondedLogged) {
-      logger.info("steem relayer idle: key is not a bonded validator", { valoper: valoperAddr });
+      logger.info("steem relayer idle: not attesting", { reason: gate.reason, valoper: valoperAddr });
     }
     return { state, notBondedLogged: true };
   }
@@ -450,6 +467,8 @@ async function runPriceFeederCycle(
   feeder: Feeder,
   stateDir: string,
   lastHandledPeriod: number,
+  valoperAddr: string,
+  idle: { reason: string },
 ): Promise<number> {
   const params = await queryOracleDataParams(cfg.nodeRestUrl);
   const votePeriod = Number(params.vote_period);
@@ -461,6 +480,25 @@ async function runPriceFeederCycle(
   const period = Math.floor(height / votePeriod);
   if (period === lastHandledPeriod) {
     return lastHandledPeriod;
+  }
+
+  // Only a bonded, unjailed validator's prevotes/votes can land. A jailed one
+  // would broadcast a failing — and fee-paying — tx every vote period, so
+  // broadcast nothing (and fetch no prices) until it's back. Skipping periods
+  // is safe: step only ever reveals the commit from the period right before,
+  // so a commit stranded by a jailed gap is abandoned, never mis-revealed.
+  const gate = await queryValidatorCanSubmit(cfg.nodeRestUrl, valoperAddr);
+  if (!gate.ok) {
+    if (idle.reason !== gate.reason) {
+      logger.info("price feeder idle: not broadcasting", { reason: gate.reason, valoper: valoperAddr });
+      idle.reason = gate.reason;
+    }
+    // A definitive answer skips this period; a failed lookup retries next tick.
+    return gate.definitive ? period : lastHandledPeriod;
+  }
+  if (idle.reason !== "") {
+    logger.info("price feeder resuming: validator is bonded and not jailed", { valoper: valoperAddr });
+    idle.reason = "";
   }
 
   const prevState = await loadFeederState(stateDir);
