@@ -27,9 +27,10 @@ func TestPatchFeemarketDefaultsSetsOneGweiFloor(t *testing.T) {
 	require.Equal(t, "0", fm.BlockGas, "non-param fields untouched")
 }
 
-func TestPatchEVMActiveStaticPrecompilesDropsStaking(t *testing.T) {
-	// Even if the base template already activates the staking precompile, a
-	// fresh genesis must come out without it.
+func TestPatchEVMActiveStaticPrecompilesActivatesDefaults(t *testing.T) {
+	// A fresh genesis gets every default precompile — including the (identity-
+	// gated) staking precompile — without duplicating any the base template
+	// already lists.
 	appState := map[string]json.RawMessage{
 		"evm": json.RawMessage(`{"params":{"evm_denom":"asteem","active_static_precompiles":["` +
 			app.StakingPrecompileAddress + `"]}}`),
@@ -43,13 +44,7 @@ func TestPatchEVMActiveStaticPrecompilesDropsStaking(t *testing.T) {
 		} `json:"params"`
 	}
 	require.NoError(t, json.Unmarshal(appState["evm"], &evm))
-	require.NotContains(t, evm.Params.Active, app.StakingPrecompileAddress)
-	require.Len(t, evm.Params.Active, len(defaultActiveStaticPrecompiles))
+	require.Contains(t, evm.Params.Active, app.StakingPrecompileAddress)
+	require.ElementsMatch(t, defaultActiveStaticPrecompiles, evm.Params.Active, "no duplicates, nothing missing")
 	require.Equal(t, "asteem", evm.Params.EVMDenom)
-}
-
-func TestDefaultActiveStaticPrecompilesNeverIncludeADisabledOne(t *testing.T) {
-	for _, addr := range defaultActiveStaticPrecompiles {
-		require.False(t, disabledStaticPrecompiles[addr], "%s is both default-active and disabled", addr)
-	}
 }

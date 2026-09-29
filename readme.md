@@ -89,7 +89,7 @@ identical on any chain built on it:
 |---|---|---|
 | `0x…0100` | p256 | Verifies secp256r1 (P-256) signatures on-chain — e.g. passkey/WebAuthn-style auth |
 | `0x…0400` | bech32 | Converts between `steem1…` (bech32) and `0x…` (hex) address forms |
-| `0x…0800` | staking | Delegate, undelegate, redelegate, and query staking state from Solidity |
+| `0x…0800` | staking | Delegate, undelegate, redelegate, and query staking state from Solidity. `createValidator`/`editValidator` enforce the same Steem-identity rule as Cosmos txs (from v0.0.5) |
 | `0x…0801` | distribution | Claim/query staking rewards from Solidity |
 | `0x…0802` | ics20 | IBC fungible-token transfers initiated from Solidity |
 | `0x…0804` | bank | Query and transfer any bank denom (not just `asteem`) from Solidity |

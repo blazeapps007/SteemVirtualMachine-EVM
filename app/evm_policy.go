@@ -28,17 +28,18 @@ import (
 // in the v0.0.5 upgrade handler (enforceEVMPolicy).
 var EVMGasFloor = math.LegacyNewDec(1_000_000_000)
 
-// StakingPrecompileAddress is cosmos/evm's staking precompile, which this chain
-// keeps permanently disabled. Its createValidator/editValidator call x/staking's
-// msg server directly, and EVM txs never pass through the Cosmos ante chain, so
-// it bypasses the Steem validator-identity gate entirely: any EVM account could
-// register an anonymous validator or strip its identity. Staking stays available
-// through Cosmos txs. Do NOT re-activate it without wrapping those two methods in
-// the same identity check the ante gate and icaIdentityRouter apply.
+// StakingPrecompileAddress is cosmos/evm's staking precompile. It is active on
+// this chain ONLY in its identity-gated form (stakingIdentityPrecompile, wired
+// in app/evm.go): upstream's createValidator/editValidator call x/staking's msg
+// server directly and EVM txs skip the Cosmos ante chain, so unwrapped it let
+// any EVM account register an anonymous validator or strip an identity. Before
+// v0.0.5 the live chain therefore had it switched off (governance proposal 3);
+// the v0.0.5 upgrade switches it back on together with the gate, in one binary.
 const StakingPrecompileAddress = "0x0000000000000000000000000000000000000800"
 
 // enforceEVMPolicy brings live chain state in line with EVMGasFloor and the
-// staking-precompile ban (see applyEVMPolicy), writing only what changed.
+// (now identity-gated) staking precompile being active (see applyEVMPolicy),
+// writing only what changed.
 func (app *App) enforceEVMPolicy(ctx sdk.Context) error {
 	fm, fmChanged, evm, evmChanged := applyEVMPolicy(
 		app.FeeMarketKeeper.GetParams(ctx),
@@ -59,8 +60,12 @@ func (app *App) enforceEVMPolicy(ctx sdk.Context) error {
 
 // applyEVMPolicy is the pure core of enforceEVMPolicy. Idempotent: it only
 // raises a min_gas_price/base_fee that is below EVMGasFloor (never lowers one
-// governance set higher), and only removes the staking precompile if it is
-// still active. Every other field passes through untouched.
+// governance set higher), and only adds the staking precompile if it is not
+// already active. Every other field passes through untouched.
+//
+// Re-activating the staking precompile is only safe because this same binary
+// registers it wrapped in the identity gate — this must never run on a binary
+// that registers the upstream precompile unwrapped.
 func applyEVMPolicy(fm feemarkettypes.Params, evm evmtypes.Params) (feemarkettypes.Params, bool, evmtypes.Params, bool) {
 	fmChanged := false
 	if fm.MinGasPrice.IsNil() || fm.MinGasPrice.LT(EVMGasFloor) {
@@ -73,11 +78,12 @@ func applyEVMPolicy(fm feemarkettypes.Params, evm evmtypes.Params) (feemarkettyp
 	}
 
 	evmChanged := false
-	if slices.Contains(evm.ActiveStaticPrecompiles, StakingPrecompileAddress) {
-		evm.ActiveStaticPrecompiles = slices.DeleteFunc(
-			slices.Clone(evm.ActiveStaticPrecompiles),
-			func(addr string) bool { return addr == StakingPrecompileAddress },
-		)
+	if !slices.Contains(evm.ActiveStaticPrecompiles, StakingPrecompileAddress) {
+		// Keep ascending order (all entries are same-length lowercase hex, so a
+		// string sort is address order) rather than relying on SetParams to sort.
+		active := append(slices.Clone(evm.ActiveStaticPrecompiles), StakingPrecompileAddress)
+		slices.Sort(active)
+		evm.ActiveStaticPrecompiles = active
 		evmChanged = true
 	}
 	return fm, fmChanged, evm, evmChanged

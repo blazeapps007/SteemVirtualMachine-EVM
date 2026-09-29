@@ -51,7 +51,7 @@ func (r icaIdentityRouter) Handler(msg sdk.Msg) baseapp.MsgServiceHandler {
 	switch msg.(type) {
 	case *stakingtypes.MsgCreateValidator, *stakingtypes.MsgEditValidator:
 		return func(ctx sdk.Context, req sdk.Msg) (*sdk.Result, error) {
-			if err := r.checkValidatorIdentity(ctx, req); err != nil {
+			if err := checkValidatorIdentityMsg(ctx, r.identity, req); err != nil {
 				return nil, err
 			}
 			return handler(ctx, req)
@@ -61,17 +61,20 @@ func (r icaIdentityRouter) Handler(msg sdk.Msg) baseapp.MsgServiceHandler {
 	}
 }
 
-// checkValidatorIdentity mirrors steembridgeValidatorGateDecorator.AnteHandle
-// exactly, so a message is accepted here if and only if it would be accepted
-// as a direct Cosmos tx.
-func (r icaIdentityRouter) checkValidatorIdentity(ctx sdk.Context, req sdk.Msg) error {
-	switch m := req.(type) {
+// checkValidatorIdentityMsg is the one Steem-identity check shared by every
+// route that can reach x/staking without the ante gate — the ICA host router
+// and the staking precompile (staking_identity_precompile.go). It mirrors
+// steembridgeValidatorGateDecorator.AnteHandle exactly, so a create/edit is
+// accepted on those routes if and only if it would be accepted as a direct
+// Cosmos tx. Any other message passes.
+func checkValidatorIdentityMsg(ctx sdk.Context, identity validatorIdentityChecker, msg sdk.Msg) error {
+	switch m := msg.(type) {
 	case *stakingtypes.MsgCreateValidator:
 		valAddr, err := sdk.ValAddressFromBech32(m.ValidatorAddress)
 		if err != nil {
 			return errorsmod.Wrapf(sdkerrors.ErrInvalidAddress, "invalid validator address: %s", err)
 		}
-		if err := r.identity.ValidateValidatorCreationEligibility(ctx, valAddr.Bytes(), m.Description.Moniker, m.Description.Details); err != nil {
+		if err := identity.ValidateValidatorCreationEligibility(ctx, valAddr.Bytes(), m.Description.Moniker, m.Description.Details); err != nil {
 			return errorsmod.Wrap(sdkerrors.ErrUnauthorized, err.Error())
 		}
 	case *stakingtypes.MsgEditValidator:
@@ -79,7 +82,7 @@ func (r icaIdentityRouter) checkValidatorIdentity(ctx sdk.Context, req sdk.Msg) 
 		if err != nil {
 			return errorsmod.Wrapf(sdkerrors.ErrInvalidAddress, "invalid validator address: %s", err)
 		}
-		if err := r.identity.ValidateValidatorEdit(ctx, valAddr.Bytes(), m.Description.Moniker, m.Description.Details); err != nil {
+		if err := identity.ValidateValidatorEdit(ctx, valAddr.Bytes(), m.Description.Moniker, m.Description.Details); err != nil {
 			return errorsmod.Wrap(sdkerrors.ErrUnauthorized, err.Error())
 		}
 	}

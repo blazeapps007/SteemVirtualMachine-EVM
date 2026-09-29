@@ -26,7 +26,7 @@ import (
 var defaultActiveStaticPrecompiles = []string{
 	"0x0000000000000000000000000000000000000100", // p256
 	"0x0000000000000000000000000000000000000400", // bech32
-	// 0x...0800 (staking) deliberately absent — see disabledStaticPrecompiles.
+	app.StakingPrecompileAddress,                 // staking — identity-gated, see app/staking_identity_precompile.go
 	"0x0000000000000000000000000000000000000801", // distribution
 	"0x0000000000000000000000000000000000000802", // ics20
 	"0x0000000000000000000000000000000000000804", // bank
@@ -35,12 +35,6 @@ var defaultActiveStaticPrecompiles = []string{
 	"0x0000000000000000000000000000000000000807", // ics02
 	steembridgeprecompile.PrecompileAddress,      // this chain's steembridge precompile
 	oracledataprecompile.PrecompileAddress,       // this chain's oracledata precompile
-}
-
-// disabledStaticPrecompiles are stripped from a fresh genesis even if the base
-// template already lists them. See app.StakingPrecompileAddress for why.
-var disabledStaticPrecompiles = map[string]bool{
-	app.StakingPrecompileAddress: true,
 }
 
 // wrapInitCmdWithChainDefaults makes `steemvmd init`'s output genesis.json
@@ -336,16 +330,11 @@ func patchEVMActiveStaticPrecompiles(appState map[string]json.RawMessage) error 
 		return err
 	}
 
-	var inherited []string
-	_ = json.Unmarshal(params["active_static_precompiles"], &inherited)
+	var active []string
+	_ = json.Unmarshal(params["active_static_precompiles"], &active)
 
-	active := make([]string, 0, len(inherited)+len(defaultActiveStaticPrecompiles))
-	have := make(map[string]bool, len(inherited))
-	for _, a := range inherited {
-		if disabledStaticPrecompiles[a] {
-			continue
-		}
-		active = append(active, a)
+	have := make(map[string]bool, len(active))
+	for _, a := range active {
 		have[a] = true
 	}
 	for _, addr := range defaultActiveStaticPrecompiles {

@@ -8,13 +8,12 @@ import (
 
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/log/v2"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
-	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkmempool "github.com/cosmos/cosmos-sdk/types/mempool"
 	"github.com/cosmos/cosmos-sdk/types/module"
@@ -22,11 +21,14 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 	"github.com/spf13/cast"
 
 	evmcryptocodec "github.com/cosmos/evm/crypto/codec"
+	evmaddress "github.com/cosmos/evm/encoding/address"
 	"github.com/cosmos/evm/ethereum/eip712"
 	evmmempool "github.com/cosmos/evm/mempool"
+	stakingprecompile "github.com/cosmos/evm/precompiles/staking"
 	precompiletypes "github.com/cosmos/evm/precompiles/types"
 	evmserver "github.com/cosmos/evm/server"
 	srvflags "github.com/cosmos/evm/server/flags"
@@ -119,6 +121,37 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		app.GetKey(feemarkettypes.StoreKey),
 	)
 
+	staticPrecompiles := precompiletypes.DefaultStaticPrecompiles(
+		*app.StakingKeeper,
+		app.DistrKeeper,
+		app.BankKeeper,
+		&app.Erc20Keeper,
+		app.TransferKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		app.IBCKeeper.ClientKeeper,
+		*app.GovKeeper,
+		app.SlashingKeeper,
+		app.appCodec,
+	)
+
+	// Replace upstream's staking precompile (0x...0800) with the same instance
+	// wrapped in the Steem validator-identity gate — see
+	// staking_identity_precompile.go. Unwrapped, its createValidator/
+	// editValidator would bypass the gate entirely. Fail loudly rather than
+	// ever run it unwrapped if a cosmos/evm bump changes its type.
+	stakingAddr := common.HexToAddress(evmtypes.StakingPrecompileAddress)
+	upstreamStaking, ok := staticPrecompiles[stakingAddr].(*stakingprecompile.Precompile)
+	if !ok {
+		return fmt.Errorf("cannot wrap the staking precompile with the identity gate: got %T", staticPrecompiles[stakingAddr])
+	}
+	staticPrecompiles[stakingAddr] = newStakingIdentityPrecompile(
+		upstreamStaking,
+		app.SteembridgeKeeper,
+		app.StakingKeeper.BondDenom,
+		// Same codec cosmos/evm's defaults construct the precompile with.
+		evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
+	)
+
 	app.EVMKeeper = evmkeeper.NewKeeper(
 		app.appCodec,
 		app.GetKey(evmtypes.StoreKey),
@@ -133,20 +166,7 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		&app.Erc20Keeper,
 		chainID,
 		tracer,
-	).WithStaticPrecompiles(
-		precompiletypes.DefaultStaticPrecompiles(
-			*app.StakingKeeper,
-			app.DistrKeeper,
-			app.BankKeeper,
-			&app.Erc20Keeper,
-			app.TransferKeeper,
-			app.IBCKeeper.ChannelKeeper,
-			app.IBCKeeper.ClientKeeper,
-			*app.GovKeeper,
-			app.SlashingKeeper,
-			app.appCodec,
-		),
-	)
+	).WithStaticPrecompiles(staticPrecompiles)
 
 	// NOTE: virtual fee collection (EnableVirtualFeeCollection) is deliberately
 	// NOT wired here. It is part of the BlockSTM parallel-execution bundle

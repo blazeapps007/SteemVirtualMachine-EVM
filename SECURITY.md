@@ -97,7 +97,7 @@ Three routes reached x/staking without passing it:
 
 | Route | Why the gate missed it | Fix | Needs a halt? |
 |---|---|---|---|
-| EVM staking precompile `0x…0800` | EVM txs use cosmos/evm's own ante handler; the precompile calls x/staking's msg server directly | Precompile removed from `active_static_precompiles` (governance vote, enforced again by the v0.0.5 upgrade handler, and absent from fresh-chain defaults) | No |
+| EVM staking precompile `0x…0800` | EVM txs use cosmos/evm's own ante handler; the precompile calls x/staking's msg server directly | Switched off by governance proposal 3 until v0.0.5. v0.0.5 registers it wrapped in the same identity check (`app/staking_identity_precompile.go`) and its upgrade handler switches it back on; `delegate`/`undelegate`/`redelegate`/queries are untouched | Off: no. Gated: yes (execution change) |
 | authz | `MsgExec{MsgCreateValidator}` is a top-level `MsgExec` | `MsgCreateValidator`/`MsgEditValidator` added to the authz limiter, which also rejects `MsgGrant` for them and recurses into nested `MsgExec` | Yes (ante change) |
 | ICA host | The host executes packet messages through the router, never the ante handler; `allow_messages` is `["*"]` | `icaIdentityRouter` (`app/ica_identity_router.go`) runs the gate's own two keeper checks on create/edit; ICA stays fully on | Yes (execution change) |
 
@@ -110,8 +110,16 @@ running the live v0.0.4-1 binary: a grant plus `MsgExec` created a validator wit
 all, while the same attempt after the v0.0.5 upgrade — including one reusing a grant made before
 it — is rejected.
 
-**Do not re-activate the staking precompile** without wrapping `createValidator`/`editValidator`
-in the same identity check. See `app.StakingPrecompileAddress`.
+The EVM route was proven the same way: on the v0.0.4-1 binary a plain EVM account created a
+validator with no identity through `0x…0800`. After the v0.0.5 upgrade, real EVM transactions
+confirm an anonymous `createValidator` is mined and rejected with the gate's own error. Renaming a
+validator to an unregistered moniker is likewise rejected. `delegate`, and an edit that leaves the
+identity untouched, still succeed.
+
+**The staking precompile must only ever be active in its wrapped form.** `app/evm.go` refuses to
+start if a cosmos/evm bump changes the precompile's type so it can no longer be wrapped. On any
+future cosmos/evm upgrade, re-check that `stakingIdentityPrecompile.Run` still matches upstream's
+`Run` (`RunNativeAction` around `Execute`). See `app.StakingPrecompileAddress`.
 
 ## EVM gas floor: 1 gwei
 

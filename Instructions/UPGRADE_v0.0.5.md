@@ -10,8 +10,12 @@ swaps to it automatically at that height — no action needed at the block itsel
 
 - **Closes every route around the "no anonymous validators" rule.** Creating or editing a
   validator now always runs the Steem-identity check, whether it arrives as a normal tx, wrapped in
-  authz, or from an interchain account. The EVM staking precompile (`0x…0800`) stays disabled.
+  authz, from an interchain account, or from MetaMask/Solidity through the staking precompile.
   Full detail in [`SECURITY.md`](../SECURITY.md).
+- **Turns EVM staking back on.** The staking precompile (`0x…0800`) was switched off by governance
+  because it skipped the identity check. v0.0.5 switches it back on, with the check built in:
+  delegating, undelegating and redelegating from MetaMask work again, while creating or editing a
+  validator from the EVM must pass the same Steem-identity rule as everywhere else.
 - **Makes the 1 gwei EVM gas floor part of the chain.** EVM transactions previously paid zero
   fees, so the fee burn burned nothing. The upgrade enforces a 1 gwei minimum on-chain.
 - IBC, including interchain accounts, stays fully enabled.

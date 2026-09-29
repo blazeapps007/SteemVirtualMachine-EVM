@@ -41,9 +41,11 @@ const UpgradeNameV004 = "v0.0.4"
 //     MsgExec or authorized via MsgGrant (ante_steembridge.go's limiter);
 //   - ICA host: interchain-account validator create/edit now runs the same
 //     identity check (ica_identity_router.go);
-//   - state: the handler enforces the 1 gwei EVM gas floor and the disabled
-//     staking precompile (enforceEVMPolicy), so both hold even if the earlier
-//     governance vote setting them never passed.
+//   - EVM: the staking precompile is registered wrapped in the same identity
+//     check (staking_identity_precompile.go), so it can be active again;
+//   - state: the handler enforces the 1 gwei EVM gas floor and switches the
+//     (now gated) staking precompile back on (enforceEVMPolicy). Governance
+//     proposal 3 had switched it off on the live chain until this binary.
 //
 // Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
 // and the Plan.Name of the governance MsgSoftwareUpgrade.
