@@ -57,6 +57,7 @@ COMPOSE="${COMPOSE:-docker compose}"
 CONTAINER="${CONTAINER:-steemvm-node}"
 BIN="${BIN:-/root/go/bin/steemvmd}"
 HOME_DIR="${HOME_DIR:-/root/.steemvm}"
+STEEMVM_HOME_FROM_ENV="${STEEMVM_HOME:-}"   # set explicitly by the operator?
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"
 export STEEMVM_HOME
 CHAIN_ID="${CHAIN_ID:-steemvm}"
@@ -107,8 +108,10 @@ done
 if [ "$MODE" = "auto" ]; then
   if ! command -v docker >/dev/null 2>&1; then
     MODE=bare-metal
+  elif docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+    MODE=docker   # a RUNNING node container — a stopped leftover proves nothing
   elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
-    MODE=docker
+    die "the '$CONTAINER' container exists but isn't running, so this can't tell how the node runs. If it runs in Docker, re-run with --docker; if it runs steemvmd directly, use --bare-metal. Nothing was changed."
   else
     die "can't tell how this node runs: docker is installed but there is no '$CONTAINER' container. Re-run with --docker or --bare-metal. Nothing was changed."
   fi
@@ -122,8 +125,17 @@ BARE_METAL=0
 [ -z "$(git status --porcelain)" ] || die "you have local changes (git status is not clean) — commit, stash, or discard them first."
 
 log "Fetching…"
-git fetch --all --tags --quiet
+# Plain fetch, errors visible. NOT --tags: the repo has a moving "latest"
+# tag, and `git fetch --tags` refuses ("would clobber existing tag") on any
+# clone holding an older copy of it — which failed silently under --quiet.
+git fetch origin || die "git fetch failed (see the error above). Nothing was changed."
 if [ -n "$TARGET_REF" ]; then
+  # A tag we don't have yet? Fetch just that one (forced — tags can move).
+  if ! git rev-parse -q --verify "$TARGET_REF^{commit}" >/dev/null \
+     && ! git rev-parse -q --verify "origin/$TARGET_REF^{commit}" >/dev/null; then
+    git fetch origin "+refs/tags/$TARGET_REF:refs/tags/$TARGET_REF" 2>/dev/null \
+      || die "'$TARGET_REF' is neither a branch nor a tag on origin. Nothing was changed."
+  fi
   log "Checking out $TARGET_REF…"
   git checkout "$TARGET_REF"
 fi
@@ -178,6 +190,19 @@ fi
 
 # ══ Docker ═════════════════════════════════════════════════════════════════════
 command -v docker >/dev/null || die "docker not found on PATH (for a node that runs steemvmd directly, use --bare-metal)"
+
+# Use the node home the RUNNING container actually mounts, not a guess from
+# $HOME: running this as root on a node whose compose was started by another
+# user would otherwise stage the binary into the wrong home.
+LIVE_HOME="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "'"$HOME_DIR"'"}}{{.Source}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+if [ -n "$LIVE_HOME" ]; then
+  if [ -n "$STEEMVM_HOME_FROM_ENV" ] && [ "$STEEMVM_HOME_FROM_ENV" != "$LIVE_HOME" ]; then
+    die "STEEMVM_HOME=$STEEMVM_HOME_FROM_ENV, but the running '$CONTAINER' uses $LIVE_HOME. Unset STEEMVM_HOME (or fix it). Nothing was changed."
+  fi
+  STEEMVM_HOME="$LIVE_HOME"
+  export STEEMVM_HOME
+  log "Node home (from the running container): $STEEMVM_HOME"
+fi
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
 
 CONFIG_TOML="$STEEMVM_HOME/config/config.toml"
