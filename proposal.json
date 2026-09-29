@@ -1,0 +1,18 @@
+{
+  "messages": [
+    {
+      "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+      "authority": "steem10d07y265gmmuvt4z0w9aw880jnsr700jvhcqmf",
+      "plan": {
+        "name": "v0.0.5",
+        "height": "620500",
+        "info": ""
+      }
+    }
+  ],
+  "metadata": "",
+  "deposit": "10000000asteem",
+  "title": "Coordinated upgrade v0.0.5: validator identity hardening, EVM staking re-enabled, 1 gwei gas floor",
+  "summary": "Coordinated software upgrade to v0.0.5 at block height 620500.\n\n1. Every route to creating or editing a validator now enforces the Steem-identity rule (ACTIVE Steem name owned by the validator, owner/active/posting keys in details): direct transactions, authz, interchain accounts, and the EVM staking precompile.\n2. The EVM staking precompile (0x0000000000000000000000000000000000000800) is switched back on with that check built in, so delegating from MetaMask works again. It was switched off by proposal 3 because it skipped the check.\n3. The 1 gwei minimum EVM gas price becomes part of the chain.\n\nKeys, stake and validator identities are untouched. Every validator must stage the binary before the upgrade height, from the SteemVM folder:\n  git fetch && git checkout release/v0.0.5-validator-identity && ./update.sh\nDocker image steemblazer/steemvmd:v0.0.5, staged binary sha256 5915bf669c390d3f6e08c81961d8aec2818145e1a9155e26a88b080a507d334f. Anyone who staged v0.0.5 before 29 September must run the line again. Full instructions: Instructions/UPGRADE_v0.0.5.md",
+  "expedited": false
+}
