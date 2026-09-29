@@ -2,13 +2,18 @@
 #
 # update.sh — update a validator to the checked-out release, cosmovisor-aware.
 #
-# Usage: ./update.sh [branch-or-tag] [--reset] [--bare-metal]
+# Usage: ./update.sh [branch-or-tag] [--reset] [--docker | --bare-metal]
 #   branch-or-tag   git ref to check out before pulling (default: stay on the
 #                   current branch and just pull it)
 #   --reset         Docker only: when a coordinated upgrade is pending, also run
 #                   the full reset flow below instead of just staging
-#   --bare-metal    node runs steemvmd directly under cosmovisor (no Docker):
-#                   build + stage only, see "Bare metal" below
+#   --docker        force Docker mode
+#   --bare-metal    force bare-metal mode: steemvmd runs directly under
+#                   cosmovisor (no Docker) — build + stage only, see below
+#
+# Without --docker/--bare-metal the mode is detected: no docker installed ->
+# bare metal; a '$CONTAINER' container exists -> Docker; anything else is
+# refused (never guessed), with a message saying which flag to add.
 #
 # What it does depends on the checked-out release:
 #
@@ -79,20 +84,39 @@ kf() { node "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 kf_i() { node_i "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 
 # ── args ──────────────────────────────────────────────────────────────────────
-TARGET_REF="" FORCE_RESET=0 BARE_METAL=0
+TARGET_REF="" FORCE_RESET=0 MODE=auto
 for arg in "$@"; do
   case "$arg" in
     --reset)      FORCE_RESET=1 ;;
-    --bare-metal) BARE_METAL=1 ;;
-    -h|--help)    sed -n '2,38p' "$0"; exit 0 ;;
+    --docker)     MODE=docker ;;
+    --bare-metal) MODE=bare-metal ;;
+    -h|--help)    sed -n '2,44p' "$0"; exit 0 ;;
     -*)           die "unknown flag: $arg (see ./update.sh --help)" ;;
     *)            [ -z "$TARGET_REF" ] || die "only one branch-or-tag may be given"; TARGET_REF="$arg" ;;
   esac
 done
-[ "$BARE_METAL" = "1" ] && [ "$FORCE_RESET" = "1" ] && die "--reset is Docker-only; bare metal only ever builds + stages."
 
 [ -d .git ] || die "not a git checkout — run this from the repository root."
 [ -f docker-compose.yml ] || die "run this from the repository root."
+
+# ── Docker or bare metal? — decided before anything changes ─────────────────
+# Deliberately conservative: staging the Docker image's binary into a
+# bare-metal node's cosmovisor (it may not even run on the host's OS) or a
+# host-built binary into a container would leave a node that can't start at
+# the upgrade height. So only decide when it's unambiguous; otherwise ask.
+if [ "$MODE" = "auto" ]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    MODE=bare-metal
+  elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+    MODE=docker
+  else
+    die "can't tell how this node runs: docker is installed but there is no '$CONTAINER' container. Re-run with --docker or --bare-metal. Nothing was changed."
+  fi
+  log "Detected a $MODE node."
+fi
+BARE_METAL=0
+[ "$MODE" = "bare-metal" ] && BARE_METAL=1
+[ "$BARE_METAL" = "1" ] && [ "$FORCE_RESET" = "1" ] && die "--reset is Docker-only; bare metal only ever builds + stages."
 
 # ── 1. git checkout + pull ───────────────────────────────────────────────────
 [ -z "$(git status --porcelain)" ] || die "you have local changes (git status is not clean) — commit, stash, or discard them first."
@@ -153,7 +177,7 @@ if [ "$BARE_METAL" = "1" ]; then
 fi
 
 # ══ Docker ═════════════════════════════════════════════════════════════════════
-command -v docker >/dev/null || die "docker not found on PATH"
+command -v docker >/dev/null || die "docker not found on PATH (for a node that runs steemvmd directly, use --bare-metal)"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
 
 CONFIG_TOML="$STEEMVM_HOME/config/config.toml"
@@ -175,7 +199,11 @@ CURRENT_TARGET="genesis"
 if [ "${#PENDING[@]}" -gt 0 ]; then
   for svc in "${PENDING[@]}"; do
     log "Coordinated upgrade pending: staging ${svc#stage-} into cosmovisor…"
-    $COMPOSE --profile stage run --rm "$svc" || die "staging ${svc#stage-} failed — nothing else was touched. Is its image published and pullable?"
+    # Always pull first: a copy of the image cached from an earlier pull may be
+    # an older build that reports the SAME version string. Staging that would
+    # split this node off the network at the upgrade height.
+    $COMPOSE --profile stage pull "$svc" || die "could not pull the ${svc#stage-} image — nothing was touched. Check your connection to Docker Hub."
+    $COMPOSE --profile stage run --rm "$svc" || die "staging ${svc#stage-} failed — nothing else was touched."
   done
   ok "Staged: ${PENDING[*]#stage-}"
 

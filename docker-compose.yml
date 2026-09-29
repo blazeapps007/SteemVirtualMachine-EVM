@@ -94,6 +94,10 @@ services:
   #     docker compose --profile stage run --rm stage-v0.0.5
   stage-v0.0.5:
     image: ${STEEMVM_STAGE_IMAGE:-steemblazer/steemvmd:v0.0.5}
+    # Always fetch the published image: an older build cached from an earlier
+    # pull reports the same "0.0.5" version but would split this node off the
+    # network at the upgrade height.
+    pull_policy: always
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -106,6 +110,7 @@ services:
         mkdir -p /root/.steemvm/cosmovisor/upgrades/v0.0.5/bin
         cp /root/go/bin/steemvmd /root/.steemvm/cosmovisor/upgrades/v0.0.5/bin/steemvmd
         echo "staged: $$(/root/.steemvm/cosmovisor/upgrades/v0.0.5/bin/steemvmd version) -> cosmovisor/upgrades/v0.0.5/bin/steemvmd"
+        echo "sha256: $$(sha256sum /root/.steemvm/cosmovisor/upgrades/v0.0.5/bin/steemvmd | cut -d' ' -f1)  (compare with the value in the upgrade announcement)"
     volumes:
       - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
     profiles: ["stage"]

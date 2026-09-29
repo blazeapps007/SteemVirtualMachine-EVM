@@ -22,47 +22,59 @@ swaps to it automatically at that height — no action needed at the block itsel
 
 Nothing for oracle operators to do: the oracle images are unchanged and already pay 1 gwei.
 
-## Docker Compose validators
+## Every validator: one line
 
-1. Get the new compose file **without restarting your node**:
+From your SteemVM folder:
 
-   ```sh
-   git fetch && git checkout release/v0.0.5-validator-identity   # or main once merged
-   ```
+```sh
+git fetch && git checkout release/v0.0.5-validator-identity && ./update.sh
+```
 
-2. Stage the v0.0.5 binary into cosmovisor's upgrade slot. This pulls the image, copies the
-   binary into place and exits — it never touches the running node:
+That's all. **No reset, no restart, no downtime.** `update.sh` works out how your node runs and
+stages the v0.0.5 binary where cosmovisor expects it:
 
-   ```sh
-   docker compose --profile stage run --rm stage-v0.0.5
-   # must print: staged: 0.0.5 -> cosmovisor/upgrades/v0.0.5/bin/steemvmd
-   ```
+- **Docker node:** it pulls the published image and stages its binary. It prints a `sha256:` line;
+  it must match **`SHA256_OF_PUBLISHED_BINARY`**.
+- **Bare-metal node (no Docker installed):** it builds v0.0.5 from source into a temporary folder,
+  so your running binary is never overwritten, and stages it. Your node must run under cosmovisor.
+- If it says it **can't tell how your node runs**, re-run with `--docker` or `--bare-metal`.
 
-3. **Do not** change the `steemvm` service's image and **do not** run
-   `docker compose pull && docker compose up -d` before the upgrade height. The compose file
-   deliberately keeps the live node on `v0.0.4-1` until then. If your node joined after the v0.0.4
-   upgrade, running the v0.0.5 image early makes cosmovisor start it immediately. The chain then
-   rejects it (`BINARY UPDATED BEFORE TRIGGER`), your node halts, and you get jailed.
+**Staged v0.0.5 before 29 September? Run the line again.** The image published on 24 September was
+an earlier build of v0.0.5. It reports the same version but behaves differently at the upgrade, and
+a node staging it would split off the network at the upgrade height. Running `update.sh` again
+replaces it.
 
-4. At the upgrade height, cosmovisor stops the old binary, switches to v0.0.5 and restarts on its
-   own. Watch it happen:
+Check out the branch **before** running `update.sh`. The version on the older branch doesn't know
+how to stage an upgrade and would reset your node instead.
 
-   ```sh
-   docker compose logs -f steemvm
-   ```
+⚠️ **Until the upgrade height, do not change your node's image and do not run
+`docker compose pull && docker compose up -d` on the node.** The compose file deliberately keeps the
+live node on `v0.0.4-1` until then. If your node joined after the v0.0.4 upgrade, running the v0.0.5
+image early makes cosmovisor start it immediately. The chain then rejects it
+(`BINARY UPDATED BEFORE TRIGGER`), your node halts, and you get jailed.
 
-5. Once it has applied, move the live service to the v0.0.5 image for future restarts. The branch
-   will be updated to make this the default; until then, set it explicitly:
+At the upgrade height, cosmovisor stops the old binary, switches to v0.0.5 and restarts on its own.
+Once it has applied, Docker nodes can move the live service to the new image for future restarts
+(the branch will make this the default):
 
-   ```sh
-   docker exec steemvm-node /root/go/bin/steemvmd query upgrade applied v0.0.5 --home /root/.steemvm
-   STEEMVM_IMAGE=steemblazer/steemvmd:v0.0.5 docker compose up -d steemvm
-   ```
+```sh
+docker exec steemvm-node /root/go/bin/steemvmd query upgrade applied v0.0.5 --home /root/.steemvm
+STEEMVM_IMAGE=steemblazer/steemvmd:v0.0.5 docker compose up -d steemvm
+```
 
-## Bare-metal validators (cosmovisor)
+## Doing it by hand instead
 
-`make install` always installs to `$GOBIN`, whichever checkout you build from. Point `GOBIN` at a
-scratch directory so the build never overwrites the binary you're running:
+**Docker:**
+
+```sh
+git fetch && git checkout release/v0.0.5-validator-identity
+docker compose --profile stage pull stage-v0.0.5
+docker compose --profile stage run --rm stage-v0.0.5
+# must print "staged: 0.0.5 …" and the sha256 above
+```
+
+**Bare metal (cosmovisor):** `make install` always installs to `$GOBIN`, whichever checkout you
+build from, so point `GOBIN` at a scratch directory to avoid overwriting the binary you're running:
 
 ```sh
 git fetch && git checkout release/v0.0.5-validator-identity
