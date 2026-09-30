@@ -8,12 +8,15 @@
 #   --reset         Docker only: when a coordinated upgrade is pending, also run
 #                   the full reset flow below instead of just staging
 #   --docker        force Docker mode
-#   --bare-metal    force bare-metal mode: steemvmd runs directly under
-#                   cosmovisor (no Docker) — build + stage only, see below
+#   --bare-metal    force bare-metal mode: the node runs on the host, not in
+#                   Docker — build + stage only, see below
 #
 # Without --docker/--bare-metal the mode is detected: no docker installed ->
-# bare metal; a '$CONTAINER' container exists -> Docker; anything else is
-# refused (never guessed), with a message saying which flag to add.
+# bare metal; a running '$CONTAINER' container -> Docker; no such container
+# but cosmovisor/steemvmd running directly on the host -> bare metal; anything
+# else is refused (never guessed), with a message saying which flag to add.
+# Either way the node home is read from the running node itself (the
+# container's mount, or cosmovisor's DAEMON_HOME), not guessed from $HOME.
 #
 # What it does depends on the checked-out release:
 #
@@ -31,9 +34,11 @@
 #     sync -> unjail if needed -> rebuild + restart the oracle.
 #
 #   Bare metal (--bare-metal): builds the checked-out code into a scratch GOBIN
-#   (NEVER overwrites the binary you are running) and stages it into
-#   $DAEMON_HOME/cosmovisor/upgrades/v<version>/bin. Never stops or restarts
-#   anything. Needs go + make; no Docker, curl or jq.
+#   (NEVER overwrites the binary you are running). Under cosmovisor it stages
+#   it into $DAEMON_HOME/cosmovisor/upgrades/v<version>/bin. If steemvmd runs
+#   directly (no cosmovisor), it saves it to $HOME/steemvmd-v<version>/ and
+#   prints the steps for swapping it in by hand at the upgrade height. Never
+#   stops or restarts anything. Needs go + make; no Docker, curl or jq.
 #
 # Overridable via env: COMPOSE, NODE_IPS, SELF_IP, P2P_PORT, RPC_PORT,
 # STEEMVM_HOME, CONTAINER, BIN, HOME_DIR, CHAIN_ID, KEYRING, GAS_PRICES,
@@ -91,7 +96,7 @@ for arg in "$@"; do
     --reset)      FORCE_RESET=1 ;;
     --docker)     MODE=docker ;;
     --bare-metal) MODE=bare-metal ;;
-    -h|--help)    sed -n '2,44p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,/^$/p' "$0"; exit 0 ;;
     -*)           die "unknown flag: $arg (see ./update.sh --help)" ;;
     *)            [ -z "$TARGET_REF" ] || die "only one branch-or-tag may be given"; TARGET_REF="$arg" ;;
   esac
@@ -99,6 +104,12 @@ done
 
 [ -d .git ] || die "not a git checkout — run this from the repository root."
 [ -f docker-compose.yml ] || die "run this from the repository root."
+
+# Node processes running directly on THIS host. Processes inside containers
+# are visible from the host too, so they are excluded by their cgroup.
+on_host() { [ -r "/proc/$1/cgroup" ] && ! grep -qiE 'docker|containerd|kubepods|libpod|lxc' "/proc/$1/cgroup"; }
+host_cosmovisor_pid() { local p; for p in $(pgrep -x cosmovisor 2>/dev/null); do on_host "$p" && { echo "$p"; return 0; }; done; return 1; }
+host_steemvmd_pid()   { local p; for p in $(pgrep -f 'steemvmd start' 2>/dev/null); do on_host "$p" && { echo "$p"; return 0; }; done; return 1; }
 
 # ── Docker or bare metal? — decided before anything changes ─────────────────
 # Deliberately conservative: staging the Docker image's binary into a
@@ -110,10 +121,12 @@ if [ "$MODE" = "auto" ]; then
     MODE=bare-metal
   elif docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
     MODE=docker   # a RUNNING node container — a stopped leftover proves nothing
+  elif host_cosmovisor_pid >/dev/null || host_steemvmd_pid >/dev/null; then
+    MODE=bare-metal   # the node binary runs directly on this host (docker is used for other things)
   elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
     die "the '$CONTAINER' container exists but isn't running, so this can't tell how the node runs. If it runs in Docker, re-run with --docker; if it runs steemvmd directly, use --bare-metal. Nothing was changed."
   else
-    die "can't tell how this node runs: docker is installed but there is no '$CONTAINER' container. Re-run with --docker or --bare-metal. Nothing was changed."
+    die "can't tell how this node runs: docker is installed, there is no '$CONTAINER' container, and no cosmovisor/steemvmd process is running on this host. Re-run with --docker or --bare-metal. Nothing was changed."
   fi
   log "Detected a $MODE node."
 fi
@@ -149,14 +162,48 @@ ok "At $(git rev-parse --short HEAD) ($(git describe --tags --always 2>/dev/null
 
 # ══ Bare metal: build + stage into cosmovisor, nothing else ════════════════════
 if [ "$BARE_METAL" = "1" ]; then
-  DAEMON_HOME="${DAEMON_HOME:-$HOME/.steemvm}"
-  CV="$DAEMON_HOME/cosmovisor"
   command -v go   >/dev/null 2>&1 || die "go not found on PATH."
   command -v make >/dev/null 2>&1 || die "make not found on PATH."
-  [ -e "$CV/current/bin/steemvmd" ] || die "$CV/current/bin/steemvmd not found — this node does not run under cosmovisor (or DAEMON_HOME is wrong). Set cosmovisor up first (Instructions/README.md, 'Run under cosmovisor'), or swap the binary by hand at the upgrade height (Instructions/UPGRADE_v0.0.5.md)."
 
-  RUNNING_VER="$("$CV/current/bin/steemvmd" version 2>/dev/null || echo unknown)"
-  log "cosmovisor currently runs $RUNNING_VER ($(readlink "$CV/current"))."
+  # Read how the RUNNING node actually runs instead of guessing from $HOME:
+  # running this as root on a node that runs as another user (e.g. ubuntu)
+  # would otherwise stage into a home cosmovisor never looks at.
+  DIRECT=0 SDPID=""
+  if [ -z "${DAEMON_HOME:-}" ]; then
+    if cvpid="$(host_cosmovisor_pid)"; then
+      DAEMON_HOME="$(tr '\0' '\n' < "/proc/$cvpid/environ" 2>/dev/null | sed -n 's/^DAEMON_HOME=//p' | head -1 || true)"
+      if [ -n "$DAEMON_HOME" ]; then
+        log "Node home (from the running cosmovisor, pid $cvpid): $DAEMON_HOME"
+      else
+        warn "cosmovisor is running (pid $cvpid) but its DAEMON_HOME can't be read (run as root, or set DAEMON_HOME) — assuming $HOME/.steemvm."
+      fi
+    fi
+  fi
+  DAEMON_HOME="${DAEMON_HOME:-$HOME/.steemvm}"
+  CV="$DAEMON_HOME/cosmovisor"
+
+  if [ ! -e "$CV/current/bin/steemvmd" ]; then
+    # No cosmovisor home. If steemvmd runs directly (and no cosmovisor does),
+    # it can't switch binaries by itself — prepare a manual swap instead.
+    if SDPID="$(host_steemvmd_pid)" && ! host_cosmovisor_pid >/dev/null; then
+      DIRECT=1
+    else
+      die "$CV/current/bin/steemvmd not found, and no steemvmd process is running on this host — DAEMON_HOME is probably wrong (set it to the node's --home). Nothing was changed."
+    fi
+  fi
+
+  if [ "$DIRECT" = "1" ]; then
+    LIVE_BIN="$(readlink -f "/proc/$SDPID/exe" 2>/dev/null || true)"
+    [ -n "$LIVE_BIN" ] || die "steemvmd runs (pid $SDPID) but its binary path can't be read — run this as root. Nothing was changed."
+    # The node's --home, from its own command line (either --home X or --home=X).
+    NODE_HOME="$(tr '\0' '\n' < "/proc/$SDPID/cmdline" | awk 'p=="--home"{print; exit} /^--home=/{sub(/^--home=/,""); print; exit} {p=$0}')"
+    NODE_HOME="${NODE_HOME:-$HOME/.steemvm}"
+    RUNNING_VER="$("$LIVE_BIN" version 2>/dev/null || echo unknown)"
+    warn "steemvmd runs directly (pid $SDPID: $LIVE_BIN, version $RUNNING_VER, home $NODE_HOME) — NOT under cosmovisor, so it can't switch binaries by itself."
+  else
+    RUNNING_VER="$("$CV/current/bin/steemvmd" version 2>/dev/null || echo unknown)"
+    log "cosmovisor currently runs $RUNNING_VER ($(readlink "$CV/current"))."
+  fi
 
   # `make install` always installs to $GOBIN — point it at a scratch dir so the
   # build can never overwrite the binary the node is running.
@@ -168,7 +215,30 @@ if [ "$BARE_METAL" = "1" ]; then
   [ -n "$NEW_VER" ] || die "the freshly built steemvmd reports no version."
 
   if [ "$NEW_VER" = "$RUNNING_VER" ]; then
-    ok "cosmovisor already runs $NEW_VER — nothing to stage."
+    ok "the node already runs $NEW_VER — nothing to do."
+    exit 0
+  fi
+
+  if [ "$DIRECT" = "1" ]; then
+    OUT_DIR="$HOME/steemvmd-v$NEW_VER"
+    mkdir -p "$OUT_DIR"
+    cp "$BUILD_DIR/steemvmd" "$OUT_DIR/steemvmd"
+    chmod +x "$OUT_DIR/steemvmd"
+    [ "$("$OUT_DIR/steemvmd" version)" = "$NEW_VER" ] || die "built binary does not report $NEW_VER."
+    ok "Built v$NEW_VER -> $OUT_DIR/steemvmd (your running $LIVE_BIN is untouched)."
+    log "Upgrade plan on chain:"
+    "$LIVE_BIN" query upgrade plan --home "$NODE_HOME" 2>&1 | sed 's/^/    /' || true
+    echo
+    warn "This node runs steemvmd directly, so YOU must switch the binary at the upgrade height."
+    echo "   When the node halts there (its log says: UPGRADE \"v$NEW_VER\" NEEDED at height: …):"
+    echo "     1. stop it the way you normally do (systemctl stop <service>, or kill $SDPID)"
+    echo "     2. cp $OUT_DIR/steemvmd $LIVE_BIN"
+    echo "     3. start it again exactly as before (same command, same --home $NODE_HOME)"
+    echo "   Every minute between the halt and the restart counts toward downtime jailing."
+    echo
+    echo "   Recommended instead: move this node under cosmovisor now (one restart today,"
+    echo "   none at the height), then re-run ./update.sh and it stages automatically."
+    echo "   See Instructions/README.md, 'Run under cosmovisor'."
     exit 0
   fi
 

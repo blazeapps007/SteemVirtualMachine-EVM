@@ -43,7 +43,9 @@ export STEEMVM_HOME
 CHAIN_ID="${CHAIN_ID:-steemvm}"
 KEYRING="${KEYRING:-test}"
 
-SEED_RPC="${SEED_RPC:-http://57.131.13.43:26657}"
+# svm-deployer: the node that serves public RPC. The other validators bind RPC
+# to 127.0.0.1 (docker-compose.yml), so they can't be a state-sync source.
+SEED_RPC="${SEED_RPC:-http://62.169.19.142:26657}"
 START_TIMEOUT="${START_TIMEOUT:-1800}"
 KEEP_ADDRBOOK=1
 USE_STATESYNC=1
@@ -75,7 +77,7 @@ done
 # ── state-sync / peer discovery helpers (same logic as new-validator.sh) ────
 MIN_STATESYNC_HEIGHT=1500
 
-EXTRA_PERSISTENT_PEERS="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:26656 9ce6a5ecd05e9bd8a7f455976b308094329d7937@167.235.9.31:26656"
+EXTRA_PERSISTENT_PEERS="b20931fcca2666bfe45ff0dcf1094aea7633b0be@57.131.13.43:26656 bd2ae613b8a32ffdf1b8a1184a3d7b520802eb8a@95.217.44.178:26656 9ce6a5ecd05e9bd8a7f455976b308094329d7937@167.235.9.31:26656"
 
 fetch_statesync_trust() {
   TRUST_HEIGHT="" TRUST_HASH=""

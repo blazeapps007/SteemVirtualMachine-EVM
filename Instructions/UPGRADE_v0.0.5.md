@@ -35,8 +35,11 @@ stages the v0.0.5 binary where cosmovisor expects it:
 
 - **Docker node:** it pulls the published image and stages its binary. It prints a `sha256:` line;
   it must match **`5915bf669c390d3f6e08c81961d8aec2818145e1a9155e26a88b080a507d334f`**.
-- **Bare-metal node (no Docker installed):** it builds v0.0.5 from source into a temporary folder,
-  so your running binary is never overwritten, and stages it. Your node must run under cosmovisor.
+- **Bare-metal node under cosmovisor:** it builds v0.0.5 from source into a temporary folder,
+  so your running binary is never overwritten, and stages it.
+- **Bare-metal node running `steemvmd` directly (no cosmovisor):** it builds v0.0.5 into
+  `~/steemvmd-v0.0.5/` and prints the three steps for swapping it in when your node halts at the
+  upgrade height. Your running binary is never touched.
 - If it says it **can't tell how your node runs**, re-run with `--docker` or `--bare-metal`.
 
 **Staged v0.0.5 before 29 September? Run the line again.** The image published on 24 September was

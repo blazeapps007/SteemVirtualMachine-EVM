@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 #
 # update_peers.sh — rebuild persistent_peers from a fixed list of known
-# validator IPs, by querying each one's RPC for its live node ID. Excludes
-# whichever of those IPs turns out to be this host itself.
+# validator IPs. Excludes whichever of those IPs turns out to be this host
+# itself. Each IP's node ID comes from, in order:
+#   1. that IP's own RPC (/status) — only if it serves RPC publicly, which
+#      most validators no longer do (docker-compose.yml binds it to 127.0.0.1);
+#   2. this node's own /net_info — the peers it is connected to right now;
+#   3. the entry config.toml already has for that IP. Node IDs survive resets
+#      (node_key.json is kept), so a known entry stays valid.
+# An IP found by none of them is left out.
 #
 # Standalone: patches config.toml, prints the result, and reminds you a
 # restart is needed to pick it up. Called from update.sh as one step of a
@@ -16,6 +22,8 @@
 #   SELF_IP     skip self-detection and use this IP as "self" instead
 #   P2P_PORT    p2p port appended to each peer entry (default: 26656)
 #   RPC_PORT    RPC port queried for each IP's node ID (default: 26657)
+#   LOCAL_RPC   this node's own RPC, for /net_info (default:
+#               http://127.0.0.1:$RPC_PORT)
 #   STEEMVM_HOME  node home to patch (default: $HOME/.steemvm, must match
 #                 docker-compose.yml's bind mount)
 
@@ -33,6 +41,7 @@ set -euo pipefail
 NODE_IPS="${NODE_IPS:-95.217.44.178 62.169.19.142 57.131.13.43 167.235.9.31}"
 P2P_PORT="${P2P_PORT:-26656}"
 RPC_PORT="${RPC_PORT:-26657}"
+LOCAL_RPC="${LOCAL_RPC:-http://127.0.0.1:${RPC_PORT}}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -73,6 +82,23 @@ fetch_node_id() {
   printf '%s' "$id"
 }
 
+LOCAL_NET_INFO="$(curl -fsS --max-time 5 "${LOCAL_RPC%/}/net_info" 2>/dev/null || true)"
+id_from_net_info() {
+  local id
+  [ -n "$LOCAL_NET_INFO" ] || return 1
+  id="$(printf '%s' "$LOCAL_NET_INFO" | jq -r --arg ip "$1" '[.result.peers[]? | select(.remote_ip == $ip) | .node_info.id][0] // empty' 2>/dev/null)"
+  [ -n "$id" ] || return 1
+  printf '%s' "$id"
+}
+
+EXISTING_PEERS="$(cat "$STEEMVM_HOME/config/config.toml" Instructions/config.toml 2>/dev/null | sed -n 's/^persistent_peers = "\(.*\)"/\1/p' | tr ',' '\n' | tr -d ' ' || true)"
+id_from_config() {
+  local id
+  id="$(printf '%s\n' "$EXISTING_PEERS" | awk -F@ -v ip="$1" '{ split($2, a, ":") } a[1] == ip { print $1; exit }')"
+  [ -n "$id" ] || return 1
+  printf '%s' "$id"
+}
+
 if detect_self_ip; then
   ok "This host's IP: $SELF_IP (excluded from its own persistent_peers)"
 else
@@ -88,14 +114,19 @@ for ip in $NODE_IPS; do
   fi
   if id="$(fetch_node_id "$ip")"; then
     ok "$ip -> $id"
-    entry="${id}@${ip}:${P2P_PORT}"
-    if [ -z "$PEER_LIST" ]; then PEER_LIST="$entry"; else PEER_LIST="${PEER_LIST},${entry}"; fi
+  elif id="$(id_from_net_info "$ip")"; then
+    ok "$ip -> $id (connected to this node now)"
+  elif id="$(id_from_config "$ip")"; then
+    ok "$ip -> $id (kept from config.toml — its RPC is private and it isn't connected right now)"
   else
-    warn "$ip -> unreachable or RPC error, skipping"
+    warn "$ip -> node ID unknown (RPC private, not connected, not in config.toml), skipping"
+    continue
   fi
+  entry="${id}@${ip}:${P2P_PORT}"
+  if [ -z "$PEER_LIST" ]; then PEER_LIST="$entry"; else PEER_LIST="${PEER_LIST},${entry}"; fi
 done
 
-[ -n "$PEER_LIST" ] || die "no reachable peers among: $NODE_IPS (all unreachable, or all matched as self)."
+[ -n "$PEER_LIST" ] || die "no peer node IDs found for: $NODE_IPS (all unknown, or all matched as self)."
 
 log "persistent_peers = \"$PEER_LIST\""
 
