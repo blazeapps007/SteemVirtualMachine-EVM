@@ -35,6 +35,8 @@ stages the v0.0.5 binary where cosmovisor expects it:
 
 - **Docker node:** it pulls the published image and stages its binary. It prints a `sha256:` line;
   it must match **`5915bf669c390d3f6e08c81961d8aec2818145e1a9155e26a88b080a507d334f`**.
+  It also moves your running oracle (go, python or js) to its latest published image. The oracle
+  restarts only if there's a newer image; the node itself is never restarted.
 - **Bare-metal node under cosmovisor:** it builds v0.0.5 from source into a temporary folder,
   so your running binary is never overwritten, and stages it.
 - **Bare-metal node running `steemvmd` directly (no cosmovisor):** it builds v0.0.5 into

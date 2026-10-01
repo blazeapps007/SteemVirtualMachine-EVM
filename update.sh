@@ -22,8 +22,9 @@
 #
 #   Docker, coordinated upgrade PENDING (the branch's docker-compose.yml has a
 #   `stage-vX.Y.Z` service): stages the new binary into cosmovisor's upgrade
-#   slot and exits. No reset, no restart, no downtime — cosmovisor switches to
-#   it by itself at the upgrade height. Safe to run any time before or after
+#   slot, moves the running oracle (if any) to its published image, and
+#   exits. No node reset, no node restart — cosmovisor switches to the new
+#   binary by itself at the upgrade height. Safe to run any time before or after
 #   the upgrade proposal passes. If the node already halted at the upgrade
 #   height for lack of the binary, it picks the staged one up on its next
 #   automatic restart.
@@ -31,7 +32,8 @@
 #   Docker, no upgrade pending: the full flow —
 #     stop node + oracle -> reset chain data (keys untouched) -> refresh
 #     persistent_peers -> state-sync from a live peer -> start -> wait for
-#     sync -> unjail if needed -> rebuild + restart the oracle.
+#     sync -> unjail if needed -> update + restart the oracle (published
+#     image; built from this checkout only if the pull fails).
 #
 #   Bare metal (--bare-metal): builds the checked-out code into a scratch GOBIN
 #   (NEVER overwrites the binary you are running). Under cosmovisor it stages
@@ -279,6 +281,33 @@ CONFIG_TOML="$STEEMVM_HOME/config/config.toml"
 KEY_FILE="$STEEMVM_HOME/config/priv_validator_key.json"
 [ -f "$KEY_FILE" ] || die "$KEY_FILE not found — this isn't an existing validator home. Use new-validator.sh for a first-time setup instead."
 
+# Which oracle runs here (read before anything is stopped).
+if [ -z "$ORACLE_PROFILE" ]; then
+  RUNNING="$(docker ps --format '{{.Names}}' 2>/dev/null || true)"
+  if printf '%s' "$RUNNING" | grep -qx 'steemvm-oracle-go'; then ORACLE_PROFILE=go
+  elif printf '%s' "$RUNNING" | grep -qx 'steemvm-oracle-python'; then ORACLE_PROFILE=python
+  elif printf '%s' "$RUNNING" | grep -qx 'steemvm-oracle-js'; then ORACLE_PROFILE=js
+  fi
+fi
+
+# Moves the oracle to its published image (the compose file's tag, normally
+# :latest). Only the oracle service is touched — --no-deps keeps compose
+# from starting, rebuilding or recreating the node — and compose recreates
+# the container only if the pulled image differs from the one it runs.
+update_oracle() {
+  local svc="oracle-$ORACLE_PROFILE"
+  log "Updating the $ORACLE_PROFILE oracle to its published image…"
+  if $COMPOSE --profile "$ORACLE_PROFILE" pull "$svc"; then
+    $COMPOSE --profile "$ORACLE_PROFILE" up -d --no-deps "$svc" \
+      || { warn "could not (re)start $svc — see the error above. Fix it, then: $COMPOSE --profile $ORACLE_PROFILE up -d --no-deps $svc"; return 0; }
+  else
+    warn "could not pull the $svc image — building it from this checkout instead."
+    $COMPOSE --profile "$ORACLE_PROFILE" up -d --no-deps --build "$svc" \
+      || { warn "could not build/start $svc — see the error above."; return 0; }
+  fi
+  ok "Oracle $svc runs $(docker inspect -f '{{.Config.Image}}' "steemvm-$svc" 2>/dev/null) (image $(docker inspect -f '{{.Image}}' "steemvm-$svc" 2>/dev/null | cut -c8-19))."
+}
+
 # ── 2. stage any pending coordinated upgrade into cosmovisor ────────────────
 # A release branch declares a pending upgrade by carrying a `stage-vX.Y.Z`
 # service (profile "stage") in docker-compose.yml.
@@ -311,8 +340,13 @@ if [ "${#PENDING[@]}" -gt 0 ]; then
   fi
 
   if [ "$FORCE_RESET" != "1" ]; then
+    if [ -n "$ORACLE_PROFILE" ]; then
+      update_oracle
+    else
+      warn "no oracle container running — none updated. Set ORACLE_PROFILE=go|python|js to update/start one."
+    fi
     echo
-    ok "Done — no reset, no restart. Leave the node running: at the upgrade height"
+    ok "Done — the node was not reset or restarted. Leave it running: at the upgrade height"
     echo "   cosmovisor switches to the staged binary by itself."
     echo "   Do NOT change the steemvm image or 'docker compose pull && up' before then."
     exit 0
@@ -369,16 +403,9 @@ fetch_statesync_trust_from_nodes() {
 fetch_statesync_trust_from_nodes || die "no state-sync trust anchor from any of: $NODE_IPS — refusing to wipe chain data that could not be resynced. Nothing was touched. (Needs at least one of them serving CometBFT RPC on :$RPC_PORT; set NODE_IPS/RPC_PORT to reachable peers.)"
 ok "State-sync trust anchor from $TRUST_SEED: height $TRUST_HEIGHT."
 
-# ── 4. detect a currently-running oracle profile (before we stop anything) ──
-if [ -z "$ORACLE_PROFILE" ]; then
-  RUNNING="$(docker ps --format '{{.Names}}' 2>/dev/null || true)"
-  if printf '%s' "$RUNNING" | grep -qx 'steemvm-oracle-go'; then ORACLE_PROFILE=go
-  elif printf '%s' "$RUNNING" | grep -qx 'steemvm-oracle-python'; then ORACLE_PROFILE=python
-  elif printf '%s' "$RUNNING" | grep -qx 'steemvm-oracle-js'; then ORACLE_PROFILE=js
-  fi
-fi
+# ── 4. the oracle profile (detected above, before anything was stopped) ─────
 if [ -n "$ORACLE_PROFILE" ]; then
-  ok "Oracle profile currently running: $ORACLE_PROFILE (will rebuild + restart it)."
+  ok "Oracle profile currently running: $ORACLE_PROFILE (will update + restart it)."
 else
   warn "no oracle container currently running — none will be started. Set ORACLE_PROFILE=go|python|js to force one."
 fi
@@ -478,11 +505,12 @@ else
   warn "could not auto-detect your validator's keyring key (found none, or more than one) — set VALIDATOR_KEY=<name> to enable the automatic unjail check. Skipping."
 fi
 
-# ── 11. rebuild + restart the oracle, if one was running ────────────────────
+# ── 11. update + restart the oracle, if one was running ─────────────────────
+# NOT `--profile X up -d --build`: that also rebuilds the NODE image from
+# this checkout's source and recreates the node with it — during a pending
+# upgrade, that's the new binary running before the height.
 if [ -n "$ORACLE_PROFILE" ]; then
-  log "Rebuilding and restarting the $ORACLE_PROFILE oracle (picks up any oracle code changes)…"
-  $COMPOSE --profile "$ORACLE_PROFILE" up -d --build
-  ok "Oracle restarted."
+  update_oracle
 fi
 
 # ── 12. verification checklist ────────────────────────────────────────────────
