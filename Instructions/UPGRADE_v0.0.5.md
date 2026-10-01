@@ -97,9 +97,30 @@ same `--home`.
 
 ## If you missed staging
 
-Your node halts at the upgrade height with `UPGRADE "v0.0.5" NEEDED at height: …`. Nothing is
-lost: stage the binary as above and restart. Every block you're down counts toward downtime
-jailing, though, so stage ahead of time.
+Your node halts at the upgrade height with `UPGRADE "v0.0.5" NEEDED at height: …` and keeps
+restarting on the old binary. Nothing is lost. **Run the same one line as above.**
+`update.sh` notices that the node already halted at the upgrade height. It stages v0.0.5,
+switches cosmovisor to it and restarts the node once. Then unjail if you were jailed for the
+downtime.
+
+Staging by hand is **not** enough at this point. cosmovisor only switches binaries while the old
+binary is still running, and a halted node's old binary exits as soon as it starts. So a plain
+restart stays stuck on the old binary. To recover by hand on Docker, do what `update.sh` does:
+
+```sh
+docker compose --profile stage run --rm stage-v0.0.5            # stage it
+H="$HOME/.steemvm"                                                # your node home
+cat "$H/data/upgrade-info.json"                                   # must name v0.0.5
+sudo cp "$H/data/upgrade-info.json" "$H/cosmovisor/upgrades/v0.0.5/"
+sudo ln -sfn upgrades/v0.0.5 "$H/cosmovisor/current"
+docker restart steemvm-node
+```
+
+Bare metal under cosmovisor: the same `cp` + `ln` with your `$DAEMON_HOME`, then restart the
+service. Bare metal without cosmovisor: stop the node, copy the new binary over the old one,
+and start it again.
+
+Every block you're down counts toward downtime jailing, so stage ahead of time.
 
 ## Checks after the upgrade
 

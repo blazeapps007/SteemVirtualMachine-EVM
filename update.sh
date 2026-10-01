@@ -25,9 +25,10 @@
 #   slot, moves the running oracle (if any) to its published image, and
 #   exits. No node reset, no node restart — cosmovisor switches to the new
 #   binary by itself at the upgrade height. Safe to run any time before or after
-#   the upgrade proposal passes. If the node already halted at the upgrade
-#   height for lack of the binary, it picks the staged one up on its next
-#   automatic restart.
+#   the upgrade proposal passes. Run AFTER the node already halted at the
+#   upgrade height for lack of the binary, it also points cosmovisor at the
+#   staged binary and restarts the node once — cosmovisor can't switch by
+#   itself then (see below).
 #
 #   Docker, no upgrade pending: the full flow —
 #     stop node + oracle -> reset chain data (keys untouched) -> refresh
@@ -190,7 +191,7 @@ if [ "$BARE_METAL" = "1" ]; then
     if SDPID="$(host_steemvmd_pid)" && ! host_cosmovisor_pid >/dev/null; then
       DIRECT=1
     else
-      die "$CV/current/bin/steemvmd not found, and no steemvmd process is running on this host — DAEMON_HOME is probably wrong (set it to the node's --home). Nothing was changed."
+      die "$CV/current/bin/steemvmd not found, and no steemvmd process is running on this host — DAEMON_HOME is probably wrong (set it to the node's --home). If your node runs steemvmd directly and has halted at the upgrade height, follow Instructions/UPGRADE_v0.0.5.md, 'Bare metal without cosmovisor'. Nothing was changed."
     fi
   fi
 
@@ -250,6 +251,18 @@ if [ "$BARE_METAL" = "1" ]; then
   chmod +x "$DEST/steemvmd"
   [ "$("$DEST/steemvmd" version)" = "$NEW_VER" ] || die "staged binary does not report $NEW_VER — do not rely on this stage."
   ok "Staged $NEW_VER -> $DEST/steemvmd"
+
+  # Already halted at the upgrade height (see the Docker section for why
+  # cosmovisor can't switch by itself then)? Do what it would have done.
+  if grep -q "\"name\": *\"v$NEW_VER\"" "$DAEMON_HOME/data/upgrade-info.json" 2>/dev/null \
+     && [ "$(readlink -f "$CV/current")" != "$(readlink -f "$CV/upgrades/v$NEW_VER")" ]; then
+    cp "$DAEMON_HOME/data/upgrade-info.json" "$CV/upgrades/v$NEW_VER/upgrade-info.json"
+    ln -sfn "upgrades/v$NEW_VER" "$CV/current"
+    warn "This node had already halted at the v$NEW_VER upgrade height — pointed cosmovisor at v$NEW_VER."
+    echo "   It starts v$NEW_VER on its next restart. If your service doesn't restart by itself,"
+    echo "   restart it now (e.g. systemctl restart <service>), then unjail if it was jailed."
+    exit 0
+  fi
 
   log "Upgrade plan on chain:"
   "$CV/current/bin/steemvmd" query upgrade plan --home "$DAEMON_HOME" 2>&1 | sed 's/^/    /' || true
@@ -331,7 +344,42 @@ if [ "${#PENDING[@]}" -gt 0 ]; then
   done
   ok "Staged: ${PENDING[*]#stage-}"
 
-  if docker exec "$CONTAINER" true 2>/dev/null; then
+  # Already halted at the upgrade height? x/upgrade writes data/upgrade-info.json
+  # naming the plan only once the chain reaches its height. If the binary
+  # wasn't staged by then, staging it now is NOT enough: cosmovisor switches
+  # only while the old binary still answers `status`, and a halted old binary
+  # dies during startup, so the node stays in a restart loop on the old one
+  # (rehearsed on a devnet, with and without `docker restart`). Do what
+  # cosmovisor would have done — point `current` at the staged upgrade, with
+  # its upgrade-info.json — and restart the node once. Exit codes: 0 switched,
+  # 10 height not reached yet (the normal case), 11 already switched.
+  SWITCHED=0 APPLIED=0
+  for svc in "${PENDING[@]}"; do
+    name="${svc#stage-}" rc=0
+    $COMPOSE --profile stage run --rm --no-deps --entrypoint sh "$svc" -c '
+      H=/root/.steemvm N="$1"; CV="$H/cosmovisor"
+      grep -q "\"name\": *\"$N\"" "$H/data/upgrade-info.json" 2>/dev/null || exit 10
+      [ "$(readlink -f "$CV/current")" = "$(readlink -f "$CV/upgrades/$N")" ] && exit 11
+      [ -x "$CV/upgrades/$N/bin/steemvmd" ] || exit 12
+      cp "$H/data/upgrade-info.json" "$CV/upgrades/$N/upgrade-info.json"
+      ln -sfn "upgrades/$N" "$CV/current"' sh "$name" >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+      0)  SWITCHED=1
+          warn "this node had already halted at the $name upgrade height — pointed cosmovisor at $name."
+          if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+            docker restart "$CONTAINER" >/dev/null && ok "Restarted $CONTAINER on $name. It may be jailed for the downtime: unjail once it has caught up (Instructions/README.md, Troubleshooting)."
+          else
+            warn "no '$CONTAINER' container to restart — start the node: $COMPOSE up -d steemvm"
+          fi ;;
+      11) APPLIED=1 ;;
+      10) ;;
+      *)  die "could not check whether the node already halted at the $name height (exit $rc). $name IS staged. If the node logs say UPGRADE \"$name\" NEEDED, see Instructions/UPGRADE_${name}.md, 'If you missed staging'." ;;
+    esac
+  done
+
+  if [ "$SWITCHED" = "1" ]; then
+    :   # just restarted — it isn't answering queries yet
+  elif docker exec "$CONTAINER" true 2>/dev/null; then
     log "cosmovisor currently runs: $(docker exec "$CONTAINER" readlink /root/.steemvm/cosmovisor/current 2>/dev/null || echo '?')"
     log "Upgrade plan on chain:"
     node query upgrade plan --home "$HOME_DIR" 2>&1 | sed 's/^/    /' || true
@@ -339,16 +387,24 @@ if [ "${#PENDING[@]}" -gt 0 ]; then
     warn "node container '$CONTAINER' is not running — can't show the on-chain plan."
   fi
 
-  if [ "$FORCE_RESET" != "1" ]; then
+  if [ "$FORCE_RESET" != "1" ] || [ "$SWITCHED" = "1" ]; then
     if [ -n "$ORACLE_PROFILE" ]; then
       update_oracle
     else
       warn "no oracle container running — none updated. Set ORACLE_PROFILE=go|python|js to update/start one."
     fi
     echo
-    ok "Done — the node was not reset or restarted. Leave it running: at the upgrade height"
-    echo "   cosmovisor switches to the staged binary by itself."
-    echo "   Do NOT change the steemvm image or 'docker compose pull && up' before then."
+    if [ "$SWITCHED" = "1" ]; then
+      ok "Done — the node had halted at the upgrade height and now restarts on the staged binary."
+      echo "   Watch it catch up: $COMPOSE logs -f steemvm   (then unjail if it was jailed)."
+      if [ "$FORCE_RESET" = "1" ]; then warn "--reset was skipped: the node was just switched. Re-run with --reset later if you still need it."; fi
+    elif [ "$APPLIED" = "1" ]; then
+      ok "Done — cosmovisor already runs the upgraded binary (the upgrade has applied). Nothing else to do."
+    else
+      ok "Done — the node was not reset or restarted. Leave it running: at the upgrade height"
+      echo "   cosmovisor switches to the staged binary by itself."
+      echo "   Do NOT change the steemvm image or 'docker compose pull && up' before then."
+    fi
     exit 0
   fi
 

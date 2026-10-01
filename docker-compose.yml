@@ -107,9 +107,17 @@ services:
           echo "refusing to stage: image reports version '$$ver', expected 0.0.5" >&2
           exit 1
         fi
-        mkdir -p /root/.steemvm/cosmovisor/upgrades/v0.0.5/bin
-        cp /root/go/bin/steemvmd /root/.steemvm/cosmovisor/upgrades/v0.0.5/bin/steemvmd
-        echo "staged: $$(/root/.steemvm/cosmovisor/upgrades/v0.0.5/bin/steemvmd version) -> cosmovisor/upgrades/v0.0.5/bin/steemvmd"
+        d=/root/.steemvm/cosmovisor/upgrades/v0.0.5/bin
+        mkdir -p "$$d"
+        if [ -f "$$d/steemvmd" ] && [ "$$(sha256sum < "$$d/steemvmd")" = "$$(sha256sum < /root/go/bin/steemvmd)" ]; then
+          echo "already staged (identical binary)"
+        else
+          # Copy, then rename over: once cosmovisor RUNS this binary (after the
+          # upgrade height), a plain cp onto it fails with "Text file busy".
+          cp /root/go/bin/steemvmd "$$d/.steemvmd.new"
+          mv -f "$$d/.steemvmd.new" "$$d/steemvmd"
+        fi
+        echo "staged: $$("$$d/steemvmd" version) -> cosmovisor/upgrades/v0.0.5/bin/steemvmd"
         echo "sha256: $$(sha256sum /root/.steemvm/cosmovisor/upgrades/v0.0.5/bin/steemvmd | cut -d' ' -f1)  (compare with the value in the upgrade announcement)"
     volumes:
       - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
