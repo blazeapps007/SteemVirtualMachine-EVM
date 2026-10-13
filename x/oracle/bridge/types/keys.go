@@ -53,18 +53,44 @@ var (
 	DepositByTxidKey = collections.NewPrefix("deposit/by_txid/")
 	// DepositConfirmedByKey indexes (txid, opIndex, validator) confirmations already recorded.
 	DepositConfirmedByKey = collections.NewPrefix("deposit/confirmed_by/")
+	// DepositFactsVoteKey records (dedupKey, factsHash, validator) — which
+	// validators attested each distinct observed fact-set for a deposit
+	// (dedupKey encodes txid + op-index). Deposit attestations are tallied PER
+	// fact-set: the deposit resolves to whichever fact-set's live bonded power
+	// reaches the threshold, so a minority reporting wrong facts cannot block
+	// or redirect the honest majority's deposit. One vote per validator per
+	// (txid, op-index) — enforced by DepositConfirmedBy — so two fact-sets can
+	// never both reach the threshold.
+	DepositFactsVoteKey = collections.NewPrefix("deposit/facts_vote/")
 	// DepositByStatusKey indexes (status, depositID) for efficient status-filtered queries.
 	DepositByStatusKey = collections.NewPrefix("deposit/by_status/")
 	// WithdrawalByStatusKey indexes (status, withdrawalID) for efficient status-filtered queries.
 	WithdrawalByStatusKey = collections.NewPrefix("withdrawal/by_status/")
 	// WithdrawalConfirmedByKey records (withdrawalID, validator) payout attestations
-	// already recorded, so a duplicate-confirmation check is O(1).
+	// already recorded, so a duplicate-confirmation check is O(1). A validator
+	// may record at most one payout attestation per withdrawal (enforced here),
+	// so it can vote for at most one payout candidate — which is what keeps two
+	// different payout candidates from ever both reaching the 2/3 threshold.
 	WithdrawalConfirmedByKey = collections.NewPrefix("withdrawal/confirmed_by/")
+	// WithdrawalPayoutVoteKey records (withdrawalID, payoutKey, validator) — the
+	// validators that attested each distinct observed payout (payoutKey encodes
+	// the Steem txid + op-index). Payout attestations are tallied PER candidate:
+	// the withdrawal flips to PROCESSED when one candidate's live bonded power
+	// reaches the threshold, so a minority validator reporting a bogus payout
+	// txid cannot keep the honest majority's real payout from being recognized.
+	WithdrawalPayoutVoteKey = collections.NewPrefix("withdrawal/payout_vote/")
 	// TotalsKey holds the cumulative bridge mint/burn statistics.
 	TotalsKey = collections.NewPrefix("stats/totals")
 	// FreeDepositCounterKey holds the per-validator, per-block free-tx counter
 	// used by the ante fee-exemption decorator's DoS cap.
 	FreeDepositCounterKey = collections.NewPrefix("ante/free_deposit_counter/")
+	// BridgeDutyQueueKey holds (kind, id) entries for bridge events that
+	// finalized during the current block. The module EndBlocker drains it and
+	// reports each event's full attester set to the unified slashing engine
+	// once, then clears it — so a validator whose attestation landed in the
+	// same block but after the threshold was crossed is still credited, not
+	// marked a miss. kind: 0 = deposit, 1 = withdrawal.
+	BridgeDutyQueueKey = collections.NewPrefix("duty/queue/")
 )
 
 var (
@@ -77,6 +103,10 @@ var (
 	NameRegistrationByTxidKey = collections.NewPrefix("name/registration/by_txid/")
 	// NameRegistrationConfirmedByKey indexes (txid, opIndex, validator) attestations already recorded.
 	NameRegistrationConfirmedByKey = collections.NewPrefix("name/registration/confirmed_by/")
+	// NameRegistrationFactsVoteKey records (dedupKey, factsHash, validator) for
+	// the per-fact-set name-registration tally, exactly as DepositFactsVoteKey
+	// does for deposits.
+	NameRegistrationFactsVoteKey = collections.NewPrefix("name/registration/facts_vote/")
 	// NameRegistrationByStatusKey indexes (status, registrationID) for status-filtered queries and expiry.
 	NameRegistrationByStatusKey = collections.NewPrefix("name/registration/by_status/")
 	// NameRegistrationByAccountKey indexes (steemAccount, registrationID) — a

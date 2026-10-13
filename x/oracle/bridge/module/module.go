@@ -142,6 +142,12 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 // EndBlock contains the logic that is automatically triggered at the end of each block.
 // The end block implementation is optional.
 func (am AppModule) EndBlock(ctx context.Context) error {
+	// Report this block's finalized bridge events (full same-block attester
+	// sets) to the unified slashing engine, before the parent oracle module's
+	// EndBlocker — which is ordered last — evaluates the slashing window.
+	if err := am.keeper.FlushBridgeDuty(ctx); err != nil {
+		return err
+	}
 	if err := am.keeper.ExpireDeposits(ctx); err != nil {
 		return err
 	}

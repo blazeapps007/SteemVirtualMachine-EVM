@@ -103,19 +103,17 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 		}
 
 		// The deposit may already be resolved (MINTED or UNCLAIMABLE). We do NOT
-		// stop here: attestations that arrive after the 2/3 threshold was crossed
-		// are still recorded below, so ValidatorConfirmations captures the full set
-		// of validators that attested — not just the quorum that crossed first
-		// (bridge-participation data). Re-resolution is prevented by the PENDING
-		// status guard further down.
+		// stop here: attestations that arrive after the threshold was crossed
+		// are still recorded below, so ValidatorConfirmations captures the full
+		// set of validators that attested. Re-resolution is prevented by the
+		// PENDING status guard further down.
 
 		if !matchesPending(deposit, msg) {
-			// The submission is rejected but the stored deposit is left
-			// completely untouched. This is deliberately a benign (non-error)
-			// message outcome, not a failed tx, so the mismatch event below
-			// is actually committed and observable on-chain for auditing —
-			// an erroring message would revert its own events along with
-			// everything else in the tx.
+			// This attestation reports different facts than the record's
+			// current provisional ones (the first attester's). It is NOT
+			// rejected: it votes for its own fact-set candidate below and may
+			// yet win the tally. The event is purely informational for
+			// auditing which facts differ.
 			sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
 				types.EventTypeDepositConfirmationMismatch,
 				sdk.NewAttribute(types.AttributeKeyDepositID, strconv.FormatUint(depositID, 10)),
@@ -132,11 +130,19 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 				sdk.NewAttribute(types.AttributeKeyStoredMemo, deposit.Memo),
 				sdk.NewAttribute(types.AttributeKeySubmittedMemo, msg.Memo),
 			))
-			return &types.MsgAttestDepositResponse{}, nil
 		}
 	}
 
 	if err := k.DepositConfirmedBy.Set(ctx, confirmedKey); err != nil {
+		return nil, err
+	}
+	// Record this validator's vote for the exact fact-set it observed, and
+	// tally per fact-set: the deposit resolves to whichever fact-set reaches
+	// the threshold, so an attester reporting wrong facts (or front-running
+	// with them) cannot block or redirect the honest majority.
+	factsHash := types.DepositFactsHash(msg.SteemBlock, msg.SteemTimestamp, msg.SteemSender, msg.GatewayAccount, msg.AmountMillisteem, msg.Memo, msg.Asset)
+	dedup := dedupKeyString(msg.Txid, msg.OpIndex)
+	if err := k.DepositFactsVote.Set(ctx, collections.Join3(dedup, factsHash, validatorAddr)); err != nil {
 		return nil, err
 	}
 
@@ -146,9 +152,8 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 		Timestamp:        sdkCtx.BlockTime().Unix(),
 	})
 
-	// Voting power is recomputed live from current bonded stake on every
-	// confirmation, never snapshotted — see confirmedPowerRatio.
-	ratio, err := k.confirmedPowerRatio(ctx, deposit.ValidatorConfirmations)
+	// Live bonded power behind THIS attestation's fact-set.
+	ratio, err := k.factsCandidateRatio(ctx, k.DepositFactsVote, dedup, factsHash)
 	if err != nil {
 		return nil, err
 	}
@@ -160,20 +165,26 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 		sdk.NewAttribute(types.AttributeKeyConfirmedRatio, ratio.String()),
 	))
 
-	// Resolve exactly once, the first time the threshold is crossed. Later
-	// attestations against an already-resolved deposit are recorded (above) but
-	// never re-mint.
+	// Resolve exactly once, the first time ONE fact-set crosses the threshold.
+	// The winning fact-set is this message's facts — adopt them as the record's
+	// canonical facts (overwriting any provisional facts a front-running
+	// attester wrote) before minting.
 	if deposit.Status == types.DepositStatus_DEPOSIT_STATUS_PENDING && ratio.GTE(params.BridgeConfirmationThreshold) {
+		deposit.SteemBlock = msg.SteemBlock
+		deposit.SteemTimestamp = msg.SteemTimestamp
+		deposit.SteemSender = msg.SteemSender
+		deposit.GatewayAccount = msg.GatewayAccount
+		deposit.AmountMillisteem = msg.AmountMillisteem
+		deposit.Memo = msg.Memo
+		deposit.Asset = msg.Asset
 		if err := k.resolveDeposit(ctx, &deposit, params); err != nil {
 			return nil, err
 		}
-		// A finalized deposit is a bridge-duty opportunity: report the attesters
-		// that carried it to the unified slashing engine.
-		attesterStrs := make([]string, 0, len(deposit.ValidatorConfirmations))
-		for _, c := range deposit.ValidatorConfirmations {
-			attesterStrs = append(attesterStrs, c.ValidatorAddress)
-		}
-		if err := k.reportBridgeEvent(ctx, attesterStrs); err != nil {
+		// A finalized deposit is a bridge-duty opportunity. Queue it for the
+		// EndBlocker to report, so every validator that attested this same
+		// block — including ones whose attestation lands after this crossing
+		// one — is credited, not just the set present at this instant.
+		if err := k.enqueueBridgeDuty(ctx, bridgeDutyKindDeposit, deposit.Id); err != nil {
 			return nil, err
 		}
 	}

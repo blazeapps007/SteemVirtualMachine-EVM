@@ -10,6 +10,18 @@ import (
 	"steemvm/x/oracle/bridge/types"
 )
 
+// MaxExpirySweepPerBlock bounds how many of the oldest still-open records each
+// EndBlock expiry/refund sweep examines. The status indexes are ordered by id,
+// and id order matches creation order, which matches expiry order (every
+// record uses the same timeout window). So the oldest ids expire first: once
+// the sweep has looked at this many of the oldest open records it can stop,
+// and anything it did not reach is newer and not yet due. This caps the
+// per-block work regardless of how many open records exist (a bonded
+// validator can create pending deposits/registrations for free, and anyone
+// can create withdrawals), while still clearing a large backlog within a few
+// blocks. 1000 per block is far above any honest rate.
+const MaxExpirySweepPerBlock = 1000
+
 // ExpireDeposits sweeps pending deposits whose confirmation window
 // (Params.DepositTimeoutBlocks) has elapsed without reaching threshold. Per
 // the module's expiry design, this removes the (txid, opIndex) dedup index
@@ -26,8 +38,10 @@ func (k Keeper) ExpireDeposits(ctx context.Context) error {
 	}
 
 	// Collect candidates first: mutating the PENDING status index bucket
-	// while walking it would be unsafe.
+	// while walking it would be unsafe. Visit at most MaxExpirySweepPerBlock
+	// of the oldest pending deposits and stop — see that constant.
 	var expiredIDs []uint64
+	scanned := 0
 	err = k.DepositByStatus.Walk(
 		ctx,
 		collections.NewPrefixedPairRange[int32, uint64](int32(types.DepositStatus_DEPOSIT_STATUS_PENDING)),
@@ -39,7 +53,8 @@ func (k Keeper) ExpireDeposits(ctx context.Context) error {
 			if deposit.CreatedAt+params.DepositTimeoutBlocks < height {
 				expiredIDs = append(expiredIDs, key.K2())
 			}
-			return false, nil
+			scanned++
+			return scanned >= MaxExpirySweepPerBlock, nil
 		},
 	)
 	if err != nil {
@@ -63,6 +78,11 @@ func (k Keeper) ExpireDeposits(ctx context.Context) error {
 			if err := k.DepositConfirmedBy.Remove(ctx, collections.Join3(deposit.Txid, deposit.OpIndex, []byte(valAddr))); err != nil {
 				return err
 			}
+		}
+		// Drop every per-fact-set vote recorded under this deposit's dedup key,
+		// so the key is fully clean for a fresh resubmission.
+		if err := k.clearDepositFactsVotes(ctx, deposit.Txid, deposit.OpIndex); err != nil {
+			return err
 		}
 
 		if err := k.setDepositStatus(ctx, &deposit, types.DepositStatus_DEPOSIT_STATUS_EXPIRED); err != nil {
@@ -110,8 +130,10 @@ func (k Keeper) RefundExpiredWithdrawals(ctx context.Context) error {
 	}
 
 	// Collect candidates first: mutating the REQUESTED status index bucket
-	// while walking it would be unsafe.
+	// while walking it would be unsafe. Visit at most MaxExpirySweepPerBlock
+	// of the oldest requested withdrawals and stop — see that constant.
 	var expiredIDs []uint64
+	scanned := 0
 	err = k.WithdrawalByStatus.Walk(
 		ctx,
 		collections.NewPrefixedPairRange[int32, uint64](int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED)),
@@ -123,7 +145,8 @@ func (k Keeper) RefundExpiredWithdrawals(ctx context.Context) error {
 			if withdrawal.CreatedAt+params.WithdrawalTimeoutBlocks < height {
 				expiredIDs = append(expiredIDs, key.K2())
 			}
-			return false, nil
+			scanned++
+			return scanned >= MaxExpirySweepPerBlock, nil
 		},
 	)
 	if err != nil {
@@ -210,12 +233,20 @@ func (k Keeper) ExpireNameRegistrations(ctx context.Context) error {
 	}
 
 	// Collect candidates first: mutating the status index buckets while
-	// walking them would be unsafe.
+	// walking them would be unsafe. Visit at most MaxExpirySweepPerBlock
+	// entries total across both buckets and stop — see that constant. (For
+	// AWAITING, id order is not exactly expiry order, so an early stop may
+	// defer an expiry to a later block; that is harmless — expiry only frees
+	// the txid for resubmission and marks the record EXPIRED.)
 	var expiredIDs []uint64
+	scanned := 0
 	for _, status := range []types.NameRegistrationStatus{
 		types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_PENDING,
 		types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_AWAITING_CONFIRMATION,
 	} {
+		if scanned >= MaxExpirySweepPerBlock {
+			break
+		}
 		err = k.NameRegistrationByStatus.Walk(
 			ctx,
 			collections.NewPrefixedPairRange[int32, uint64](int32(status)),
@@ -231,7 +262,8 @@ func (k Keeper) ExpireNameRegistrations(ctx context.Context) error {
 				if phaseStart+params.NamePendingTimeoutBlocks < height {
 					expiredIDs = append(expiredIDs, key.K2())
 				}
-				return false, nil
+				scanned++
+				return scanned >= MaxExpirySweepPerBlock, nil
 			},
 		)
 		if err != nil {
@@ -256,6 +288,9 @@ func (k Keeper) ExpireNameRegistrations(ctx context.Context) error {
 			if err := k.NameRegistrationConfirmedBy.Remove(ctx, collections.Join3(registration.Txid, registration.OpIndex, []byte(valAddr))); err != nil {
 				return err
 			}
+		}
+		if err := k.clearNameFactsVotes(ctx, registration.Txid, registration.OpIndex); err != nil {
+			return err
 		}
 		if registration.Status == types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_AWAITING_CONFIRMATION {
 			destAddr, err := k.addressCodec.StringToBytes(registration.DerivedDestination)

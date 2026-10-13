@@ -54,12 +54,15 @@ func TestValidateDepositAcceptance_Boundaries(t *testing.T) {
 		require.ErrorIs(t, f.keeper.ValidateDepositAcceptance(f.ctx, msg), types.ErrDuplicateConfirmation)
 	})
 
-	t.Run("mismatched resubmission from a different validator", func(t *testing.T) {
+	t.Run("differing-facts submission from a different validator is accepted (its own candidate)", func(t *testing.T) {
+		// Deposits are tallied per fact-set, so a submission whose facts differ
+		// from the record's provisional ones is a valid vote for a different
+		// candidate — not a rejection — and stays fee-exempt.
 		v2 := newTestValidator(t, 2)
 		f.stakingKeeper.setValidator(v2.ValAddr, 100, true)
-		mismatched := baseDepositMsg(v2, msg.Txid, msg.OpIndex)
-		mismatched.AmountMillisteem = msg.AmountMillisteem + 1
-		require.ErrorIs(t, f.keeper.ValidateDepositAcceptance(f.ctx, mismatched), types.ErrDepositMismatch)
+		differing := baseDepositMsg(v2, msg.Txid, msg.OpIndex)
+		differing.AmountMillisteem = msg.AmountMillisteem + 1
+		require.NoError(t, f.keeper.ValidateDepositAcceptance(f.ctx, differing))
 	})
 
 	t.Run("matching confirmation from a different validator is accepted", func(t *testing.T) {

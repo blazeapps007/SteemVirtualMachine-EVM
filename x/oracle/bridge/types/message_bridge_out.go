@@ -13,5 +13,8 @@ func (msg *MsgBridgeOut) ValidateBasic() error {
 	if !msg.AmountAsteem.Mod(MillisteemToAsteemFactor).IsZero() {
 		return ErrInvalidAmount.Wrap("amount must be a whole multiple of 10^15 asteem (one millisteem)")
 	}
+	if err := ValidateMemo(msg.Memo); err != nil {
+		return err
+	}
 	return nil
 }

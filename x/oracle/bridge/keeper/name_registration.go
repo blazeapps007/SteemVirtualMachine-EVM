@@ -100,10 +100,9 @@ func (k Keeper) ValidateNameRegistrationAcceptance(ctx context.Context, msg *typ
 		return types.ErrRegistrationAlreadyResolved
 	}
 
-	if !matchesPendingRegistration(existing, msg) {
-		return types.ErrRegistrationMismatch
-	}
-
+	// A fact-set differing from the record's provisional facts is accepted:
+	// name registrations are tallied per fact-set, so this is a valid vote for
+	// a different candidate (and stays fee-exempt), not a rejection.
 	return nil
 }
 

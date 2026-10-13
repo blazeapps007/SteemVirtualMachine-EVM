@@ -28,12 +28,17 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		if err := k.DepositByTxid.Set(ctx, collections.Join(elem.Txid, elem.OpIndex), elem.Id); err != nil {
 			return err
 		}
+		depositFacts := types.DepositFactsHash(elem.SteemBlock, elem.SteemTimestamp, elem.SteemSender, elem.GatewayAccount, elem.AmountMillisteem, elem.Memo, elem.Asset)
+		depositDedup := dedupKeyString(elem.Txid, elem.OpIndex)
 		for _, confirmation := range elem.ValidatorConfirmations {
 			validatorAddr, err := sdk.ValAddressFromBech32(confirmation.ValidatorAddress)
 			if err != nil {
 				return err
 			}
 			if err := k.DepositConfirmedBy.Set(ctx, collections.Join3(elem.Txid, elem.OpIndex, []byte(validatorAddr))); err != nil {
+				return err
+			}
+			if err := k.DepositFactsVote.Set(ctx, collections.Join3(depositDedup, depositFacts, []byte(validatorAddr))); err != nil {
 				return err
 			}
 		}
@@ -48,6 +53,27 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		}
 		if err := k.WithdrawalByStatus.Set(ctx, collections.Join(int32(elem.Status), elem.Id)); err != nil {
 			return err
+		}
+		// Restore the payout-attestation indexes from the recorded
+		// confirmations so a genesis round-trip preserves who attested and the
+		// per-candidate tally. The canonical payout candidate is the one
+		// recorded on the withdrawal (set only once a candidate crossed the
+		// threshold, so every recorded confirmation voted for it).
+		if elem.SteemPayoutTxid == "" {
+			continue
+		}
+		candidate := payoutCandidateKey(elem.SteemPayoutTxid, elem.PayoutOpIndex)
+		for _, confirmation := range elem.ValidatorConfirmations {
+			validatorAddr, err := sdk.ValAddressFromBech32(confirmation.ValidatorAddress)
+			if err != nil {
+				return err
+			}
+			if err := k.WithdrawalConfirmedBy.Set(ctx, collections.Join(elem.Id, []byte(validatorAddr))); err != nil {
+				return err
+			}
+			if err := k.WithdrawalPayoutVote.Set(ctx, collections.Join3(elem.Id, candidate, []byte(validatorAddr))); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -86,12 +112,17 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		if err := k.NameRegistrationByTxid.Set(ctx, collections.Join(elem.Txid, elem.OpIndex), elem.Id); err != nil {
 			return err
 		}
+		nameFacts := types.NameFactsHash(elem.SteemBlock, elem.SteemTimestamp, elem.SteemAccount, elem.GatewayAccount, elem.AmountMillisteem, elem.Memo)
+		nameDedup := dedupKeyString(elem.Txid, elem.OpIndex)
 		for _, confirmation := range elem.ValidatorConfirmations {
 			validatorAddr, err := sdk.ValAddressFromBech32(confirmation.ValidatorAddress)
 			if err != nil {
 				return err
 			}
 			if err := k.NameRegistrationConfirmedBy.Set(ctx, collections.Join3(elem.Txid, elem.OpIndex, []byte(validatorAddr))); err != nil {
+				return err
+			}
+			if err := k.NameRegistrationFactsVote.Set(ctx, collections.Join3(nameDedup, nameFacts, []byte(validatorAddr))); err != nil {
 				return err
 			}
 		}

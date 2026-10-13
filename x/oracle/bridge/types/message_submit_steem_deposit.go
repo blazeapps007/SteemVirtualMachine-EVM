@@ -27,5 +27,11 @@ func (msg *MsgAttestDeposit) ValidateBasic() error {
 	if msg.AmountMillisteem == 0 {
 		return ErrInvalidAmount.Wrap("amount millisteem must be positive")
 	}
+	if err := ValidateSteemTimestamp(msg.SteemTimestamp); err != nil {
+		return err
+	}
+	if err := ValidateMemo(msg.Memo); err != nil {
+		return err
+	}
 	return nil
 }

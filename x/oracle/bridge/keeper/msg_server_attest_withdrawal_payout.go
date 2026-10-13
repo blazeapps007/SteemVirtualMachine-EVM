@@ -91,25 +91,21 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 		return nil, err
 	}
 	if already {
+		// This validator already attested a payout for this withdrawal. It gets
+		// exactly one vote, which is what stops two different payout candidates
+		// from both reaching the threshold.
 		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
 	}
 
-	// The first attestation fixes the payout facts (txid, op_index); later ones
-	// must match or become a benign mismatch event with no record.
-	if withdrawal.SteemPayoutTxid == "" {
-		withdrawal.SteemPayoutTxid = msg.SteemTxid
-		withdrawal.PayoutOpIndex = msg.OpIndex
-	} else if withdrawal.SteemPayoutTxid != msg.SteemTxid || withdrawal.PayoutOpIndex != msg.OpIndex {
-		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
-			types.EventTypeWithdrawalPayoutMismatch,
-			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(msg.WithdrawalId, 10)),
-			sdk.NewAttribute(types.AttributeKeyStoredTxid, withdrawal.SteemPayoutTxid),
-			sdk.NewAttribute(types.AttributeKeySubmittedTxid, msg.SteemTxid),
-		))
-		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
-	}
-
+	// Record this validator's vote for its observed payout candidate. Payout
+	// attestations are tallied PER (txid, op-index) candidate — the first
+	// attester no longer fixes the facts, so a minority validator reporting a
+	// bogus txid cannot block the honest majority's real payout.
+	candidate := payoutCandidateKey(msg.SteemTxid, msg.OpIndex)
 	if err := k.WithdrawalConfirmedBy.Set(ctx, confirmedKey); err != nil {
+		return nil, err
+	}
+	if err := k.WithdrawalPayoutVote.Set(ctx, collections.Join3(msg.WithdrawalId, candidate, validatorAddr)); err != nil {
 		return nil, err
 	}
 	confirmingValidator := sdk.ValAddress(validatorAddr).String()
@@ -118,7 +114,7 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 		Timestamp:        sdkCtx.BlockTime().Unix(),
 	})
 
-	ratio, err := k.confirmedPowerRatio(ctx, withdrawal.ValidatorConfirmations)
+	ratio, err := k.candidatePayoutRatio(ctx, msg.WithdrawalId, candidate)
 	if err != nil {
 		return nil, err
 	}
@@ -127,11 +123,15 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 		types.EventTypeWithdrawalConfirmed,
 		sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(msg.WithdrawalId, 10)),
 		sdk.NewAttribute(types.AttributeKeyValidator, confirmingValidator),
+		sdk.NewAttribute(types.AttributeKeySteemTxid, msg.SteemTxid),
 		sdk.NewAttribute(types.AttributeKeyConfirmedRatio, ratio.String()),
 	))
 
-	// Flip to PROCESSED exactly once, the first time the threshold is crossed.
+	// Flip to PROCESSED the first time ONE payout candidate crosses the
+	// threshold, recording that candidate's facts as the canonical payout.
 	if withdrawal.Status == types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED && ratio.GTE(params.BridgeConfirmationThreshold) {
+		withdrawal.SteemPayoutTxid = msg.SteemTxid
+		withdrawal.PayoutOpIndex = msg.OpIndex
 		if err := k.WithdrawalByStatus.Remove(ctx, collections.Join(int32(types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED), msg.WithdrawalId)); err != nil {
 			return nil, err
 		}
@@ -145,13 +145,10 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(msg.WithdrawalId, 10)),
 			sdk.NewAttribute(types.AttributeKeySteemTxid, msg.SteemTxid),
 		))
-		// A finalized payout is a bridge-duty opportunity: report the attesters
-		// that carried it to the unified slashing engine.
-		attesterStrs := make([]string, 0, len(withdrawal.ValidatorConfirmations))
-		for _, c := range withdrawal.ValidatorConfirmations {
-			attesterStrs = append(attesterStrs, c.ValidatorAddress)
-		}
-		if err := k.reportBridgeEvent(ctx, attesterStrs); err != nil {
+		// A finalized payout is a bridge-duty opportunity. Queue it for the
+		// EndBlocker to report (full same-block attester set); see
+		// enqueueBridgeDuty.
+		if err := k.enqueueBridgeDuty(ctx, bridgeDutyKindWithdrawal, withdrawal.Id); err != nil {
 			return nil, err
 		}
 	}
@@ -201,9 +198,11 @@ func (k Keeper) ValidateWithdrawalProcessedAcceptance(ctx context.Context, msg *
 	if already {
 		return types.ErrDuplicateWithdrawalConfirmation
 	}
-	if withdrawal.SteemPayoutTxid != "" && (withdrawal.SteemPayoutTxid != msg.SteemTxid || withdrawal.PayoutOpIndex != msg.OpIndex) {
-		return types.ErrWithdrawalPayoutMismatch
-	}
+	// Payout txid/op-index are tallied per candidate, so a value differing from
+	// one another validator already recorded is NOT a rejection — it is a valid
+	// attestation for a different candidate and stays fee-exempt. Only a
+	// mismatch against the withdrawal's own ground-truth amount/asset is
+	// rejected (and so falls back to the fee-paying path).
 	if withdrawal.AmountMillisteem != msg.AmountMillisteem || withdrawal.Asset != msg.Asset {
 		return types.ErrWithdrawalPayoutMismatch
 	}

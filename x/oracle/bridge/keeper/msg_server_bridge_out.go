@@ -37,6 +37,13 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 		return nil, err
 	}
 
+	// Stateless guards, enforced here and not only in ValidateBasic: the EVM
+	// bridgeOut precompile (precompiles/steembridge) calls this msg server
+	// directly, so it never passes through the ante handler's
+	// ValidateBasicDecorator.
+	if err := types.ValidateMemo(msg.Memo); err != nil {
+		return nil, err
+	}
 	if msg.AmountAsteem.IsNil() || !msg.AmountAsteem.IsPositive() {
 		return nil, errorsmod.Wrap(types.ErrInvalidAmount, "amount must be positive")
 	}
@@ -45,7 +52,18 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 	}
 
 	denom := types.DenomForAsset(msg.Asset)
-	grossMilli := msg.AmountAsteem.Quo(types.MillisteemToAsteemFactor).Uint64()
+	grossMilliInt := msg.AmountAsteem.Quo(types.MillisteemToAsteemFactor)
+	// Steem's whole supply is ~4e11 millisteem, far under uint64; a value that
+	// does not fit is not a real bridgeable amount and must be rejected before
+	// the .Uint64() below, which would otherwise panic (recovered, but it
+	// aborts the tx for no reason).
+	if !grossMilliInt.IsUint64() {
+		return nil, errorsmod.Wrap(types.ErrInvalidAmount, "amount is far larger than any bridgeable amount")
+	}
+	grossMilli := grossMilliInt.Uint64()
+	if params.MinimumBridgeAmount != 0 && grossMilli < params.MinimumBridgeAmount {
+		return nil, errorsmod.Wrapf(types.ErrInvalidAmount, "amount %d millisteem is below the minimum bridge amount %d", grossMilli, params.MinimumBridgeAmount)
+	}
 	netMilli, feeMilli := types.ApplyBridgeFee(grossMilli, params.BridgeFeeBps)
 	netAsteem := types.MillisteemToAsteem(netMilli)
 	feeAsteem := types.MillisteemToAsteem(feeMilli)
