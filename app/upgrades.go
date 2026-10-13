@@ -51,6 +51,21 @@ const UpgradeNameV004 = "v0.0.4"
 // and the Plan.Name of the governance MsgSoftwareUpgrade.
 const UpgradeNameV005 = "v0.0.5"
 
+// UpgradeNameV006 moves the chain to the latest stable releases compatible
+// with cosmos/evm (which pins the SDK line; SDK v0.55 needs a cosmos/evm
+// release that does not exist yet):
+//   - cosmos/evm v0.7.3: state-breaking security release — the EVM StateDB
+//     commit is now atomic when precompiles ran, and AddBalance rejects
+//     uint256 overflow instead of wrapping;
+//   - ibc-go v11.2.0: extra ICS-20 v2 / GMP validation (the new optional
+//     packet-forward and rate-limit middlewares are not wired);
+//   - cosmos/go-ethereum v1.17.2-cosmos-1: EIP-712 encodeType fix for empty
+//     struct types.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV006 = "v0.0.6"
+
 // RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On
 // the IN-PLACE upgrade path this: runs module migrations, registers the native
 // SBD coin (bank metadata + ERC20 precompile, via the same registerSBD helper the
@@ -117,6 +132,15 @@ func (app *App) RegisterUpgradeHandlers() {
 				return vm, err
 			}
 			return vm, app.enforceEVMPolicy(sdk.UnwrapSDKContext(ctx))
+		},
+	)
+
+	// v0.0.6: dependency security upgrade (see UpgradeNameV006). No new store
+	// keys and no parameter changes.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV006,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 		},
 	)
 
