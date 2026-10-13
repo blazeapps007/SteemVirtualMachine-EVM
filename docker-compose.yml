@@ -1,41 +1,33 @@
 services:
   steemvm:
     # Pre-built image (see Dockerfile) — no more `make install` inside the
-    # container on every start. Defaults to the published v0.0.4-1 image
-    # (cosmos/evm + cosmos-sdk security patches, withdrawal-payout
-    # enforcement, CoinGecko price source — see
-    # Instructions/UPGRADE_v0.0.4.md). Override with STEEMVM_IMAGE (env var
-    # or repo-root .env) to point at a different tag: STEEMVM_IMAGE=you/steemvmd:tag
+    # container on every start. Defaults to the published v0.0.5 image, which
+    # is the version currently APPLIED on-chain (the coordinated v0.0.5 upgrade
+    # applied at height 620500). Override with STEEMVM_IMAGE (env var or
+    # repo-root .env) to point at a different tag: STEEMVM_IMAGE=you/steemvmd:tag
     #
-    # v0.0.4-1 is a DEPENDENCY-ONLY security rebuild of v0.0.4 — newer Go
-    # toolchain, cosmovisor v1.7.3, refreshed golang.org/x/* — with zero
-    # application or consensus changes. It still reports `version 0.0.4` on
-    # purpose (see SECURITY.md): the on-chain upgrade name must keep matching,
-    # and docker-entrypoint.sh stages by that version string. Tell the two
-    # apart with `steemvmd version --long`: go1.26.8 = patched, go1.26.5 = not.
+    # v0.0.6 ROLLOUT IN PROGRESS — this default deliberately STAYS on v0.0.5
+    # (the applied version) until the coordinated v0.0.6 upgrade has applied
+    # on-chain. Stage v0.0.6 with the `stage-v0.0.6` service below instead:
     #
-    # v0.0.5 ROLLOUT IN PROGRESS — this default deliberately STAYS on v0.0.4-1
-    # until the coordinated v0.0.5 upgrade has applied on-chain. Stage v0.0.5
-    # with the `stage-v0.0.5` service below instead:
+    #     docker compose --profile stage run --rm stage-v0.0.6
     #
-    #     docker compose --profile stage run --rm stage-v0.0.5
-    #
-    # Why not just bump this to v0.0.5: every validator created after the
-    # v0.0.4 height still has cosmovisor's `current` pointing at `genesis`,
+    # Why not just bump this to v0.0.6: every validator created after the
+    # v0.0.5 height still has cosmovisor's `current` pointing at `genesis`,
     # and docker-entrypoint.sh refreshes genesis/bin from the image on every
-    # start. Running the v0.0.5 image here early would make cosmovisor run
-    # v0.0.5 immediately; once the upgrade plan is scheduled, x/upgrade then
+    # start. Running the v0.0.6 image here early would make cosmovisor run
+    # v0.0.6 immediately; once the upgrade plan is scheduled, x/upgrade then
     # refuses to run ("BINARY UPDATED BEFORE TRIGGER") and that node halts
-    # and gets jailed. Keeping this on v0.0.4-1 makes an accidental
-    # `docker compose pull && up -d` harmless. Flip it to v0.0.5 (and drop
-    # the stage service) only once `steemvmd query upgrade applied v0.0.5`
-    # succeeds. See Instructions/UPGRADE_v0.0.5.md.
+    # and gets jailed. Keeping this on v0.0.5 makes an accidental
+    # `docker compose pull && up -d` harmless. Flip it to v0.0.6 (and drop
+    # the stage service) only once `steemvmd query upgrade applied v0.0.6`
+    # succeeds. See Instructions/UPGRADE_v0.0.6.md.
     #
     # `docker compose up -d` alone still works with zero setup: if the image
     # named below isn't already pulled, compose falls back to building it
     # locally from ./Dockerfile (same as always, just now cached properly
     # instead of rebuilding from scratch every start).
-    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.4-1}
+    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.5}
     build:
       context: .
       dockerfile: Dockerfile
@@ -83,19 +75,19 @@ services:
       - "127.0.0.1:1317:1317"    # Cosmos REST API
       - "127.0.0.1:9090:9090"    # gRPC
 
-  # One-off: stage the v0.0.5 binary into cosmovisor's upgrade slot WITHOUT
+  # One-off: stage the v0.0.6 binary into cosmovisor's upgrade slot WITHOUT
   # running it or touching the live node. cosmovisor swaps to it on its own at
   # the upgrade height. It never writes cosmovisor/genesis or `current`, so it
   # is safe on any node, whichever way `current` points. Uses its own image
   # variable (not STEEMVM_IMAGE) so an operator override of the live image
   # can't stage the wrong binary — and it refuses to stage anything that
-  # doesn't report version 0.0.5.
+  # doesn't report version 0.0.6.
   #
-  #     docker compose --profile stage run --rm stage-v0.0.5
-  stage-v0.0.5:
-    image: ${STEEMVM_STAGE_IMAGE:-steemblazer/steemvmd:v0.0.5}
+  #     docker compose --profile stage run --rm stage-v0.0.6
+  stage-v0.0.6:
+    image: ${STEEMVM_STAGE_IMAGE:-steemblazer/steemvmd:v0.0.6}
     # Always fetch the published image: an older build cached from an earlier
-    # pull reports the same "0.0.5" version but would split this node off the
+    # pull reports the same "0.0.6" version but would split this node off the
     # network at the upgrade height.
     pull_policy: always
     entrypoint: ["/bin/sh", "-c"]
@@ -103,11 +95,11 @@ services:
       - |
         set -eu
         ver="$$(/root/go/bin/steemvmd version)"
-        if [ "$$ver" != "0.0.5" ]; then
-          echo "refusing to stage: image reports version '$$ver', expected 0.0.5" >&2
+        if [ "$$ver" != "0.0.6" ]; then
+          echo "refusing to stage: image reports version '$$ver', expected 0.0.6" >&2
           exit 1
         fi
-        d=/root/.steemvm/cosmovisor/upgrades/v0.0.5/bin
+        d=/root/.steemvm/cosmovisor/upgrades/v0.0.6/bin
         mkdir -p "$$d"
         if [ -f "$$d/steemvmd" ] && [ "$$(sha256sum < "$$d/steemvmd")" = "$$(sha256sum < /root/go/bin/steemvmd)" ]; then
           echo "already staged (identical binary)"
@@ -117,8 +109,8 @@ services:
           cp /root/go/bin/steemvmd "$$d/.steemvmd.new"
           mv -f "$$d/.steemvmd.new" "$$d/steemvmd"
         fi
-        echo "staged: $$("$$d/steemvmd" version) -> cosmovisor/upgrades/v0.0.5/bin/steemvmd"
-        echo "sha256: $$(sha256sum /root/.steemvm/cosmovisor/upgrades/v0.0.5/bin/steemvmd | cut -d' ' -f1)  (compare with the value in the upgrade announcement)"
+        echo "staged: $$("$$d/steemvmd" version) -> cosmovisor/upgrades/v0.0.6/bin/steemvmd"
+        echo "sha256: $$(sha256sum /root/.steemvm/cosmovisor/upgrades/v0.0.6/bin/steemvmd | cut -d' ' -f1)  (compare with the value in the upgrade announcement)"
     volumes:
       - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
     profiles: ["stage"]
