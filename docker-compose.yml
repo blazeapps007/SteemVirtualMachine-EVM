@@ -152,8 +152,9 @@ services:
   oracle-python:
     image: ${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:latest}
     build:
-      context: ./oracle/python
-      dockerfile: Dockerfile
+      # oracle/, not oracle/python: the image ships oracle/multisig/vectors.json.
+      context: ./oracle
+      dockerfile: python/Dockerfile
     container_name: steemvm-oracle-python
     depends_on:
       - steemvm
@@ -168,8 +169,9 @@ services:
   oracle-js:
     image: ${ORACLE_JS_IMAGE:-steemblazer/steemvm-oracle-js:latest}
     build:
-      context: ./oracle/js
-      dockerfile: Dockerfile
+      # oracle/, not oracle/js: the image ships oracle/multisig/vectors.json.
+      context: ./oracle
+      dockerfile: js/Dockerfile
     container_name: steemvm-oracle-js
     depends_on:
       - steemvm

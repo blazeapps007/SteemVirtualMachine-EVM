@@ -5,6 +5,9 @@ oracle/js/dist
 oracle/python/**/__pycache__
 oracle/python/.venv
 oracle/python/*.egg-info
+# Build-time copies of oracle/multisig/vectors.json (the Dockerfiles make them).
+oracle/python/src/steemvm_oracle/multisig/vectors.json
+oracle/js/src/multisig/vectors.json
 release/
 .idea/
 .vscode/

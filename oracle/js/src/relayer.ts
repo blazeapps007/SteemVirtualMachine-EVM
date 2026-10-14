@@ -28,9 +28,9 @@ const VALOPER_HRP = "steemvaloper";
 
 /** Derives the bech32 valoper address from an account bech32 address — same
  * 20 bytes, different HRP (see oracle/PROTOCOL.md §1). Only used for
- * `x/staking` bonded-status lookups; every duty message field uses the
- * account address. */
-function toValoperAddress(accountAddress: string): string {
+ * `x/staking` lookups (bonded status here, the svm.bank signer's identity);
+ * every duty message field uses the account address. */
+export function toValoperAddress(accountAddress: string): string {
   const { data } = fromBech32(accountAddress);
   return toBech32(VALOPER_HRP, data);
 }

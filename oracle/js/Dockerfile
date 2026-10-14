@@ -1,19 +1,21 @@
 # SteemVM bridge oracle — JS/TypeScript client. Multi-stage build: compile
 # TypeScript in a full node image, then copy the dist/ output + production
-# node_modules into a slim runtime image. Build context is oracle/js/ (see
-# docker-compose.yml's oracle-js service: context ./oracle/js, dockerfile
-# Dockerfile — this exact path, do not move).
+# node_modules into a slim runtime image. Build context is oracle/ (see
+# docker-compose.yml's oracle-js service: context ./oracle, dockerfile
+# js/Dockerfile), so the shared svm.bank signer conformance vectors
+# (oracle/multisig/vectors.json) ship in the image:
+#   docker build -f oracle/js/Dockerfile oracle
 
 # trixie-slim (Debian 13), NOT the default node:22-slim — that one is still
 # Debian 12/bookworm, whose older perl carries CVEs this image has no use for.
 FROM node:22-trixie-slim AS builder
 WORKDIR /build
 
-COPY package.json package-lock.json* ./
+COPY js/package.json js/package-lock.json* ./
 RUN npm ci
 
-COPY tsconfig.json ./
-COPY src ./src
+COPY js/tsconfig.json ./
+COPY js/src ./src
 RUN npm run build
 
 # Prune devDependencies out of node_modules for the runtime stage, rather
@@ -38,6 +40,7 @@ RUN apt-get update \
 
 COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/dist ./dist
-COPY package.json ./
+COPY multisig/vectors.json ./dist/multisig/vectors.json
+COPY js/package.json ./
 
 CMD ["node", "dist/main.js"]

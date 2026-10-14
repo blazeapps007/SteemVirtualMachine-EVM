@@ -1,0 +1,973 @@
+{
+  "_comment": "Shared conformance vectors for the svm.bank multisig signer. The Go, Python and JS oracle clients all load this file in their test suites and at startup (selftest). Transaction vectors are real svm.bank transactions executed on Steem mainnet (oracle/multisigguide.md section 4.8). Apportionment vectors pin the exact integer weight algorithm in oracle/PROTOCOL.md; expected values were computed with an independent big-integer reference implementation.",
+  "chain_id": "0000000000000000000000000000000000000000000000000000000000000000",
+  "transactions": [
+    {
+      "name": "transfer (executed 2026-09-27)",
+      "tx": {
+        "ref_block_num": 28270,
+        "ref_block_prefix": 2711898870,
+        "expiration": "2026-09-27T02:18:06",
+        "operations": [
+          [
+            "transfer",
+            {
+              "from": "svm.bank",
+              "to": "svm.bank",
+              "amount": "1.000 STEEM",
+              "memo": "multisig test"
+            }
+          ]
+        ],
+        "extensions": []
+      },
+      "serialized": "6e6ef64aa4a1de7cb86a01020873766d2e62616e6b0873766d2e62616e6be80300000000000003535445454d00000d6d756c7469736967207465737400",
+      "digest": "426f69aabb998b3b5e9f79c879015ce523f2d34db048e4fea9341768ae25a4c7",
+      "id": "f4bc2c800eecf30226a37235886cc89a2e5b44e7",
+      "signatures": [
+        {
+          "sig": "1f1e0597e19740b2d55c182905d8bad43efa47282f4ee17b1105faf9bd88fab8fd3cd86c1f72937973de48fd820906c13f9a4b8dc8b8a250a372598b7e14a02927",
+          "pubkey": "STM5fvPvqwkwDTKXW1wsr7wPdeVXjetjvg1Wer8Zs7P24KFHht2Be"
+        },
+        {
+          "sig": "1f5455c57294bc991743d3baa3584387d90010a8f8fc988e0b17d4a0e87db2d31c11ad211cd0581224a39b331b21862422ce39baaa0b8cad770dfda9bb0d959d99",
+          "pubkey": "STM4vpkJnwbFzFmFyEPpP6T8iMLn6rc9j8aa3PVo62yQnP9ck9sps"
+        }
+      ]
+    },
+    {
+      "name": "change_recovery_account (executed 2026-10-11, block 110332809)",
+      "tx": {
+        "ref_block_num": 35715,
+        "ref_block_prefix": 3778233551,
+        "expiration": "2026-10-11T01:48:45",
+        "operations": [
+          [
+            "change_recovery_account",
+            {
+              "account_to_recover": "svm.bank",
+              "new_recovery_account": "null",
+              "extensions": []
+            }
+          ]
+        ],
+        "extensions": []
+      },
+      "serialized": "838bcf4433e1fdeaca6a011a0873766d2e62616e6b046e756c6c0000",
+      "digest": "4a5f4e05cf52dcebb03f2a8f4d065ea8276db6885f77d1272c2478b0d1df6578",
+      "id": "4b3ae1add30535891552adb33e130fa71deadfdf",
+      "signatures": []
+    },
+    {
+      "name": "account_update validator set (executed 2026-10-11, block 110332671)",
+      "tx": {
+        "ref_block_num": 35560,
+        "ref_block_prefix": 4046415574,
+        "expiration": "2026-10-11T01:40:57",
+        "operations": [
+          [
+            "account_update",
+            {
+              "account": "svm.bank",
+              "owner": {
+                "weight_threshold": 7503,
+                "account_auths": [
+                  [
+                    "blaze.apps",
+                    309
+                  ],
+                  [
+                    "blazed007",
+                    6980
+                  ],
+                  [
+                    "cur8",
+                    309
+                  ],
+                  [
+                    "dhaka.witness",
+                    309
+                  ],
+                  [
+                    "happycapital",
+                    303
+                  ],
+                  [
+                    "steem-agora",
+                    303
+                  ],
+                  [
+                    "steem-space",
+                    300
+                  ],
+                  [
+                    "svm-deployer",
+                    312
+                  ],
+                  [
+                    "upex",
+                    266
+                  ],
+                  [
+                    "xpilar.witness",
+                    306
+                  ],
+                  [
+                    "yasu",
+                    306
+                  ]
+                ],
+                "key_auths": []
+              },
+              "active": {
+                "weight_threshold": 7503,
+                "account_auths": [
+                  [
+                    "blaze.apps",
+                    309
+                  ],
+                  [
+                    "blazed007",
+                    6980
+                  ],
+                  [
+                    "cur8",
+                    309
+                  ],
+                  [
+                    "dhaka.witness",
+                    309
+                  ],
+                  [
+                    "happycapital",
+                    303
+                  ],
+                  [
+                    "steem-agora",
+                    303
+                  ],
+                  [
+                    "steem-space",
+                    300
+                  ],
+                  [
+                    "svm-deployer",
+                    312
+                  ],
+                  [
+                    "upex",
+                    266
+                  ],
+                  [
+                    "xpilar.witness",
+                    306
+                  ],
+                  [
+                    "yasu",
+                    306
+                  ]
+                ],
+                "key_auths": []
+              },
+              "posting": {
+                "weight_threshold": 7503,
+                "account_auths": [
+                  [
+                    "blaze.apps",
+                    309
+                  ],
+                  [
+                    "blazed007",
+                    6980
+                  ],
+                  [
+                    "cur8",
+                    309
+                  ],
+                  [
+                    "dhaka.witness",
+                    309
+                  ],
+                  [
+                    "happycapital",
+                    303
+                  ],
+                  [
+                    "steem-agora",
+                    303
+                  ],
+                  [
+                    "steem-space",
+                    300
+                  ],
+                  [
+                    "svm-deployer",
+                    312
+                  ],
+                  [
+                    "upex",
+                    266
+                  ],
+                  [
+                    "xpilar.witness",
+                    306
+                  ],
+                  [
+                    "yasu",
+                    306
+                  ]
+                ],
+                "key_auths": []
+              },
+              "memo_key": "STM8LWVtBAjP9Hq8vXQfw15nfnnaNMSiZmvEpLEy6G3jjPFPxerAS",
+              "json_metadata": "{}"
+            }
+          ]
+        ],
+        "extensions": []
+      },
+      "serialized": "e88ad6662ff129e9ca6a010a0873766d2e62616e6b014f1d00000b0a626c617a652e61707073350109626c617a6564303037441b046375723835010d6468616b612e7769746e65737335010c68617070796361706974616c2f010b737465656d2d61676f72612f010b737465656d2d73706163652c010c73766d2d6465706c6f796572380104757065780a010e7870696c61722e7769746e65737332010479617375320100014f1d00000b0a626c617a652e61707073350109626c617a6564303037441b046375723835010d6468616b612e7769746e65737335010c68617070796361706974616c2f010b737465656d2d61676f72612f010b737465656d2d73706163652c010c73766d2d6465706c6f796572380104757065780a010e7870696c61722e7769746e65737332010479617375320100014f1d00000b0a626c617a652e61707073350109626c617a6564303037441b046375723835010d6468616b612e7769746e65737335010c68617070796361706974616c2f010b737465656d2d61676f72612f010b737465656d2d73706163652c010c73766d2d6465706c6f796572380104757065780a010e7870696c61722e7769746e6573733201047961737532010003c62b5716ac3b7c30be5710b1be73b5a6c8d41a4a8154149d3f3c128c3b525181027b7d00",
+      "digest": "b3dadf83c8a4c9cb1d8360569a793201b75b9478c847be17d66a2cba54e4c797",
+      "id": "63ea81848ebc17e01d58ca41329c0dc9b48ea90a",
+      "signatures": []
+    }
+  ],
+  "keys": [
+    {
+      "_comment": "made-up account and password from the guide, safe to publish: svm.example / active / correct horse battery staple",
+      "wif": "5Hxy6PfPo8GPD2SHpMERWy2TBJ9WrKinYyBQLpPBoMBj2GxpXdg",
+      "pubkey": "STM897LiMytWqxuRnrNNMuAJRqjK9yWsVpVvoQzRM6n9wVBxcM3RJ",
+      "compressed": "03ac492d0e65b7eb7f0a8499736a7e4192d967284904666881c11748d0ee227cc7"
+    }
+  ],
+  "assets": [
+    {
+      "millisteem": "1000",
+      "symbol": "STEEM",
+      "string": "1.000 STEEM"
+    },
+    {
+      "millisteem": "12500",
+      "symbol": "SBD",
+      "string": "12.500 SBD"
+    },
+    {
+      "millisteem": "1",
+      "symbol": "STEEM",
+      "string": "0.001 STEEM"
+    },
+    {
+      "millisteem": "70561",
+      "symbol": "STEEM",
+      "string": "70.561 STEEM"
+    },
+    {
+      "millisteem": "0",
+      "symbol": "SBD",
+      "string": "0.000 SBD"
+    }
+  ],
+  "ballots": [
+    {
+      "name": "live svm_ms metadata: the 2026-10-11 validator-set and recovery-account proposals",
+      "now": "2026-10-11T00:45:00",
+      "bank_authority": {
+        "weight_threshold": 7503,
+        "account_auths": [
+          [
+            "blaze.apps",
+            309
+          ],
+          [
+            "blazed007",
+            6980
+          ],
+          [
+            "cur8",
+            309
+          ],
+          [
+            "dhaka.witness",
+            309
+          ],
+          [
+            "happycapital",
+            303
+          ],
+          [
+            "steem-agora",
+            303
+          ],
+          [
+            "steem-space",
+            300
+          ],
+          [
+            "svm-deployer",
+            312
+          ],
+          [
+            "upex",
+            266
+          ],
+          [
+            "xpilar.witness",
+            306
+          ],
+          [
+            "yasu",
+            306
+          ]
+        ],
+        "key_auths": []
+      },
+      "members": [
+        {
+          "name": "blaze.apps",
+          "active_key": "STM5fvPvqwkwDTKXW1wsr7wPdeVXjetjvg1Wer8Zs7P24KFHht2Be",
+          "posting_json_metadata": "{\"svm_ms\":{\"props\":{\"63ea81848ebc17e01d58ca41329c0dc9b48ea90a\":{\"t\":\"Validator set by stake: 11 validators, 75% threshold\",\"tx\":{\"ref_block_num\":35560,\"ref_block_prefix\":4046415574,\"expiration\":\"2026-10-11T01:40:57\",\"operations\":[[\"account_update\",{\"account\":\"svm.bank\",\"owner\":{\"weight_threshold\":7503,\"account_auths\":[[\"blaze.apps\",309],[\"blazed007\",6980],[\"cur8\",309],[\"dhaka.witness\",309],[\"happycapital\",303],[\"steem-agora\",303],[\"steem-space\",300],[\"svm-deployer\",312],[\"upex\",266],[\"xpilar.witness\",306],[\"yasu\",306]],\"key_auths\":[]},\"active\":{\"weight_threshold\":7503,\"account_auths\":[[\"blaze.apps\",309],[\"blazed007\",6980],[\"cur8\",309],[\"dhaka.witness\",309],[\"happycapital\",303],[\"steem-agora\",303],[\"steem-space\",300],[\"svm-deployer\",312],[\"upex\",266],[\"xpilar.witness\",306],[\"yasu\",306]],\"key_auths\":[]},\"posting\":{\"weight_threshold\":7503,\"account_auths\":[[\"blaze.apps\",309],[\"blazed007\",6980],[\"cur8\",309],[\"dhaka.witness\",309],[\"happycapital\",303],[\"steem-agora\",303],[\"steem-space\",300],[\"svm-deployer\",312],[\"upex\",266],[\"xpilar.witness\",306],[\"yasu\",306]],\"key_auths\":[]},\"memo_key\":\"STM8LWVtBAjP9Hq8vXQfw15nfnnaNMSiZmvEpLEy6G3jjPFPxerAS\",\"json_metadata\":\"{}\"}]],\"extensions\":[]},\"c\":\"2026-10-11T00:42:57\"},\"4b3ae1add30535891552adb33e130fa71deadfdf\":{\"t\":\"Set recovery account to @null\",\"tx\":{\"ref_block_num\":35715,\"ref_block_prefix\":3778233551,\"expiration\":\"2026-10-11T01:48:45\",\"operations\":[[\"change_recovery_account\",{\"account_to_recover\":\"svm.bank\",\"new_recovery_account\":\"null\",\"extensions\":[]}]],\"extensions\":[]},\"c\":\"2026-10-11T00:50:46\"}},\"votes\":{\"63ea81848ebc17e01d58ca41329c0dc9b48ea90a\":{\"a\":1,\"s\":\"205659ae799a51b7b94b992dc279dd014de568537aa245e1615f976958766ed1803c87d79cffa4eb9f3c71e237f3a487c0b9005ef539c1a75a6432bf0bc06b0fb6\",\"x\":\"2026-10-11T01:40:57\"},\"4b3ae1add30535891552adb33e130fa71deadfdf\":{\"a\":1,\"s\":\"1f6b035bc12c6841f6409079146c31796aeeaf2b4a5f6d8f9a444d08d2b42fe77b4353aab9d8fb4cb9c7cf8e29ca4364772f1ac0040f9adca043e8a27c465042fa\",\"x\":\"2026-10-11T01:48:45\"}}}}"
+        },
+        {
+          "name": "blazed007",
+          "active_key": "STM4vpkJnwbFzFmFyEPpP6T8iMLn6rc9j8aa3PVo62yQnP9ck9sps",
+          "posting_json_metadata": "{\"svm_ms\":{\"props\":{},\"votes\":{\"63ea81848ebc17e01d58ca41329c0dc9b48ea90a\":{\"a\":1,\"s\":\"203f070cdd0c6f659537b1a6e35b28652bae5bb8f0641d62f78197f1e8f928e5296149411cc2b76da809d06e374d7a2b16e652530c8ed439c12bec5396a3cfb6b4\",\"x\":\"2026-10-11T01:40:57\"},\"4b3ae1add30535891552adb33e130fa71deadfdf\":{\"a\":1,\"s\":\"2047a58e9e0b8f0830896c261877466d305e8f2ec2f78f716614f4523c46f3d0b82e00a906c5139b07461ee90d01fc820e600814adad0400bda85e9ca13924b8b1\",\"x\":\"2026-10-11T01:48:45\"}}}}"
+        },
+        {
+          "name": "upex",
+          "active_key": "STM8CGkgyKgdMse1oGnqyD6TiB6C9Eiq1GszpKotrm6huzKJ4jcuF",
+          "posting_json_metadata": "{\"svm_ms\":{\"props\":{},\"votes\":{\"63ea81848ebc17e01d58ca41329c0dc9b48ea90a\":{\"a\":1,\"s\":\"202b1589a0f1390fed1251cf584ff5c0b94c4337f0921833d0b540c0950b6a2f3916d8fe32ebed2fecfc43b8db6938f20b231ec400997f3880af03d0dd9aaac5e2\",\"x\":\"2026-10-11T01:40:57\"},\"4b3ae1add30535891552adb33e130fa71deadfdf\":{\"a\":1,\"s\":\"1f5cf2ec18ff4e07f16d5f37a9c3b2de10fbd3767a9c9ed416c8f2bc931a15dc10050719ca7407dd6f6676288756f23cbe4021dc7c3b902b7d42d1f10545cb61ef\",\"x\":\"2026-10-11T01:48:45\"}}}}"
+        },
+        {
+          "name": "xpilar.witness",
+          "active_key": "STM6R8CesvLBASSd9znjgovr3Xk3z7ptawYyS7iksPXDXXkopfwDJ",
+          "posting_json_metadata": "{\"svm_ms\":{\"props\":{},\"votes\":{\"87de841ecf8de67459d8a161a453cbefd619940c\":{\"a\":1,\"s\":\"20aef95ce3f7d6d6ed10f0c05d5ff12756321ce922bc6ef2f39051bb7c859993eb17c9fcd9d4a4f26747195406d0323ca993efdaf57501c01088678b85e2193b75\",\"x\":\"2026-09-27T03:56:33\"}}}}"
+        }
+      ],
+      "expected": [
+        {
+          "id": "4b3ae1add30535891552adb33e130fa71deadfdf",
+          "creator": "blaze.apps",
+          "approve": 7555,
+          "deny": 0,
+          "status": "ready",
+          "valid_approvals": [
+            "blaze.apps",
+            "blazed007",
+            "upex"
+          ]
+        },
+        {
+          "id": "63ea81848ebc17e01d58ca41329c0dc9b48ea90a",
+          "creator": "blaze.apps",
+          "approve": 7555,
+          "deny": 0,
+          "status": "ready",
+          "valid_approvals": [
+            "blaze.apps",
+            "blazed007",
+            "upex"
+          ]
+        }
+      ]
+    }
+  ],
+  "apportionment": [
+    {
+      "name": "equal three, remainder tie broken by name",
+      "threshold_percent": 75,
+      "validators": [
+        {
+          "account": "carol",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "alice",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "bob",
+          "tokens": "1000000000000000000000"
+        }
+      ],
+      "expected": {
+        "weight_threshold": 7500,
+        "account_auths": [
+          [
+            "alice",
+            3334
+          ],
+          [
+            "bob",
+            3333
+          ],
+          [
+            "carol",
+            3333
+          ]
+        ]
+      }
+    },
+    {
+      "name": "distinct remainders, two-way tie",
+      "threshold_percent": 75,
+      "validators": [
+        {
+          "account": "d",
+          "tokens": "4000000000000000000"
+        },
+        {
+          "account": "c",
+          "tokens": "1000000000000000000"
+        },
+        {
+          "account": "b",
+          "tokens": "1000000000000000000"
+        },
+        {
+          "account": "a",
+          "tokens": "1000000000000000000"
+        }
+      ],
+      "expected": {
+        "weight_threshold": 7500,
+        "account_auths": [
+          [
+            "a",
+            1429
+          ],
+          [
+            "b",
+            1429
+          ],
+          [
+            "c",
+            1428
+          ],
+          [
+            "d",
+            5714
+          ]
+        ]
+      }
+    },
+    {
+      "name": "exact split, no deficit",
+      "threshold_percent": 75,
+      "validators": [
+        {
+          "account": "x",
+          "tokens": "7000000000000000000"
+        },
+        {
+          "account": "y",
+          "tokens": "2000000000000000000"
+        },
+        {
+          "account": "z",
+          "tokens": "1000000000000000000"
+        }
+      ],
+      "expected": {
+        "weight_threshold": 7500,
+        "account_auths": [
+          [
+            "x",
+            7000
+          ],
+          [
+            "y",
+            2000
+          ],
+          [
+            "z",
+            1000
+          ]
+        ]
+      }
+    },
+    {
+      "name": "minimum weight one",
+      "threshold_percent": 75,
+      "validators": [
+        {
+          "account": "tiny",
+          "tokens": "1"
+        },
+        {
+          "account": "big",
+          "tokens": "1000000000000000000000000"
+        }
+      ],
+      "expected": {
+        "weight_threshold": 7500,
+        "account_auths": [
+          [
+            "big",
+            9999
+          ],
+          [
+            "tiny",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "more than 40 validators truncated",
+      "threshold_percent": 75,
+      "validators": [
+        {
+          "account": "v42",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v41",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v40",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v39",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v38",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v37",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v36",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v35",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v34",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v33",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v32",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v31",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v30",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v29",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v28",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v27",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v26",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v25",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v24",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v23",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v22",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v21",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v20",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v19",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v18",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v17",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v16",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v15",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v14",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v13",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v12",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v11",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v10",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v09",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v08",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v07",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v06",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v05",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v04",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v03",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v02",
+          "tokens": "1000000000000000000000"
+        },
+        {
+          "account": "v01",
+          "tokens": "1000000000000000000000"
+        }
+      ],
+      "expected": {
+        "weight_threshold": 7500,
+        "account_auths": [
+          [
+            "v01",
+            250
+          ],
+          [
+            "v02",
+            250
+          ],
+          [
+            "v03",
+            250
+          ],
+          [
+            "v04",
+            250
+          ],
+          [
+            "v05",
+            250
+          ],
+          [
+            "v06",
+            250
+          ],
+          [
+            "v07",
+            250
+          ],
+          [
+            "v08",
+            250
+          ],
+          [
+            "v09",
+            250
+          ],
+          [
+            "v10",
+            250
+          ],
+          [
+            "v11",
+            250
+          ],
+          [
+            "v12",
+            250
+          ],
+          [
+            "v13",
+            250
+          ],
+          [
+            "v14",
+            250
+          ],
+          [
+            "v15",
+            250
+          ],
+          [
+            "v16",
+            250
+          ],
+          [
+            "v17",
+            250
+          ],
+          [
+            "v18",
+            250
+          ],
+          [
+            "v19",
+            250
+          ],
+          [
+            "v20",
+            250
+          ],
+          [
+            "v21",
+            250
+          ],
+          [
+            "v22",
+            250
+          ],
+          [
+            "v23",
+            250
+          ],
+          [
+            "v24",
+            250
+          ],
+          [
+            "v25",
+            250
+          ],
+          [
+            "v26",
+            250
+          ],
+          [
+            "v27",
+            250
+          ],
+          [
+            "v28",
+            250
+          ],
+          [
+            "v29",
+            250
+          ],
+          [
+            "v30",
+            250
+          ],
+          [
+            "v31",
+            250
+          ],
+          [
+            "v32",
+            250
+          ],
+          [
+            "v33",
+            250
+          ],
+          [
+            "v34",
+            250
+          ],
+          [
+            "v35",
+            250
+          ],
+          [
+            "v36",
+            250
+          ],
+          [
+            "v37",
+            250
+          ],
+          [
+            "v38",
+            250
+          ],
+          [
+            "v39",
+            250
+          ],
+          [
+            "v40",
+            250
+          ]
+        ]
+      }
+    },
+    {
+      "name": "live-like 10 validators (18-decimal stakes)",
+      "threshold_percent": 75,
+      "validators": [
+        {
+          "account": "blazed007",
+          "tokens": "96059610000000000000000"
+        },
+        {
+          "account": "svm-deployer",
+          "tokens": "3960000000000000000000"
+        },
+        {
+          "account": "cur8",
+          "tokens": "3960000000000000000000"
+        },
+        {
+          "account": "blaze.apps",
+          "tokens": "3920400000000000000000"
+        },
+        {
+          "account": "dhaka.witness",
+          "tokens": "3920400000000000000000"
+        },
+        {
+          "account": "yasu",
+          "tokens": "3881200000000000000000"
+        },
+        {
+          "account": "xpilar.witness",
+          "tokens": "3881200000000000000000"
+        },
+        {
+          "account": "happycapital",
+          "tokens": "3881200000000000000000"
+        },
+        {
+          "account": "steem-space",
+          "tokens": "3803970000000000000000"
+        },
+        {
+          "account": "upex",
+          "tokens": "3405880000000000000000"
+        }
+      ],
+      "expected": {
+        "weight_threshold": 7500,
+        "account_auths": [
+          [
+            "blaze.apps",
+            300
+          ],
+          [
+            "blazed007",
+            7351
+          ],
+          [
+            "cur8",
+            303
+          ],
+          [
+            "dhaka.witness",
+            300
+          ],
+          [
+            "happycapital",
+            297
+          ],
+          [
+            "steem-space",
+            291
+          ],
+          [
+            "svm-deployer",
+            303
+          ],
+          [
+            "upex",
+            261
+          ],
+          [
+            "xpilar.witness",
+            297
+          ],
+          [
+            "yasu",
+            297
+          ]
+        ]
+      }
+    },
+    {
+      "name": "threshold 67 percent",
+      "threshold_percent": 67,
+      "validators": [
+        {
+          "account": "alice",
+          "tokens": "1000000000000000000"
+        },
+        {
+          "account": "bob",
+          "tokens": "1000000000000000000"
+        }
+      ],
+      "expected": {
+        "weight_threshold": 6700,
+        "account_auths": [
+          [
+            "alice",
+            5000
+          ],
+          [
+            "bob",
+            5000
+          ]
+        ]
+      }
+    }
+  ]
+}

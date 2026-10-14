@@ -4,16 +4,19 @@
 // matching bridge-deposit / withdrawal-payout / name-registration
 // attestations, plus the commit-reveal price feed (ORACLE_GAS_PRICES
 // defaults on, see config.ts). Configuration is entirely from environment
-// variables — see oracle/.env.example.
+// variables — see oracle/.env.example. With ORACLE_MULTISIG_ENABLED=true it
+// also runs the svm.bank multisig signer (src/multisig/) beside the relay.
 
 import { loadConfig, loadSigner } from "./config";
 import { buildRegistry } from "./broadcast";
+import { buildSignerConfig, Signer as MultisigSigner } from "./multisig/signer";
+import { RestSVM } from "./multisig/svm";
 import { CompositePriceSource, type ExternalPriceClient, type PriceSource } from "./priceFeeder";
 import { CMCClient } from "./priceSources/cmc";
 import { CoinGeckoClient } from "./priceSources/coingecko";
 import { SteemPriceSource } from "./priceSources/steemPrices";
 import { SteemClient } from "./steemClient";
-import { run, type CycleLogger } from "./relayer";
+import { run, toValoperAddress, type CycleLogger } from "./relayer";
 
 function makeLogger(): CycleLogger {
   const withPrefix = (level: string) => (msg: string, meta?: Record<string, unknown>) => {
@@ -68,6 +71,18 @@ async function main(): Promise<void> {
   const stop = () => controller.abort();
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+
+  // The svm.bank multisig signer (opt-in). A misconfiguration (a forbidden
+  // owner/posting key variable, a bad active key, a failed conformance
+  // selftest) throws here, so the oracle refuses to start half-armed.
+  const msCfg = buildSignerConfig(process.env, cfg.steemRpcUrl, cfg.stateDir);
+  if (msCfg) {
+    const ms = new MultisigSigner(msCfg, new RestSVM(cfg.nodeRestUrl, toValoperAddress(signer.address)), logger);
+    logger.info("svm.bank multisig signer enabled", {
+      nodes: msCfg.nodes.length, interval_ms: msCfg.intervalMs, threshold_percent: msCfg.policy.thresholdPercent, dry_run: msCfg.dryRun,
+    });
+    ms.run(controller.signal).catch((err) => logger.error("svm.bank signer stopped", { err: String(err) }));
+  }
 
   await run({
     logger,

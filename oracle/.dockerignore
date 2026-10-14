@@ -1,0 +1,13 @@
+# Build context for the Python and JS oracle images is oracle/ (they need the
+# shared oracle/multisig/vectors.json). Keep secrets and local build output out
+# of it. (The Go image builds from the repo root and uses the root .dockerignore.)
+.env
+.env.*
+!.env.example
+**/node_modules
+js/dist
+python/.venv
+**/__pycache__
+**/*.egg-info
+**/*.log
+go

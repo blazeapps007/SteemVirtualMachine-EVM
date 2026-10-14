@@ -354,3 +354,166 @@ guaranteed failures every vote period.
 Implementations: `oracle/go/relayer/validatorgate.go`,
 `oracle/python/src/steemvm_oracle/validator_gate.py`, `oracle/js/src/validatorGate.ts` — each with
 the same test table.
+
+## 11. svm.bank multisig signer
+
+Opt-in (`ORACLE_MULTISIG_ENABLED=true`). Each client runs it in its own loop beside the relay:
+it pays SVM withdrawals out of **@svm.bank** and keeps svm.bank's authority equal to the
+validators' stake, through the `svm_ms` proposal protocol in `oracle/multisigguide.md` §2.
+Implementations: `oracle/go/multisig` + `oracle/go/steemtx`,
+`oracle/python/src/steemvm_oracle/multisig/`, `oracle/js/src/multisig/`.
+
+**Conformance.** `oracle/multisig/vectors.json` is shared by all three clients. It holds
+mainnet transactions (serialization, digest, ID, signature recovery), a key, assets, exact
+apportionment cases, and real `svm_ms` metadata with the approvals it must verify. Every client
+runs it at startup and refuses to start unless it passes. The three clients produce byte-identical
+`svm_ms` content for the same inputs.
+
+### 11.1 Keys
+
+The validator's Steem **active** key is the only Steem secret (`ORACLE_STEEM_ACTIVE_WIF`).
+
+- svm.bank's owner, active and posting authorities hold only validator `account_auths`. Steem
+  resolves each through the validator's *active* authority, so owner changes are signed with
+  active keys too.
+- The `account_update2` that publishes votes is posting-level. Active authority satisfies it.
+
+A client refuses to start if any of these is set: `ORACLE_STEEM_OWNER_WIF`, `ORACLE_STEEM_OWNER`,
+`ORACLE_STEEM_POSTING_WIF`, `ORACLE_STEEM_MASTER_PASSWORD`, `ORACLE_STEEM_PASSWORD`, `OWNER`,
+`POSTING`, `MASTER_PASSWORD`.
+
+It also refuses to start (and retries every 30 s) unless all of these hold:
+
+- its Steem account is its validator's moniker, an ACTIVE name link owned by the operator;
+- the key meets that account's active threshold;
+- the key is **not** one of the account's owner keys.
+
+### 11.2 Stake-proportional authority (exact)
+
+**Input.** Validators that are bonded, not jailed, and whose moniker is an ACTIVE name link owned by
+the operator. Each gives `(steem_account, tokens)`, with tokens an arbitrary-precision integer.
+
+1. Drop zero stakes. Sort by tokens descending, then account ascending (byte order). Keep the top
+   40.
+2. `T = Σ tokens`. For each validator, `q_i = (10000·t_i) div T` and `r_i = (10000·t_i) mod T`.
+3. `deficit = 10000 − Σ q_i`. Add 1 to the `deficit` entries with the largest `r_i`, breaking ties by
+   account ascending.
+4. Minimum weight 1. In account order, set each zero weight to 1 and take that unit from the current
+   largest weight (ties by account ascending).
+5. `threshold = ceil(10000 · P / 100)`, where `P = ORACLE_MULTISIG_THRESHOLD_PERCENT` (default 75,
+   giving 7500).
+6. Sort `account_auths` by name, with `key_auths = []`. Owner, active and posting are identical, and
+   `memo_key` is copied unchanged.
+
+Weights sum to exactly 10000. This replaces the guide's float rounding, which drifted the live set
+to 10003 / 7503.
+
+### 11.3 Snapshot rule (validator-set proposals)
+
+Checkpoints are `S = floor((H − 10) / 1000) · 1000`, where `H` is the SVM tip.
+
+- **Proposer.** Computes the authority at height `S` and titles the proposal `Validator set @svm:<S>`.
+- **Reviewers.** Recompute at `S` using historical reads (`x-cosmos-block-height` / query height).
+  A reviewer approves only if all of these hold:
+  - `S` is a multiple of 1000;
+  - `S` is at most 3000 blocks old;
+  - owner, active and posting each equal the recomputed authority byte for byte;
+  - the memo key is unchanged;
+  - the change exceeds the tolerance (below).
+- **Abstain** when the reviewer's node is below `S` or `S` has been pruned.
+
+**When to propose.** Only when membership changes or a weight moves by more than
+`ORACLE_MULTISIG_REWEIGHT_TOLERANCE` points (default 50). Also wait 60 minutes after the last owner
+change, which is a Steem rule.
+
+### 11.4 Payouts
+
+A payout is a single `transfer` from svm.bank whose memo is **exactly** `svm-withdrawal <id>`
+(decimal, no leading zeros). That is what the relays' `ParseWithdrawalMemo` reads, so the payout is
+then attested by `MsgAttestWithdrawalPayout` and the withdrawal becomes PROCESSED.
+
+It is approved only if all of these hold:
+
+- withdrawal `<id>` is REQUESTED on SVM;
+- `to` is its `destination_steem_account`;
+- `amount` is its **net** `amount_millisteem`, formatted with 3 decimals, STEEM or SBD per its asset;
+- the refund margin holds: `created_at + withdrawal_timeout_blocks − height ≥
+  ORACLE_MULTISIG_PAYOUT_MARGIN_BLOCKS` (default 14400). A payout never races the automatic refund.
+- svm.bank's history has no transfer for `<id>`. The history check is whitespace-lenient, as the
+  relay is.
+- it is the **earliest correct live** proposal for that memo, ordered by (created, id);
+- this signer has not approved another unexpired proposal for that memo. This is checked against
+  its published votes *and* its local approval journal (§11.6).
+
+Deny is final, so the policy only denies content that can never become correct. Anything that may
+clear later is an **abstain**, re-reviewed every pass: a failed read, a withdrawal the node has not
+seen yet, an earlier live duplicate, or an unexpired own approval of another proposal. Treasury and
+recovery operations always abstain, so a human decides. Multi-operation and unknown proposals are
+denied.
+
+The optional `ORACLE_MULTISIG_MAX_PER_TX_STEEM` / `_SBD` caps are unset by default. A payout over a
+cap is abstained.
+
+### 11.5 Proposing and executing
+
+**Designated proposer.** The member at index `id mod N` for payouts, or `(S/1000) mod N` for the
+validator set, where members are in name order. A member `k` places after it proposes once the
+intent has been due for `k × 120 s`. Each signer approves at most one proposal per withdrawal, so
+duplicates are harmless.
+
+**Payout intents.** One per REQUESTED withdrawal that:
+
+- is unpaid;
+- has no live proposal;
+- is outside the refund margin;
+- is covered by svm.bank's balance.
+
+**Execution.** Anyone may broadcast a `ready` proposal that its own policy still approves.
+
+- It carries the minimal signature set, walked in sorted authority order.
+- The creator broadcasts at once; others wait `4 s × (rank + 1)`.
+- `Duplicate transaction` counts as success.
+- Proposals live 58 minutes. Votes and the proposal go out in one `account_update2` per pass, signed
+  with the active key, as a read-modify-write that preserves every other metadata key.
+
+### 11.6 State files (`ORACLE_STATE_DIR`, shared by all three clients)
+
+**History index** (`svm_bank_history.json`). Paid withdrawal IDs, executed trx IDs and the last
+owner change. Deleting the file only triggers a rescan.
+
+The node asserts `start ≥ limit` and returns `[start − limit, start]`, so a sync takes two kinds
+of request:
+
+- **Newest window**, with `start = head_block_number`. The node clamps it to the newest entry, and
+  because it changes every block a caching node can't serve it stale.
+- **Gap behind it**, paged forward with `start = next_seq + 100`. That history is immutable.
+```json
+{ "next_seq": 101, "paid": { "6": "<trx_id>" }, "executed": { "<trx_id>": "2026-10-14T12:00:00" }, "last_owner_change": "2026-10-11T00:44:03" }
+```
+
+**Approval journal** (`svm_bank_approvals.json`). This is write-ahead: it is saved before any
+signature is published. A corrupt journal stops the signer; delete it only after the signer has been
+stopped for over an hour.
+```json
+{ "approvals": { "<proposal id>": { "subject": "transfer:svm-withdrawal 6", "expiration": "2026-10-14T12:58:00" } } }
+```
+
+**One signer per validator.** The signer holds an exclusive `flock` on `svm_bank_signer.lock`.
+
+### 11.7 Environment
+
+| Variable | Default |
+|---|---|
+| `ORACLE_MULTISIG_ENABLED` | `false` |
+| `ORACLE_STEEM_ACTIVE_WIF` | required when enabled |
+| `ORACLE_STEEM_RPCS` | `ORACLE_STEEM_RPC` (comma-separated, own node first) |
+| `ORACLE_MULTISIG_INTERVAL` | `10s` |
+| `ORACLE_MULTISIG_THRESHOLD_PERCENT` | `75` |
+| `ORACLE_MULTISIG_REWEIGHT_TOLERANCE` | `50` |
+| `ORACLE_MULTISIG_PAYOUT_MARGIN_BLOCKS` | `14400` |
+| `ORACLE_MULTISIG_PROPOSE` / `ORACLE_MULTISIG_EXECUTE` | `true` |
+| `ORACLE_MULTISIG_DRY_RUN` | `false` (logs decisions, publishes nothing) |
+| `ORACLE_MULTISIG_MAX_PER_TX_STEEM` / `_SBD` | unset (no cap) |
+
+The threshold, tolerance and margin must be identical on every validator: they are consensus rules
+between signers.

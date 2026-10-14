@@ -30,3 +30,9 @@ test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The shared conformance vectors (oracle/multisig/vectors.json) ship inside the
+# package: the Dockerfile copies them in before `pip install`. A source checkout
+# without the copy reads the repo file instead (multisig/vectors.py).
+[tool.setuptools.package-data]
+"steemvm_oracle.multisig" = ["vectors.json"]
