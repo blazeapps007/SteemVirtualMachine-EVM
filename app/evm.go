@@ -94,6 +94,13 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 
 	// chain config
 	chainID := GetEVMChainID(appOpts)
+	// The JSON-RPC server reports app.toml's [evm] evm-chain-id while consensus
+	// signs with EVMChainID. A stale app.toml (e.g. one written before the
+	// chain-id changed) would make every wallet fail with "incorrect chain-id",
+	// so refuse to start instead of running half-broken. 0 = unset (defaulted).
+	if v := cast.ToUint64(appOpts.Get(srvflags.EVMChainID)); v != 0 && v != EVMChainID {
+		return fmt.Errorf("app.toml [evm] evm-chain-id is %d, but this chain's EVM chain-id is %d: set evm-chain-id = %d in app.toml", v, EVMChainID, EVMChainID)
+	}
 
 	// set up non depinject support modules store keys. The transient stores
 	// evmtypes.TransientKey/feemarkettypes.TransientKey are gone as of
@@ -342,7 +349,7 @@ func GetEVMChainID(appOpts servertypes.AppOptions) uint64 {
 // for app.toml's [evm] evm-chain-id (cmd/steemvmd/cmd/config.go) — the
 // JSON-RPC server reads the latter, so the two MUST agree or wallets get
 // "incorrect chain-id" errors.
-const EVMChainID uint64 = 8163
+const EVMChainID uint64 = 81630
 
 // cosmosChainIDToEVMChainID converts a Cosmos chain ID to an EVM chain ID.
 // This is an opinionated function to simplify chain id management.

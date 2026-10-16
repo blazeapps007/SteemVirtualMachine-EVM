@@ -17,6 +17,7 @@ import { loadState, saveState, loadFeederState, saveFeederState } from "./state"
 import { Feeder, getAggregateVoteHash, type PriceSource } from "./priceFeeder";
 import { TYPE_URL_MSG_ATTEST_WITHDRAWAL_PAYOUT } from "./broadcast";
 import { validatorCanSubmit, type ValidatorRecord } from "./validatorGate";
+import { anchoredCursor, SteemAnchor } from "./steemAnchor";
 
 export interface CycleLogger {
   info(msg: string, meta?: Record<string, unknown>): void;
@@ -58,6 +59,7 @@ interface BridgeParams {
   name_service_enabled: boolean;
   bridge_out_enabled: boolean;
   relayer_start_block: string;
+  relayer_start_block_id?: string;
 }
 
 async function queryBridgeParams(restUrl: string): Promise<BridgeParams> {
@@ -217,6 +219,7 @@ export async function run(opts: {
   });
 
   let notBondedLogged = false;
+  const anchor = new SteemAnchor();
   // Why the price feeder is currently idle ("" when active), so the idle and
   // resume messages are logged once per change rather than every tick.
   const priceIdle = { reason: "" };
@@ -232,7 +235,7 @@ export async function run(opts: {
     if (abortSignal.aborted) break;
 
     try {
-      const result = await runCycle(logger, cfg, chainId, signer, registry, steem, stateDir, state, valoperAddr, notBondedLogged);
+      const result = await runCycle(logger, cfg, chainId, signer, registry, steem, stateDir, state, valoperAddr, notBondedLogged, anchor);
       state = result.state;
       notBondedLogged = result.notBondedLogged;
     } catch (err) {
@@ -293,6 +296,7 @@ async function runCycle(
   state: RelayerCycleState,
   valoperAddr: string,
   notBondedLogged: boolean,
+  anchor: SteemAnchor,
 ): Promise<{ state: RelayerCycleState; notBondedLogged: boolean }> {
   const params = await queryBridgeParams(cfg.nodeRestUrl);
   // GatewayAccount is a hardcoded chain constant, never read from params —
@@ -314,12 +318,26 @@ async function runCycle(
   }
   notBondedLogged = false;
 
+  // The chain's Steem anchor (genesis): this oracle's Steem node must agree
+  // on the anchor block's ID before anything it reports is attested.
+  const chainStart = Number(params.relayer_start_block || 0);
+  await anchor.verify(steem, chainStart, params.relayer_start_block_id || "");
+
   const lib = await steem.lastIrreversibleBlock();
 
   if (state.last_scanned_block === 0) {
-    const cursor = initialCursor(cfg.startBlock, cfg.startBlockIsLatest, lib, Number(params.relayer_start_block));
+    const cursor = anchoredCursor(initialCursor(cfg.startBlock, cfg.startBlockIsLatest, lib, chainStart), chainStart);
     const next = { last_scanned_block: cursor };
     logger.info("steem relayer cursor initialized", { cursor });
+    await saveState(stateDir, next);
+    return { state: next, notBondedLogged };
+  }
+  // A saved cursor from before the anchor (e.g. a state volume kept from a
+  // previous chain) jumps up to it: that history predates this chain.
+  const anchored = anchoredCursor(state.last_scanned_block, chainStart);
+  if (anchored !== state.last_scanned_block) {
+    logger.info("steem relayer cursor moved up to the chain's steem anchor", { from: state.last_scanned_block, to: anchored });
+    const next = { last_scanned_block: anchored };
     await saveState(stateDir, next);
     return { state: next, notBondedLogged };
   }

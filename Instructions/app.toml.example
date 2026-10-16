@@ -24,7 +24,7 @@ query-gas-limit = "0"
 
 [evm]
   cache-preimage = false
-  evm-chain-id = 8163
+  evm-chain-id = 81630
   geth-metrics-address = "127.0.0.1:8100"
   max-tx-gas-wanted = 0
   min-tip = 0

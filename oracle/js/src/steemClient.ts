@@ -99,6 +99,16 @@ export class SteemClient {
     return dgp.last_irreversible_block_num;
   }
 
+  /** The ID of Steem block num (its first 8 hex chars are the block number),
+   * used to verify the chain's Steem anchor. */
+  async blockId(num: number): Promise<string> {
+    const block = await this.call<{ block_id?: string } | null>("condenser_api.get_block", [num]);
+    if (!block || !block.block_id) {
+      throw new Error(`steem rpc returned no data for block ${num}`);
+    }
+    return block.block_id;
+  }
+
   /** Returns blocks from..to inclusive, fetched sequentially. A null result
    * for a block at or below the last irreversible block is an error, not a
    * skip: aborting the cycle makes the relayer retry rather than silently

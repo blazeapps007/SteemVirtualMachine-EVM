@@ -83,6 +83,14 @@ class SteemClient:
             raise SteemRpcError("steem rpc: zero last irreversible block")
         return lib
 
+    def block_id(self, num: int) -> str:
+        """The ID of Steem block num (its first 8 hex chars are the block
+        number), used to verify the chain's Steem anchor."""
+        block = self._call("condenser_api.get_block", [num])
+        if not block or not block.get("block_id"):
+            raise SteemRpcError(f"steem rpc returned no data for block {num}")
+        return str(block["block_id"])
+
     def fetch_blocks(self, from_num: int, to_num: int) -> list[tuple[int, dict]]:
         """Returns [(block_num, block_dict), ...] for from_num..to_num
         inclusive, fetched sequentially. A null result for a block at or

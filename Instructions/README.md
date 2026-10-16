@@ -232,7 +232,7 @@ only the address in the memo can do so.
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge confirm-name <registration-id> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 --fees 0asteem -y
+  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 --fees 0asteem -y
 ```
 
 Valid confirmations are **fee-exempt on the CLI path**, so `--fees 0asteem`
@@ -336,7 +336,7 @@ Field notes:
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd tx staking create-validator /workspace/validator.json \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -381,7 +381,7 @@ VALOPER=$(docker exec steemvm-node /root/go/bin/steemvmd keys show blazed007 --b
 docker exec -it steemvm-node /root/go/bin/steemvmd tx staking delegate \
   "$VALOPER" 5000000000000000000000asteem \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -485,7 +485,7 @@ docker compose logs -f oracle-go     # or oracle-python / oracle-js
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
   <txid> <op-index> <steem-block> <steem-timestamp> <steem-sender> <gateway-account> <amount-millisteem> <memo> <asset> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -496,7 +496,7 @@ sent `1000.000 STEEM` to the gateway with an EVM address as the memo:
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
   bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a BRIDGE_ASSET_STEEM \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -682,7 +682,7 @@ certificates with [certbot](https://certbot.eff.org/).
 ### Use it
 
 - **MetaMask** → *Add network manually*: RPC URL `https://evm.mychain.io`, Chain
-  ID `8163`, currency `STEEM`. WebSocket subscriptions use
+  ID `81630`, currency `STEEM`. WebSocket subscriptions use
   `wss://evm-ws.mychain.io`.
 - **CometBFT RPC**: `https://rpc.mychain.io/status`,
   `https://rpc.mychain.io/net_info`, etc.
@@ -852,7 +852,7 @@ the halt as you can manage.
   cover `amount` + gas. Ask the faucet for more (step 7).
 - **Validator jailed**: your node fell out of sync or was offline too long.
   Get it synced again, then unjail:
-  `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id steemvm --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
+  `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
 
 **Faster resync via state-sync**
 

@@ -480,7 +480,7 @@ a direct message.
 ## cosmos/evm v0.7.1 modules
 
 Proto sources read from the vendored `github.com/cosmos/evm@v0.7.1` module cache
-(`proto/cosmos/evm/**`). Wired in `app/evm.go`; EVM chain id `8163` (`0x1fe3`), evm denom `asteem`
+(`proto/cosmos/evm/**`). Wired in `app/evm.go`; EVM chain id `81630` (`0x13ede`), evm denom `asteem`
 (18 dec). All three below are also directly reachable through the EVM JSON-RPC surface (`eth_*`
 etc.) documented in the companion EVM reference — the entries here are the Cosmos-side gRPC/REST
 duplicate of that same state.

@@ -15,7 +15,7 @@ contradicts it; this document is the exhaustive module-by-module reference.
 
 ## Conventions used below
 
-- Chain-id: `steemvm`. EVM chain-id: `8163` (`0x1fe3`). Bech32 prefix: `steem` (validator operator
+- Chain-id: `steemvm-2`. EVM chain-id: `81630` (`0x13ede`). Bech32 prefix: `steem` (validator operator
   addresses: `steemvaloper1...`; consensus addresses: `steemvalcons1...`). Base denom: `asteem` (18
   decimals, display `steem`). Bridged SBD denom: `asbd` (18 decimals, display `sbd`).
 - Every `tx` command below additionally accepts the standard Cosmos SDK tx flags
@@ -384,7 +384,7 @@ Periodic-timer infrastructure used internally by other modules; no directly-sign
 
 None of these three implement `autocli.go` — every command below is a hand-written
 `GetTxCmd`/`GetQueryCmd` from the vendored `x/{vm,erc20,feemarket}/client/cli` packages, mounted
-directly (no autocli merging). EVM chain-id `8163`; `evm_denom = asteem`, 18 decimals
+directly (no autocli merging). EVM chain-id `81630`; `evm_denom = asteem`, 18 decimals
 (`app/evm.go`).
 
 ### 3.1 `evm` (Go package `x/vm`)

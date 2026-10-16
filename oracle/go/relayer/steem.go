@@ -133,6 +133,21 @@ func (c *SteemClient) LastIrreversibleBlock() (uint64, error) {
 	return dgp.LastIrreversibleBlockNum, nil
 }
 
+// BlockID returns the ID of Steem block num (its first 8 hex chars are the
+// block number), used to verify the chain's Steem anchor.
+func (c *SteemClient) BlockID(num uint64) (string, error) {
+	var block *struct {
+		BlockID string `json:"block_id"`
+	}
+	if err := c.call("condenser_api.get_block", []any{num}, &block); err != nil {
+		return "", err
+	}
+	if block == nil || block.BlockID == "" {
+		return "", fmt.Errorf("steem rpc returned no data for block %d", num)
+	}
+	return block.BlockID, nil
+}
+
 // FetchBlocks returns blocks from..to inclusive, fetched sequentially. A
 // null result for a block at or below the last irreversible block is an
 // error, not a skip: it means the RPC endpoint (e.g. a lagging backend in a

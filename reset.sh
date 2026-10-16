@@ -40,7 +40,7 @@ BIN="${BIN:-/root/go/bin/steemvmd}"
 HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # must match docker-compose.yml's bind mount
 export STEEMVM_HOME
-CHAIN_ID="${CHAIN_ID:-steemvm}"
+CHAIN_ID="${CHAIN_ID:-steemvm-2}"
 KEYRING="${KEYRING:-test}"
 
 # svm-deployer: the node that serves public RPC. The other validators bind RPC

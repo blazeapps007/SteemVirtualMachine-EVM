@@ -66,6 +66,9 @@ func (k Keeper) ValidateDepositAcceptance(ctx context.Context, msg *types.MsgAtt
 	if msg.GatewayAccount != types.GatewayAccount {
 		return types.ErrInvalidGatewayAccount
 	}
+	if err := params.CheckSteemBlock(msg.SteemBlock); err != nil {
+		return err
+	}
 
 	validatorAddr, err := k.addressCodec.StringToBytes(msg.Validator)
 	if err != nil {

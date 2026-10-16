@@ -89,6 +89,7 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	notBondedLogged := false
+	var anchor steemAnchor
 	// Heartbeat: "idle"/"waiting" states below are debug-level (filtered out
 	// by default), so without this, a quiet cycle — no new transfers to
 	// attest, which is most cycles most of the time — produces zero output
@@ -104,7 +105,7 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 		case <-ticker.C:
 		}
 
-		if err := runCycle(ctx, logger, cfg, clientCtx, steem, bridgeQuery, stakingQuery, signerAddr, valoperAddr, stateDir, &state, &notBondedLogged); err != nil {
+		if err := runCycle(ctx, logger, cfg, clientCtx, steem, bridgeQuery, stakingQuery, signerAddr, valoperAddr, stateDir, &state, &notBondedLogged, &anchor); err != nil {
 			logger.Error("steem oracle cycle failed", "err", err)
 		}
 
@@ -239,6 +240,7 @@ func runCycle(
 	stateDir string,
 	state *State,
 	notBondedLogged *bool,
+	anchor *steemAnchor,
 ) error {
 	params, err := bridgeQuery.Params(ctx, &types.QueryParamsRequest{})
 	if err != nil {
@@ -265,6 +267,13 @@ func runCycle(
 	}
 	*notBondedLogged = false
 
+	// The chain's Steem anchor (genesis): this oracle's Steem node must agree
+	// on the anchor block's ID before anything it reports is attested.
+	chainStart := params.Params.RelayerStartBlock
+	if err := anchor.verify(steem, chainStart, params.Params.RelayerStartBlockId); err != nil {
+		return err
+	}
+
 	lib, err := steem.LastIrreversibleBlock()
 	if err != nil {
 		return err
@@ -273,12 +282,21 @@ func runCycle(
 	// First run: establish the cursor. Precedence: the node's local
 	// start-block override, then the chain-wide relayer_start_block param
 	// (the shared anchor recorded at launch so every validator scans the
-	// same range regardless of when it first starts), then the current LIB.
+	// same range regardless of when it first starts), then the current LIB —
+	// never below the anchor.
 	if state.LastScannedBlock == 0 {
-		state.LastScannedBlock = initialCursor(cfg.StartBlock, params.Params.RelayerStartBlock, lib)
+		state.LastScannedBlock = anchoredCursor(initialCursor(cfg.StartBlock, chainStart, lib), chainStart)
 		logger.Info("steem relayer cursor initialized",
 			"cursor", state.LastScannedBlock,
-			"source", cursorSource(cfg.StartBlock, params.Params.RelayerStartBlock))
+			"source", cursorSource(cfg.StartBlock, chainStart))
+		return SaveState(stateDir, *state)
+	}
+	// A saved cursor from before the anchor (e.g. a state volume kept from a
+	// previous chain) jumps up to it: that history predates this chain.
+	if c := anchoredCursor(state.LastScannedBlock, chainStart); c != state.LastScannedBlock {
+		logger.Info("steem relayer cursor moved up to the chain's steem anchor",
+			"from", state.LastScannedBlock, "to", c, "anchor", chainStart)
+		state.LastScannedBlock = c
 		return SaveState(stateDir, *state)
 	}
 

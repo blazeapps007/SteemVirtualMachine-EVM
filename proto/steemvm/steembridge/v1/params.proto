@@ -35,13 +35,14 @@ message Params {
   // confirmation (AWAITING_CONFIRMATION) phases; the window restarts when the
   // registration reaches threshold.
   uint64 name_pending_timeout_blocks = 10;
-  // relayer_start_block is the Steem block from which validator relayers
-  // begin scanning on first run, giving every validator the same anchor
-  // regardless of when its node first starts (typically the Steem last
-  // irreversible block recorded at chain launch). 0 means each relayer
-  // starts at Steem's LIB when it first boots. Advisory for relayers only —
-  // consensus logic never reads it. Governance may move it forward to spare
-  // newly joining validators a long backfill.
+  // relayer_start_block is the Steem anchor: the Steem block this chain
+  // starts from (the Steem last irreversible block recorded at genesis).
+  // Relayers never scan below it, and the chain rejects any deposit,
+  // name-registration or withdrawal-payout attestation from an earlier Steem
+  // block, so Steem history from before this chain existed (e.g. a previous
+  // chain's deposits to the same gateway) can never be attested here.
+  // 0 = no anchor: each relayer starts at Steem's LIB when it first boots and
+  // nothing is rejected. Governance may move it forward, never back.
   uint64 relayer_start_block = 11;
   // bridge_fee_bps is the bridge fee in basis points (25 = 0.25%), applied to
   // both deposits and bridge-outs, for both assets. The fee is routed to the
@@ -53,4 +54,11 @@ message Params {
   // Keeper.RefundExpiredWithdrawals. Must be positive while bridge_out is
   // enabled.
   uint64 withdrawal_timeout_blocks = 13;
+  // relayer_start_block_id is the Steem block ID (40 hex chars) of
+  // relayer_start_block, recorded at genesis. A Steem block ID begins with its
+  // block number, so the two are checked against each other. Relayers fetch
+  // that block from their own Steem node and refuse to start if the ID
+  // differs: the node is on another network, or the anchor was tampered with.
+  // Empty when relayer_start_block is 0.
+  string relayer_start_block_id = 14;
 }

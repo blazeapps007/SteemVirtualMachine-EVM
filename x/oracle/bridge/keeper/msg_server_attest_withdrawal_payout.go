@@ -26,6 +26,11 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 	if !params.BridgeOutEnabled {
 		return nil, types.ErrBridgeOutDisabled
 	}
+	// A payout from before the Steem anchor predates this chain: its
+	// "svm-withdrawal <id>" memo refers to another chain's withdrawal IDs.
+	if err := params.CheckSteemBlock(msg.SteemBlock); err != nil {
+		return nil, err
+	}
 
 	validatorAddr, err := k.addressCodec.StringToBytes(msg.Validator)
 	if err != nil {
@@ -173,6 +178,9 @@ func (k Keeper) ValidateWithdrawalProcessedAcceptance(ctx context.Context, msg *
 	}
 	if !params.BridgeOutEnabled {
 		return types.ErrBridgeOutDisabled
+	}
+	if err := params.CheckSteemBlock(msg.SteemBlock); err != nil {
+		return err
 	}
 	validatorAddr, err := k.addressCodec.StringToBytes(msg.Validator)
 	if err != nil {

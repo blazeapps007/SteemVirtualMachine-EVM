@@ -21,7 +21,7 @@ not be confirmed from source is called out explicitly rather than guessed.
 | | |
 |---|---|
 | Cosmos chain-id | `steemvm` |
-| EVM chain-id | `8163` (`0x1fe3`) |
+| EVM chain-id | `81630` (`0x13ede`) |
 | Native/gas denom | `asteem` (18 decimals) — the EVM's native value/gas unit; 1 `asteem` = 1 wei-equivalent at the EVM layer |
 | Bridged stablecoin | `asbd` (18 decimals on the EVM side; native bank denom `asbd`, display `sbd`) |
 | Currency symbol (wallets) | `STEEM` |
@@ -36,7 +36,7 @@ not be confirmed from source is called out explicitly rather than guessed.
 |---|---|
 | Network name | SteemVM (or any label you like) |
 | New RPC URL | `http://<host>:8545` |
-| Chain ID | `8163` |
+| Chain ID | `81630` |
 | Currency symbol | `STEEM` |
 | Currency decimals | `18` |
 | Block explorer URL | *(none known to exist for this chain yet — leave blank, or fill in once one is deployed)* |
@@ -44,7 +44,7 @@ not be confirmed from source is called out explicitly rather than guessed.
 ### `cast` (Foundry) quickstart
 
 ```bash
-# Chain ID (should print 8163)
+# Chain ID (should print 81630)
 cast chain-id --rpc-url http://localhost:8545
 
 # Latest block number
@@ -183,7 +183,7 @@ namespace), taken from `rpc/namespaces/ethereum/eth/api.go` and
 
 | Method | Params | Returns | Description |
 |---|---|---|---|
-| `eth_chainId` | — | `hexutil.Big` | EVM chain ID — `0x1fe3` (8163) on this chain. |
+| `eth_chainId` | — | `hexutil.Big` | EVM chain ID — `0x13ede` (81630) on this chain. |
 | `eth_protocolVersion` | — | `hexutil.Uint` | Reports a static protocol version. |
 | `eth_syncing` | — | `false` or a sync-status object | Node sync state. |
 | `eth_getUncleByBlockHashAndIndex` | `hash`, `index` | `null` (always) | Stubbed — Cosmos consensus has no uncle blocks, this method always returns `nil`. |
@@ -216,7 +216,7 @@ Source: `rpc/namespaces/ethereum/net/api.go`.
 
 | Method | Params | Returns | Description |
 |---|---|---|---|
-| `net_version` | — | `string` | The network id — matches the EVM chain ID as a decimal string (`"8163"`). |
+| `net_version` | — | `string` | The network id — matches the EVM chain ID as a decimal string (`"81630"`). |
 | `net_listening` | — | `bool` | Whether the node is accepting network connections. |
 | `net_peerCount` | — | `int` (hex-encoded) | Number of connected CometBFT peers. |
 
@@ -442,7 +442,7 @@ module.exports = {
   networks: {
     steemvm: {
       url: "http://localhost:8545",
-      chainId: 8163,
+      chainId: 81630,
       accounts: [process.env.PRIVATE_KEY],
     },
   },

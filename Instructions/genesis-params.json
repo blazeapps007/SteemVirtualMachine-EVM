@@ -1,0 +1,142 @@
+{
+  "_comment": "Genesis parameter overrides for a fresh SteemVM chain, deep-merged by launch-genesis.sh onto `steemvmd init`'s defaults. Values are the live chain's current parameters (October 2026), except: gov deposits are 10 / 50 STEEM (the old genesis had 10000000 asteem, a units slip) and distribution community_tax is 0 (the 50/25/25 fee split is done by the steembridge BeginBlocker; the old genesis kept the SDK's 0.02). The script fills in chain-dependent values at genesis time: the Steem anchor (steembridge relayer_start_block + relayer_start_block_id), the genesis validator's name link, accounts and gentx.",
+  "app_state": {
+    "staking": {
+      "params": {
+        "unbonding_time": "1814400s",
+        "max_validators": 100,
+        "max_entries": 7,
+        "historical_entries": 10000,
+        "bond_denom": "asteem",
+        "min_commission_rate": "0.000000000000000000"
+      }
+    },
+    "slashing": {
+      "params": {
+        "signed_blocks_window": "100",
+        "min_signed_per_window": "0.500000000000000000",
+        "downtime_jail_duration": "600s",
+        "slash_fraction_double_sign": "0.050000000000000000",
+        "slash_fraction_downtime": "0.010000000000000000"
+      }
+    },
+    "gov": {
+      "params": {
+        "min_deposit": [{ "denom": "asteem", "amount": "10000000000000000000" }],
+        "expedited_min_deposit": [{ "denom": "asteem", "amount": "50000000000000000000" }],
+        "max_deposit_period": "172800s",
+        "voting_period": "172800s",
+        "expedited_voting_period": "86400s",
+        "quorum": "0.334000000000000000",
+        "threshold": "0.500000000000000000",
+        "veto_threshold": "0.334000000000000000",
+        "expedited_threshold": "0.667000000000000000"
+      }
+    },
+    "distribution": {
+      "params": {
+        "community_tax": "0.000000000000000000",
+        "base_proposer_reward": "0.000000000000000000",
+        "bonus_proposer_reward": "0.000000000000000000",
+        "withdraw_addr_enabled": true
+      }
+    },
+    "mint": {
+      "params": {
+        "mint_denom": "asteem",
+        "inflation_rate_change": "0.000000000000000000",
+        "inflation_max": "0.000000000000000000",
+        "inflation_min": "0.000000000000000000",
+        "goal_bonded": "0.670000000000000000",
+        "blocks_per_year": "5259600"
+      }
+    },
+    "bank": {
+      "denom_metadata": [
+        {
+          "description": "The native staking and gas token of SteemVM, bridged 1:1 from Steem mainchain STEEM.",
+          "denom_units": [
+            { "denom": "asteem", "exponent": 0, "aliases": ["attosteem"] },
+            { "denom": "steem", "exponent": 18, "aliases": [] }
+          ],
+          "base": "asteem",
+          "display": "steem",
+          "name": "Steem",
+          "symbol": "STEEM"
+        }
+      ]
+    },
+    "feemarket": {
+      "params": {
+        "no_base_fee": false,
+        "base_fee_change_denominator": 8,
+        "elasticity_multiplier": 2,
+        "enable_height": "0",
+        "base_fee": "1000000000.000000000000000000",
+        "min_gas_price": "1000000000.000000000000000000",
+        "min_gas_multiplier": "0.500000000000000000"
+      }
+    },
+    "evm": {
+      "params": {
+        "evm_denom": "asteem",
+        "extra_eips": [],
+        "evm_channels": [],
+        "access_control": {
+          "create": { "access_type": "ACCESS_TYPE_PERMISSIONLESS", "access_control_list": [] },
+          "call": { "access_type": "ACCESS_TYPE_PERMISSIONLESS", "access_control_list": [] }
+        },
+        "active_static_precompiles": [
+          "0x0000000000000000000000000000000000000100",
+          "0x0000000000000000000000000000000000000400",
+          "0x0000000000000000000000000000000000000800",
+          "0x0000000000000000000000000000000000000801",
+          "0x0000000000000000000000000000000000000802",
+          "0x0000000000000000000000000000000000000804",
+          "0x0000000000000000000000000000000000000805",
+          "0x0000000000000000000000000000000000000806",
+          "0x0000000000000000000000000000000000000807",
+          "0x0000000000000000000000000000000000000900",
+          "0x0000000000000000000000000000000000000902"
+        ],
+        "history_serve_window": "8192",
+        "extended_denom_options": { "extended_denom": "asteem" }
+      }
+    },
+    "erc20": {
+      "params": { "enable_erc20": true, "permissionless_registration": true }
+    },
+    "oracledata": {
+      "params": {
+        "vote_period": "600",
+        "vote_threshold": "0.500000000000000000",
+        "reward_band": "0.020000000000000000",
+        "miss_band": "0.030000000000000000",
+        "whitelist": ["STEEM/USD_External", "STEEM/SBD_Internal", "SBD/USD_External", "Price_Feed"]
+      }
+    },
+    "steembridge": {
+      "params": {
+        "bridge_enabled": true,
+        "bridge_out_enabled": true,
+        "gateway_account": "svm.bank",
+        "bridge_confirmation_threshold": "0.666666666666666667",
+        "minimum_bridge_amount": "0",
+        "maximum_bridge_amount": "0",
+        "deposit_timeout_blocks": "50400",
+        "name_service_enabled": true,
+        "name_registration_min_millisteem": "1",
+        "name_pending_timeout_blocks": "50400",
+        "bridge_fee_bps": 25,
+        "withdrawal_timeout_blocks": "50400"
+      }
+    }
+  },
+  "consensus": {
+    "params": {
+      "block": { "max_bytes": "22020096", "max_gas": "-1" },
+      "evidence": { "max_age_num_blocks": "100000", "max_age_duration": "172800000000000", "max_bytes": "1048576" },
+      "validator": { "pub_key_types": ["ed25519"] }
+    }
+  }
+}

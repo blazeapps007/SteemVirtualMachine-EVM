@@ -71,6 +71,9 @@ func (k Keeper) ValidateNameRegistrationAcceptance(ctx context.Context, msg *typ
 	if msg.AmountMillisteem < params.NameRegistrationMinMillisteem {
 		return types.ErrRegistrationBelowMinimum
 	}
+	if err := params.CheckSteemBlock(msg.SteemBlock); err != nil {
+		return err
+	}
 
 	validatorAddr, err := k.addressCodec.StringToBytes(msg.Validator)
 	if err != nil {

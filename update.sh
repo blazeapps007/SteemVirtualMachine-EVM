@@ -68,7 +68,7 @@ HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME_FROM_ENV="${STEEMVM_HOME:-}"   # set explicitly by the operator?
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"
 export STEEMVM_HOME
-CHAIN_ID="${CHAIN_ID:-steemvm}"
+CHAIN_ID="${CHAIN_ID:-steemvm-2}"
 KEYRING="${KEYRING:-test}"
 GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 VALIDATOR_KEY="${VALIDATOR_KEY:-}"

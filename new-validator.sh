@@ -36,7 +36,7 @@ BIN="${BIN:-/root/go/bin/steemvmd}"
 HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # must match docker-compose.yml's bind mount
 export STEEMVM_HOME
-CHAIN_ID="${CHAIN_ID:-steemvm}"
+CHAIN_ID="${CHAIN_ID:-steemvm-2}"
 KEYRING="${KEYRING:-test}"    # unencrypted, no prompts. Set KEYRING=file/os for a password-protected keyring.
 KEY_TYPE="${KEY_TYPE:-eth_secp256k1}"
 

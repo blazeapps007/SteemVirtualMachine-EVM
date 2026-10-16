@@ -143,6 +143,38 @@ class Cycle:
     chain_id: str
     cfg: Config
     state_dir: str
+    # The chain's Steem anchor ID once this process has verified it.
+    verified_anchor: str = ""
+
+
+class SteemAnchorMismatch(RuntimeError):
+    """This oracle's Steem node disagrees with the chain's Steem anchor."""
+
+
+def verify_steem_anchor(cycle: Cycle, block: int, block_id: str) -> None:
+    """Checks this oracle's Steem node against the chain's Steem anchor
+    (relayer_start_block + relayer_start_block_id, recorded in genesis): the
+    node must return the recorded ID for the anchor block, or nothing it
+    reports may be attested. Verified once per process. Mirrors
+    oracle/go/relayer/anchor.go."""
+    if not block_id or block_id == cycle.verified_anchor:
+        return
+    got = cycle.steem.block_id(block)
+    if got != block_id:
+        raise SteemAnchorMismatch(
+            f"steem anchor mismatch: this chain starts at Steem block {block} with ID {block_id}, but the Steem RPC "
+            f"returns {got} (the RPC is on another network, or this node has the wrong genesis) -- not attesting anything"
+        )
+    cycle.verified_anchor = block_id
+
+
+def _anchored_cursor(cursor: int, chain_start: int) -> int:
+    """Never lets the scan cursor sit below the chain's Steem anchor: the chain
+    rejects attestations of earlier blocks (they predate it). Scanning begins
+    at cursor+1, so the lowest cursor is anchor-1."""
+    if chain_start > 0 and cursor < chain_start - 1:
+        return chain_start - 1
+    return cursor
 
 
 def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> State:
@@ -171,12 +203,26 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
         return state
     not_bonded_logged[0] = False
 
+    # The chain's Steem anchor (genesis): this oracle's Steem node must agree
+    # on the anchor block's ID before anything it reports is attested.
+    chain_start = int(params.get("relayer_start_block", 0) or 0)
+    verify_steem_anchor(cycle, chain_start, str(params.get("relayer_start_block_id", "") or ""))
+
     lib = cycle.steem.last_irreversible_block()
 
-    # First run: establish the cursor.
+    # First run: establish the cursor (never below the anchor).
     if state.last_scanned_block == 0:
-        state.last_scanned_block = _initial_cursor(cycle.cfg.start_block, int(params.get("relayer_start_block", 0)), lib)
+        state.last_scanned_block = _anchored_cursor(_initial_cursor(cycle.cfg.start_block, chain_start, lib), chain_start)
         logger.info("steem relayer cursor initialized: cursor=%d", state.last_scanned_block)
+        save_state(cycle.state_dir, state)
+        return state
+    # A saved cursor from before the anchor (e.g. a state volume kept from a
+    # previous chain) jumps up to it: that history predates this chain.
+    anchored = _anchored_cursor(state.last_scanned_block, chain_start)
+    if anchored != state.last_scanned_block:
+        logger.info("steem relayer cursor moved up to the chain's steem anchor: from=%d to=%d",
+                    state.last_scanned_block, anchored)
+        state.last_scanned_block = anchored
         save_state(cycle.state_dir, state)
         return state
 

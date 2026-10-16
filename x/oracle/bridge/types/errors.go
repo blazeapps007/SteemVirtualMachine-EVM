@@ -35,6 +35,7 @@ var (
 	ErrDuplicateWithdrawalConfirmation = errors.Register(ModuleName, 1121, "validator has already attested this withdrawal payout")
 	ErrWithdrawalPayoutMismatch        = errors.Register(ModuleName, 1122, "withdrawal payout attestation does not match the recorded payout facts")
 	ErrWithdrawalAlreadyRefunded       = errors.Register(ModuleName, 1123, "withdrawal already refunded (timeout expired before payout was attested)")
+	ErrSteemBlockBeforeAnchor          = errors.Register(ModuleName, 1124, "steem block is before this chain's steem anchor (relayer_start_block)")
 )
 
 // IsBenignAttestationError reports whether an acceptance error represents a

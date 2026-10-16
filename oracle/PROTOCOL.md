@@ -38,7 +38,7 @@ All three clients read the same `oracle/.env` (see `oracle/.env.example`).
 2. Build `AuthInfo{signer_infos: [{public_key: Any(ethsecp256k1.PubKey), mode_info: {single:
    {mode: SIGN_MODE_DIRECT}}, sequence}], fee: {amount, gas_limit, payer: "", granter: ""}}`.
 3. Serialize both to protobuf bytes: `body_bytes`, `auth_info_bytes`.
-4. Build `SignDoc{body_bytes, auth_info_bytes, chain_id: "steemvm", account_number}` and serialize
+4. Build `SignDoc{body_bytes, auth_info_bytes, chain_id: "steemvm-2", account_number}` and serialize
    it to protobuf bytes.
 5. Digest = `Keccak256(serialized SignDoc)`.
 6. Signature = ECDSA-sign the digest with the secp256k1 private key, go-ethereum style
@@ -517,3 +517,35 @@ stopped for over an hour.
 
 The threshold, tolerance and margin must be identical on every validator: they are consensus rules
 between signers.
+
+## 12. Steem anchor
+
+A chain's genesis records the **Steem anchor**: the Steem block the chain starts from, and that
+block's ID. They are the bridge params `relayer_start_block` and `relayer_start_block_id`.
+`launch-genesis.sh` records Steem's last irreversible block at genesis time. A Steem block ID begins
+with the block number in 8 hex digits, and the chain's param validation checks the two agree.
+
+**On-chain.** Any `MsgAttestDeposit`, `MsgSubmitNameRegistration` or `MsgAttestWithdrawalPayout`
+whose `steem_block` is below `relayer_start_block` is rejected with `ErrSteemBlockBeforeAnchor`.
+This applies in both the msg servers and the ante fee-exemption pre-checks. Steem history from
+before the chain existed can therefore never be attested. That covers a previous chain's deposits to
+the same gateway, and its `svm-withdrawal <id>` payouts, whose IDs collide with this chain's.
+
+**Every oracle**, before attesting anything:
+
+1. If `relayer_start_block_id` is set, fetch block `relayer_start_block` from its own Steem RPC
+   (`condenser_api.get_block`). Compare its `block_id`.
+   - If the IDs differ, the RPC is on another network, or this node has the wrong genesis. The
+     oracle attests nothing, logs `steem anchor mismatch` every cycle, and never caches it as
+     verified.
+   - Once the ID matches, it is verified for the life of the process. If governance moves the anchor,
+     the oracle verifies the new one.
+2. Never scan below the anchor. The cursor (the last scanned block) is at least
+   `relayer_start_block − 1`, both on first run (even with a lower `ORACLE_START_BLOCK`) and for a
+   saved cursor, such as a state volume kept from a previous chain.
+
+`relayer_start_block = 0` means no anchor: nothing is verified or rejected.
+
+Implementations: `oracle/go/relayer/anchor.go`, `oracle/python/src/steemvm_oracle/relayer.py`
+(`verify_steem_anchor`, `_anchored_cursor`), `oracle/js/src/steemAnchor.ts`. Each has the same
+tests.

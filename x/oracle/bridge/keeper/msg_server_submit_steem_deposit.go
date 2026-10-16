@@ -31,6 +31,9 @@ func (k msgServer) AttestDeposit(ctx context.Context, msg *types.MsgAttestDeposi
 	if msg.GatewayAccount != types.GatewayAccount {
 		return nil, types.ErrInvalidGatewayAccount
 	}
+	if err := params.CheckSteemBlock(msg.SteemBlock); err != nil {
+		return nil, err
+	}
 
 	validatorAddr, err := k.addressCodec.StringToBytes(msg.Validator)
 	if err != nil {
