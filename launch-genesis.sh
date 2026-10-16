@@ -8,8 +8,9 @@
 #   1. records the Steem anchor: Steem's current last irreversible block and
 #      its block ID. The chain never accepts Steem history from before it, and
 #      every oracle checks its Steem node against the ID before attesting;
-#   2. imports the genesis validator's account key from its mnemonic (typed,
-#      never echoed or stored in shell history);
+#   2. creates a NEW account key for the genesis validator and saves its
+#      mnemonic to a root-only file (validator-mnemonic.txt) for you to back
+#      up — or, with --import-mnemonic, imports an existing one instead;
 #   3. builds genesis.json: parameters from Instructions/genesis-params.json,
 #      the anchor, the validator's Steem name link, the allocation, the gentx;
 #   4. starts the node and the bridge oracle, and verifies blocks, the EVM
@@ -23,15 +24,19 @@
 #   cd SteemVirtualMachine-EVM && git checkout <release branch>
 #   ./launch-genesis.sh
 #
-# Usage: ./launch-genesis.sh [--skip-install] [--pull] [--no-oracle] [--yes]
-#   --skip-install  don't install Docker/jq/curl (they must already be there)
-#   --pull          pull the published images instead of building them here
-#   --no-oracle     don't configure or start the bridge oracle
-#   --yes           don't ask for confirmation before creating the chain
+# Usage: ./launch-genesis.sh [--import-mnemonic] [--skip-install] [--pull] [--no-oracle] [--yes]
+#   --import-mnemonic  use an existing account key: type its mnemonic (not
+#                      shown), or pipe it in. Default: create a new key.
+#   --skip-install     don't install Docker/jq/curl (they must already be there)
+#   --pull             use the published images (pulled if not already loaded)
+#                      instead of building them here
+#   --no-oracle        don't configure or start the bridge oracle
+#   --yes              don't ask for confirmation before creating the chain
 #
 # Overridable via env (defaults in brackets):
 #   CHAIN_ID [steemvm-2]          MONIKER [blazed007] (= the Steem account)
-#   EXPECTED_ADDRESS [blazed007's steem1am0j95… address; "" skips the check]
+#   MNEMONIC_FILE [validator-mnemonic.txt]   where a new key's mnemonic is saved
+#   EXPECTED_ADDRESS [""]  with --import-mnemonic: refuse if the key's address differs
 #   ALLOC_STEEM [1000000]  ALLOC_SBD [1000000]  SELF_STAKE_STEEM [100000]
 #   COMMISSION_RATE [0.10]  COMMISSION_MAX_RATE [0.20]  COMMISSION_MAX_CHANGE_RATE [0.01]
 #   STEEM_RPC [https://api.steemit.com]   PUBLIC_IP [detected]
@@ -47,7 +52,8 @@ set -euo pipefail
 # ── config ───────────────────────────────────────────────────────────────────
 CHAIN_ID="${CHAIN_ID:-steemvm-2}"
 MONIKER="${MONIKER:-blazed007}"
-EXPECTED_ADDRESS="${EXPECTED_ADDRESS-steem1am0j95eum7tezy8n9fwjrj0nldkwaskg9xphh8}"
+EXPECTED_ADDRESS="${EXPECTED_ADDRESS:-}"
+MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}"
 ALLOC_STEEM="${ALLOC_STEEM:-1000000}"
 ALLOC_SBD="${ALLOC_SBD:-1000000}"
 SELF_STAKE_STEEM="${SELF_STAKE_STEEM:-100000}"
@@ -66,9 +72,10 @@ GATEWAY=svm.bank
 GENTX_GAS=400000
 GENTX_FEE="400000000000000asteem"   # 400000 gas at the 1 gwei minimum gas price
 
-SKIP_INSTALL=0 PULL=0 NO_ORACLE=0 ASSUME_YES=0
+SKIP_INSTALL=0 PULL=0 NO_ORACLE=0 ASSUME_YES=0 IMPORT_MNEMONIC=0
 for arg in "$@"; do
   case "$arg" in
+    --import-mnemonic) IMPORT_MNEMONIC=1 ;;
     --skip-install) SKIP_INSTALL=1 ;;
     --pull) PULL=1 ;;
     --no-oracle) NO_ORACLE=1 ;;
@@ -120,6 +127,10 @@ if [ -e "$STEEMVM_HOME" ] && [ -n "$(ls -A "$STEEMVM_HOME" 2>/dev/null)" ]; then
 fi
 if $DOCKER ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   die "a '$CONTAINER' container already exists on this machine. Remove it first if this really is meant to be the new chain's first node."
+fi
+# Never overwrite a saved mnemonic: it may be the only copy of a key.
+if [ "$IMPORT_MNEMONIC" = "0" ] && [ -e "$MNEMONIC_FILE" ]; then
+  die "$MNEMONIC_FILE already exists (from an earlier run?). Back it up and move it away first."
 fi
 
 # ── 3. Steem: the validator's public keys and the anchor ─────────────────────
@@ -193,10 +204,13 @@ case "$STEEMVM_HOME" in ""|/) die "refusing STEEMVM_HOME='$STEEMVM_HOME'." ;; es
 # Until the node starts, a failure removes the half-built home (it was empty
 # or absent, checked above) so the script can simply be re-run.
 NODE_STARTED=0
+CREATED_MNEMONIC_FILE=0
 cleanup() {
   local rc=$?
   if [ "$rc" -ne 0 ] && [ "$NODE_STARTED" = "0" ] && [ -d "$STEEMVM_HOME" ]; then
     rm -rf "$STEEMVM_HOME"
+    # A key created in this run died with the home; its mnemonic is useless.
+    [ "$CREATED_MNEMONIC_FILE" = "1" ] && rm -f "$MNEMONIC_FILE"
     warn "removed the half-built $STEEMVM_HOME — fix the problem above and re-run."
   fi
 }
@@ -205,19 +219,31 @@ mkdir -p "$STEEMVM_HOME"
 log "Initialising the node home…"
 sv init "$MONIKER" --chain-id "$CHAIN_ID" --default-denom asteem >/dev/null 2>&1 || die "steemvmd init failed."
 
-if [ -t 0 ]; then
-  echo
-  echo "Enter @$MONIKER's SteemVM account mnemonic (24 words). It is not shown, logged or saved"
-  read -rsp "anywhere except this node's keyring: " MNEMONIC || die "no mnemonic entered."
-  echo
+if [ "$IMPORT_MNEMONIC" = "1" ]; then
+  if [ -t 0 ]; then
+    echo
+    echo "Enter @$MONIKER's SteemVM account mnemonic (24 words). It is not shown, logged or saved"
+    read -rsp "anywhere except this node's keyring: " MNEMONIC || die "no mnemonic entered."
+    echo
+  else
+    # piped in (automation): ./launch-genesis.sh --import-mnemonic --yes < mnemonic.txt
+    read -r MNEMONIC || die "no mnemonic on stdin."
+  fi
+  [ "$(printf '%s' "$MNEMONIC" | wc -w)" -ge 12 ] || die "that doesn't look like a mnemonic."
+  printf '%s\n' "$MNEMONIC" | sv_stdin keys add "$MONIKER" --recover --key-type eth_secp256k1 --keyring-backend "$KEYRING" >/dev/null 2>&1 \
+    || { unset MNEMONIC; die "importing the key failed (is the mnemonic correct?)."; }
+  unset MNEMONIC
 else
-  # piped in (automation): ./launch-genesis.sh --yes < mnemonic.txt
-  read -r MNEMONIC || die "no mnemonic on stdin."
+  log "Creating a new account key for @$MONIKER…"
+  # In JSON mode `keys add` writes the record (with the mnemonic) to stderr.
+  KEY_JSON="$(sv keys add "$MONIKER" --key-type eth_secp256k1 --keyring-backend "$KEYRING" --output json 2>&1)" \
+    || die "creating the key failed."
+  (umask 077; printf '%s\n' "$KEY_JSON" | grep '^{' | tail -1 | jq -r '.mnemonic // empty' > "$MNEMONIC_FILE")
+  unset KEY_JSON
+  CREATED_MNEMONIC_FILE=1
+  [ "$(wc -w < "$MNEMONIC_FILE")" -ge 12 ] || die "steemvmd did not return a mnemonic."
+  ok "New key created; its mnemonic is in $MNEMONIC_FILE (readable by root only)."
 fi
-[ "$(printf '%s' "$MNEMONIC" | wc -w)" -ge 12 ] || die "that doesn't look like a mnemonic."
-printf '%s\n' "$MNEMONIC" | sv_stdin keys add "$MONIKER" --recover --key-type eth_secp256k1 --keyring-backend "$KEYRING" >/dev/null 2>&1 \
-  || { unset MNEMONIC; die "importing the key failed (is the mnemonic correct?)."; }
-unset MNEMONIC
 ADDRESS="$(sv keys show "$MONIKER" -a --keyring-backend "$KEYRING" | tr -d '\r')"
 if [ -n "$EXPECTED_ADDRESS" ] && [ "$ADDRESS" != "$EXPECTED_ADDRESS" ]; then
   die "that mnemonic gives $ADDRESS, not @$MONIKER's $EXPECTED_ADDRESS. Check the mnemonic (or set EXPECTED_ADDRESS)."
@@ -329,6 +355,11 @@ if [ "$NO_ORACLE" = "0" ]; then
 fi
 
 # ── 10. summary ──────────────────────────────────────────────────────────────
+MNEMONIC_NOTE=""
+if [ "$CREATED_MNEMONIC_FILE" = "1" ]; then
+  MNEMONIC_NOTE="    $(pwd)/$MNEMONIC_FILE   (the NEW account's mnemonic — show it with:
+       cat $MNEMONIC_FILE   then write it down offline and remove the file: shred -u $MNEMONIC_FILE)"
+fi
 cat <<EOF
 
 $(ok "Chain $CHAIN_ID is live.")
@@ -344,6 +375,7 @@ $(ok "Chain $CHAIN_ID is live.")
     $STEEMVM_HOME/config/priv_validator_key.json   (consensus key: double-signing = slashing)
     $STEEMVM_HOME/config/node_key.json
     $STEEMVM_HOME/keyring-test/                    (the account key, unencrypted)
+$MNEMONIC_NOTE
 
   Next:
     1. Publish Instructions/genesis.json (sha256 above) to the repository: every
