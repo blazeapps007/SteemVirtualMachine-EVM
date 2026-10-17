@@ -36,7 +36,7 @@
 #   --yes              don't ask for confirmation before creating the chain
 #
 # Overridable via env (defaults in brackets):
-#   CHAIN_ID [steemvm-2]          MONIKER [blazed007] (= the Steem account)
+#   CHAIN_ID [steemvm-2]   MONIKER [asked]  the genesis validator's Steem username (its moniker)
 #   MNEMONIC_FILE [validator-mnemonic.txt]   where a new key's mnemonic is saved
 #   EXPECTED_ADDRESS [""]  with --import-mnemonic: refuse if the key's address differs
 #   ALLOC_STEEM [1000000]  ALLOC_SBD [1000000]  SELF_STAKE_STEEM [100000]
@@ -54,7 +54,7 @@ set -euo pipefail
 
 # ── config ───────────────────────────────────────────────────────────────────
 CHAIN_ID="${CHAIN_ID:-steemvm-2}"
-MONIKER="${MONIKER:-blazed007}"
+MONIKER="${MONIKER:-}"
 EXPECTED_ADDRESS="${EXPECTED_ADDRESS:-}"
 MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}"
 ALLOC_STEEM="${ALLOC_STEEM:-1000000}"
@@ -136,7 +136,31 @@ if [ "$IMPORT_MNEMONIC" = "0" ] && [ -e "$MNEMONIC_FILE" ]; then
   die "$MNEMONIC_FILE already exists (from an earlier run?). Back it up and move it away first."
 fi
 
-# ── 3. Steem: the validator's public keys and the anchor ─────────────────────
+# ── 3. Steem: the validator's account, public keys and the anchor ───────────
+# The genesis validator's Steem username is its on-chain identity: the
+# moniker, the name link in genesis, and the account the svm.bank signer
+# signs as. Piped (automation): the username is the first line of stdin.
+if [ -z "$MONIKER" ]; then
+  if [ -t 0 ]; then
+    read -rp "Steem username of the genesis validator (e.g. blaze.apps): " MONIKER || die "no username entered."
+  else
+    read -r MONIKER || die "no Steem username on stdin."
+  fi
+fi
+MONIKER="$(printf '%s' "${MONIKER#@}" | tr -d '[:space:]' | tr 'A-Z' 'a-z')"
+# Steem account names: 3-16 chars; dot-separated segments of 3+ chars that
+# start with a letter, end with a letter or digit, and contain no "--".
+valid_steem_name() {
+  local seg
+  [ "${#1}" -ge 3 ] && [ "${#1}" -le 16 ] || return 1
+  IFS=. read -ra segs <<< "$1"
+  [ "${1: -1}" != "." ] || return 1
+  for seg in "${segs[@]}"; do
+    [[ "$seg" =~ ^[a-z][a-z0-9-]+[a-z0-9]$ ]] && [[ "$seg" != *--* ]] || return 1
+  done
+}
+valid_steem_name "$MONIKER" || die "'$MONIKER' is not a valid Steem account name."
+
 steem() { curl -fsS -m 30 "$STEEM_RPC" -H 'Content-Type: application/json' \
   -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}"; }
 
