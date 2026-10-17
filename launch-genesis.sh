@@ -13,8 +13,10 @@
 #      up — or, with --import-mnemonic, imports an existing one instead;
 #   3. builds genesis.json: parameters from Instructions/genesis-params.json,
 #      the anchor, the validator's Steem name link, the allocation, the gentx;
-#   4. starts the node and the bridge oracle, and verifies blocks, the EVM
-#      chain-id and the anchor;
+#   4. starts the node and the oracle — bridge relay, price feed and the
+#      svm.bank multisig signer, live, with @MONIKER's Steem ACTIVE key (asked
+#      up front, verified by the signer against the account) — and verifies
+#      blocks, the EVM chain-id and the anchor;
 #   5. writes the final genesis to Instructions/genesis.json and prints the
 #      genesis sha256, the peer string and what to back up.
 #
@@ -42,6 +44,7 @@
 #   STEEM_RPC [https://api.steemit.com]   PUBLIC_IP [detected]
 #   STEEMVM_HOME [$HOME/.steemvm]         STEEMVM_IMAGE [steemblazer/steemvmd:v<VERSION>]
 #   ORACLE_PROFILE [go]  ORACLE_PRICE_SOURCE [coingecko]  ORACLE_CMC_API_KEY []
+#   ORACLE_STEEM_ACTIVE_WIF [asked]  the Steem ACTIVE key for the svm.bank signer
 #   START_TIMEOUT [300]
 
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -178,6 +181,25 @@ if [ "$ASSUME_YES" = "0" ]; then
   [ "$CONFIRM" = "YES" ] || die "cancelled — nothing was created."
 fi
 
+# The oracle runs the svm.bank multisig signer (oracle/PROTOCOL.md §11), which
+# signs with @MONIKER's Steem ACTIVE key — the only Steem key it uses. Asked
+# now, before the long build. The signer itself verifies it against the
+# account (and refuses an owner key) when it starts; see step 9.
+if [ "$NO_ORACLE" = "0" ]; then
+  ACTIVE_WIF="${ORACLE_STEEM_ACTIVE_WIF:-}"
+  if [ -z "$ACTIVE_WIF" ]; then
+    if [ -t 0 ]; then
+      echo "Enter @$MONIKER's Steem ACTIVE private key (WIF, starts with 5; public key $ACTIVE_KEY)."
+      read -rsp "It is not shown; it is stored only in oracle/.env (root-only): " ACTIVE_WIF || die "no active key entered."
+      echo
+    else
+      # piped (automation): the active WIF on the first line of stdin
+      read -r ACTIVE_WIF || die "no Steem active key on stdin."
+    fi
+  fi
+  [[ "$ACTIVE_WIF" =~ ^5[1-9A-HJ-NP-Za-km-z]{50}$ ]] || die "that is not a Steem private key (WIF: 51 base58 characters starting with 5)."
+fi
+
 # ── 4. images ────────────────────────────────────────────────────────────────
 if [ "$PULL" = "1" ]; then
   if ! $DOCKER image inspect "$STEEMVM_IMAGE" >/dev/null 2>&1; then
@@ -226,7 +248,7 @@ if [ "$IMPORT_MNEMONIC" = "1" ]; then
     read -rsp "anywhere except this node's keyring: " MNEMONIC || die "no mnemonic entered."
     echo
   else
-    # piped in (automation): ./launch-genesis.sh --import-mnemonic --yes < mnemonic.txt
+    # piped in (automation): the mnemonic on the line after the active WIF
     read -r MNEMONIC || die "no mnemonic on stdin."
   fi
   [ "$(printf '%s' "$MNEMONIC" | wc -w)" -ge 12 ] || die "that doesn't look like a mnemonic."
@@ -347,11 +369,42 @@ if [ "$NO_ORACLE" = "0" ]; then
     echo "ORACLE_PRICE_SOURCE=$ORACLE_PRICE_SOURCE"
     [ -n "${ORACLE_CMC_API_KEY:-}" ] && echo "ORACLE_CMC_API_KEY=$ORACLE_CMC_API_KEY"
     echo "# No ORACLE_START_BLOCK: the oracle starts at the chain's Steem anchor."
+    echo
+    echo "# svm.bank multisig signer, fully live (oracle/PROTOCOL.md §11)."
+    echo "ORACLE_MULTISIG_ENABLED=true"
+    printf 'ORACLE_STEEM_ACTIVE_WIF=%s\n' "$ACTIVE_WIF"
+    if [ "$STEEM_RPC" = "https://api.justyy.com" ]; then
+      echo "ORACLE_STEEM_RPCS=$STEEM_RPC,https://api.steemit.com"
+    else
+      echo "ORACLE_STEEM_RPCS=$STEEM_RPC,https://api.justyy.com"
+    fi
   } > oracle/.env
   umask 022
+  unset ACTIVE_WIF
   log "Starting the $ORACLE_PROFILE oracle…"
   $COMPOSE --profile "$ORACLE_PROFILE" up -d "oracle-$ORACLE_PROFILE"
   ok "Oracle started (logs: $COMPOSE logs -f oracle-$ORACLE_PROFILE)."
+
+  # The signer checks the key against @MONIKER's on-chain active authority
+  # (and refuses an owner key) before it does anything; report what it said.
+  log "Waiting for the svm.bank signer to verify the active key…"
+  SIGNER_STATUS="no answer within 120s"
+  deadline=$(( $(date +%s) + 120 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    OLOG="$($COMPOSE logs --no-color "oracle-$ORACLE_PROFILE" 2>&1 || true)"
+    if printf '%s' "$OLOG" | grep -q "svm.bank signer ready"; then SIGNER_STATUS=ready; break; fi
+    if printf '%s' "$OLOG" | grep -q -E "signer: init failed|refusing to start"; then
+      SIGNER_STATUS="$(printf '%s' "$OLOG" | grep -E "signer: init failed|refusing to start" | tail -1)"
+      break
+    fi
+    sleep 5
+  done
+  if [ "$SIGNER_STATUS" = "ready" ]; then
+    ok "svm.bank signer is live: @$MONIKER's active key verified."
+  else
+    warn "the svm.bank signer is not running: $SIGNER_STATUS"
+    warn "fix ORACLE_STEEM_ACTIVE_WIF in oracle/.env, then: $COMPOSE --profile $ORACLE_PROFILE up -d --force-recreate oracle-$ORACLE_PROFILE"
+  fi
 fi
 
 # ── 10. summary ──────────────────────────────────────────────────────────────
@@ -376,6 +429,8 @@ $(ok "Chain $CHAIN_ID is live.")
     $STEEMVM_HOME/config/node_key.json
     $STEEMVM_HOME/keyring-test/                    (the account key, unencrypted)
 $MNEMONIC_NOTE
+  Keep private (root-only, never commit): oracle/.env — the oracle's signing key
+  and @$MONIKER's Steem ACTIVE key.
 
   Next:
     1. Publish Instructions/genesis.json (sha256 above) to the repository: every
