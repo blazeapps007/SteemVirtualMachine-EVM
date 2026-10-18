@@ -262,14 +262,16 @@ set_evm_chain_id() {
 
 # ── oracle/.env (never rewritten: missing keys are appended, nothing else) ──
 ENV_FILE="oracle/.env"
+# A line is KEY=value, also with leading spaces, `export `, or spaces around =.
+env_line() { printf '^[[:space:]]*(export[[:space:]]+)?%s[[:space:]]*=' "$1"; }
 env_get() {
   [ -f "$ENV_FILE" ] || return 0
-  sed -n "s/^$1=//p" "$ENV_FILE" | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^["'\'']//; s/["'\'']$//; s/[[:space:]]+$//'
+  sed -nE "s/$(env_line "$1")[[:space:]]*//p" "$ENV_FILE" | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^["'\'']//; s/["'\'']$//; s/[[:space:]]+$//'
 }
 env_set_if_missing() {
   [ -n "$(env_get "$1")" ] && return 0
   if [ -f "$ENV_FILE" ]; then
-    sed -i.bak "/^$1=[[:space:]]*\$/d" "$ENV_FILE"
+    sed -i.bak -E "/$(env_line "$1")[[:space:]]*\$/d" "$ENV_FILE"
     rm -f "$ENV_FILE.bak"
   fi
   printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"
@@ -491,6 +493,20 @@ if [ "$REJOIN" = "1" ]; then
   ok "Active key matches @$STEEM_USERNAME ($ACTIVE_PUB)."
 fi
 
+# The oracle must follow THIS node. A node URL override left over from the old
+# chain (another server's RPC/REST) can't be right for the new one; the
+# compose default (http://steemvm:…) is this node, so such overrides are
+# commented out after YES.
+STALE_NODE_VARS=""
+if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
+  for v in ORACLE_NODE_RPC ORACLE_NODE_REST; do
+    case "$(env_get "$v")" in
+      ""|http://steemvm:*|http://steemvm-node:*) ;;
+      *) STALE_NODE_VARS="$STALE_NODE_VARS $v" ;;
+    esac
+  done
+fi
+
 # ── confirm ──────────────────────────────────────────────────────────────────
 echo
 if [ "$REJOIN_ONLY" = "0" ]; then
@@ -509,10 +525,18 @@ if [ "$REJOIN" = "1" ]; then
   log "  sends 0.001 STEEM from @$STEEM_USERNAME to svm.bank (memo: svm-register $ADDR) if not yet registered,"
   log "  claims faucet coins, waits for $(steem_atoms "$STAKE_AMOUNT") STEEM, and creates the validator."
 fi
+for v in $STALE_NODE_VARS; do
+  log "oracle/.env: comments out $v=$(env_get "$v") — the oracle uses this node (http://steemvm:…)."
+done
 [ -n "$ORACLE_PROFILE" ] && log "Finally it restarts the $ORACLE_PROFILE oracle on its published image."
 [ "$REJOIN_ONLY" = "0" ] && warn "Your node will be out of sync until it catches up."
 read -rp "Type YES to confirm: " CONFIRM < /dev/tty
 [ "$CONFIRM" = "YES" ] || die "reset cancelled — nothing was touched."
+
+for v in $STALE_NODE_VARS; do
+  sed -i.bak -E "s/($(env_line "$v"))/# (reset.sh: the oracle uses this node) \1/" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  ok "oracle/.env: commented out $v."
+done
 
 # Save the active key first, so a later --rejoin-only never asks again.
 if [ "$REJOIN" = "1" ]; then
