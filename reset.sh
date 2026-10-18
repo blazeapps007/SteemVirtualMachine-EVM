@@ -493,18 +493,44 @@ if [ "$REJOIN" = "1" ]; then
   ok "Active key matches @$STEEM_USERNAME ($ACTIVE_PUB)."
 fi
 
-# The oracle must follow THIS node. A node URL override left over from the old
-# chain (another server's RPC/REST) can't be right for the new one; the
-# compose default (http://steemvm:…) is this node, so such overrides are
-# commented out after YES.
-STALE_NODE_VARS=""
+# oracle/.env lines that can't be right on the new chain, commented out after
+# YES (secrets are removed instead). "VAR|reason" entries:
+#   - a node URL override pointing away from this node (the old chain's RPC/
+#     REST): the compose default http://steemvm:… is this node;
+#   - an owner/posting key or password: only the active key belongs on the
+#     server, and the svm.bank signer refuses to start next to them;
+#   - ORACLE_GAS_PRICES far from this chain's floor (an old chain's value):
+#     price-feed txs pay it, and they aren't fee-exempt;
+#   - ORACLE_PRICE_SOURCE=cmc without a CoinMarketCap key (CoinGecko is keyless).
+ENV_FIXES=()
+# Owner/posting keys and passwords are removed, not commented out: a secret
+# must not stay on disk.
+secret_var() {
+  case "$1" in
+    ORACLE_STEEM_OWNER_WIF|ORACLE_STEEM_OWNER|ORACLE_STEEM_POSTING_WIF|ORACLE_STEEM_MASTER_PASSWORD|ORACLE_STEEM_PASSWORD|OWNER|POSTING|MASTER_PASSWORD) return 0 ;;
+  esac
+  return 1
+}
 if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
   for v in ORACLE_NODE_RPC ORACLE_NODE_REST; do
-    case "$(env_get "$v")" in
+    u="$(env_get "$v")"
+    case "$u" in
       ""|http://steemvm:*|http://steemvm-node:*) ;;
-      *) STALE_NODE_VARS="$STALE_NODE_VARS $v" ;;
+      *) ENV_FIXES+=("$v|$v=$u points away from this node — the oracle uses http://steemvm:…") ;;
     esac
   done
+  for v in ORACLE_STEEM_OWNER_WIF ORACLE_STEEM_OWNER ORACLE_STEEM_POSTING_WIF ORACLE_STEEM_MASTER_PASSWORD ORACLE_STEEM_PASSWORD OWNER POSTING MASTER_PASSWORD; do
+    [ -n "$(env_get "$v")" ] && ENV_FIXES+=("$v|$v (value not shown) — only the active key belongs on this server")
+  done
+  CHAIN_GAS="$(sed -n 's/^minimum-gas-prices = "\([0-9]*\)asteem".*/\1/p' Instructions/app.toml.example | head -1)"
+  GAS="$(env_get ORACLE_GAS_PRICES)"
+  if [ -n "$GAS" ] && [ -n "$CHAIN_GAS" ] \
+     && ! awk -v g="${GAS%asteem}" -v m="$CHAIN_GAS" 'BEGIN{exit !(g+0 >= m+0 && g+0 <= 10*m)}'; then
+    ENV_FIXES+=("ORACLE_GAS_PRICES|ORACLE_GAS_PRICES=$GAS is not near $TARGET_CHAIN's ${CHAIN_GAS}asteem floor — the default is that floor")
+  fi
+  if [ "$(env_get ORACLE_PRICE_SOURCE)" = "cmc" ] && [ -z "$(env_get ORACLE_CMC_API_KEY)" ]; then
+    ENV_FIXES+=("ORACLE_PRICE_SOURCE|ORACLE_PRICE_SOURCE=cmc has no ORACLE_CMC_API_KEY — CoinGecko (keyless) instead")
+  fi
 fi
 
 # ── confirm ──────────────────────────────────────────────────────────────────
@@ -525,17 +551,24 @@ if [ "$REJOIN" = "1" ]; then
   log "  sends 0.001 STEEM from @$STEEM_USERNAME to svm.bank (memo: svm-register $ADDR) if not yet registered,"
   log "  claims faucet coins, waits for $(steem_atoms "$STAKE_AMOUNT") STEEM, and creates the validator."
 fi
-for v in $STALE_NODE_VARS; do
-  log "oracle/.env: comments out $v=$(env_get "$v") — the oracle uses this node (http://steemvm:…)."
+for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
+  if secret_var "${f%%|*}"; then log "oracle/.env: removes ${f#*|}."
+  else log "oracle/.env: comments out ${f#*|}."; fi
 done
 [ -n "$ORACLE_PROFILE" ] && log "Finally it restarts the $ORACLE_PROFILE oracle on its published image."
 [ "$REJOIN_ONLY" = "0" ] && warn "Your node will be out of sync until it catches up."
 read -rp "Type YES to confirm: " CONFIRM < /dev/tty
 [ "$CONFIRM" = "YES" ] || die "reset cancelled — nothing was touched."
 
-for v in $STALE_NODE_VARS; do
-  sed -i.bak -E "s/($(env_line "$v"))/# (reset.sh: the oracle uses this node) \1/" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-  ok "oracle/.env: commented out $v."
+for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
+  v="${f%%|*}"
+  if secret_var "$v"; then
+    sed -i.bak -E "/$(env_line "$v")/d" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+    ok "oracle/.env: removed $v."
+  else
+    sed -i.bak -E "s/($(env_line "$v"))/# (reset.sh: not for $TARGET_CHAIN) \1/" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+    ok "oracle/.env: commented out $v."
+  fi
 done
 
 # Save the active key first, so a later --rejoin-only never asks again.

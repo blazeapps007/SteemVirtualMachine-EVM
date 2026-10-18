@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"cosmossdk.io/log/v2"
-	rpchttp "github.com/cometbft/cometbft/rpc/client/http"
 	"github.com/cosmos/cosmos-sdk/client"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"steemvm/oracle/go/multisig"
+	"steemvm/oracle/go/relayer"
 	"steemvm/oracle/go/steemtx"
 )
 
@@ -99,7 +99,7 @@ func startMultisig(ctx context.Context, logger log.Logger, clientCtx client.Cont
 		cfg.Policy.MaxPerTxMilli[sym] = uint64(a.Amount)
 	}
 
-	rpcClient, err := rpchttp.New(nodeRPC, "/websocket")
+	rpcClient, err := relayer.NewNodeRPC(nodeRPC)
 	if err != nil {
 		return fmt.Errorf("multisig: node RPC client: %w", err)
 	}

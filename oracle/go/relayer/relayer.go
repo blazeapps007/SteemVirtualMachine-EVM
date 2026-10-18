@@ -43,7 +43,7 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 	valoperAddr := sdk.ValAddress(signerAddr).String()
 
 	// Connect to the SteemVM node RPC (broadcast + ABCI queries route through it).
-	rpcClient, err := rpchttp.New(nodeRPC, "/websocket")
+	rpcClient, err := NewNodeRPC(nodeRPC)
 	if err != nil {
 		return fmt.Errorf("cannot create node RPC client for %q: %w", nodeRPC, err)
 	}
