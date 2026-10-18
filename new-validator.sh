@@ -129,11 +129,12 @@ fetch_statesync_trust() {
   return 0
 }
 
-# Standing extra peers (the steemvm-2 genesis node, blaze.apps), always
+# Standing extra peers (blaze.apps — the steemvm-2 genesis node —,
+# xpilar.witness, blazed007: validators with their p2p port open), always
 # included alongside whatever $SEED_RPC resolves to. Space-separated
 # "id@host:26656" entries — add more here as validators join, or update an
 # entry if that node's identity/address ever changes.
-EXTRA_PERSISTENT_PEERS="4cf3ee09021d3d0f55ce07b5106a00d4478061bf@62.169.19.142:26656"
+EXTRA_PERSISTENT_PEERS="371e1665e6cff2e3317fe9befa48a69d8ba0f8b9@62.169.19.142:26656 276517876869cbb4b2f130983646ea6945920629@45.151.123.214:26656 36e386e3aaac8f892d8498c4c83355964a6458c2@57.131.13.43:26656"
 
 # rpc_with_port: CometBFT's light client wants an explicit port.
 rpc_with_port() {
@@ -176,8 +177,10 @@ fetch_seed_peer() {
   SEED_PEER="${node_id}@${addr}"
   # Append the standing extras, skipping the seed itself.
   for p in $EXTRA_PERSISTENT_PEERS; do
+    # Skip the seed itself — also under an old node ID at the same address
+    # (a node reset with a fresh home gets a new ID).
     case "$p" in
-      "${node_id}@"*) ;;
+      "${node_id}@"*|*"@${addr}") ;;
       *) SEED_PEER="${SEED_PEER},${p}" ;;
     esac
   done

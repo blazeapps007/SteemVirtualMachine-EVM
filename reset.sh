@@ -164,9 +164,10 @@ done
 # ── state-sync / peer discovery helpers (same logic as new-validator.sh) ────
 MIN_STATESYNC_HEIGHT=1500
 
-# Standing peers, always added to whatever $SEED_RPC resolves to.
-# Space-separated "id@host:26656" entries.
-EXTRA_PERSISTENT_PEERS="4cf3ee09021d3d0f55ce07b5106a00d4478061bf@62.169.19.142:26656"
+# Standing peers, always added to whatever $SEED_RPC resolves to: blaze.apps
+# (the steemvm-2 genesis node), xpilar.witness, blazed007 — validators with
+# their p2p port open. Space-separated "id@host:26656" entries.
+EXTRA_PERSISTENT_PEERS="371e1665e6cff2e3317fe9befa48a69d8ba0f8b9@62.169.19.142:26656 276517876869cbb4b2f130983646ea6945920629@45.151.123.214:26656 36e386e3aaac8f892d8498c4c83355964a6458c2@57.131.13.43:26656"
 
 fetch_statesync_trust() {
   TRUST_HEIGHT="" TRUST_HASH=""
@@ -198,13 +199,20 @@ fetch_seed_peer() {
       [ -n "$host" ] || return 1
       addr="${host}:26656" ;;
   esac
-  SEED_PEER="${node_id}@${addr}"
+  # This node's own ID (its node_key.json is kept): a validator in the standing
+  # list must not be its own persistent peer.
+  local self_id
+  self_id="$(offline comet show-node-id 2>/dev/null | tr -d '\r' | tail -1 || true)"
+  [ "$node_id" = "$self_id" ] || SEED_PEER="${node_id}@${addr}"
   for p in $EXTRA_PERSISTENT_PEERS; do
+    # Skip the seed itself — also under an old node ID at the same address
+    # (a node reset with a fresh home gets a new ID) — and this node.
     case "$p" in
-      "${node_id}@"*) ;;
-      *) SEED_PEER="${SEED_PEER},${p}" ;;
+      "${node_id}@"*|*"@${addr}"|"${self_id:-none}@"*) ;;
+      *) SEED_PEER="${SEED_PEER:+$SEED_PEER,}${p}" ;;
     esac
   done
+  [ -n "$SEED_PEER" ] || return 1
   rpc="$(rpc_with_port "$SEED_RPC")"
   SEED_RPC_LIST="${rpc},${rpc}"
   return 0
@@ -338,11 +346,19 @@ fi
 
 TARGET_CHAIN="$(tr -d '\r' < Instructions/genesis.json | jq -r '.chain_id // empty')"
 [ -n "$TARGET_CHAIN" ] || die "Instructions/genesis.json has no chain_id."
+TARGET_GTIME="$(tr -d '\r' < Instructions/genesis.json | jq -r '.genesis_time // empty')"
 CURRENT_CHAIN="$(jq -r '.chain_id // empty' "$STEEMVM_HOME/config/genesis.json" 2>/dev/null || true)"
+CURRENT_GTIME="$(jq -r '.genesis_time // empty' "$STEEMVM_HOME/config/genesis.json" 2>/dev/null || true)"
+# A new chain is another chain-id OR another genesis: a relaunch can keep the
+# chain-id (steemvm-2 was relaunched), and then only the genesis time differs.
 NEW_CHAIN=0
-[ "$CURRENT_CHAIN" != "$TARGET_CHAIN" ] && NEW_CHAIN=1
+if [ "$CURRENT_CHAIN" != "$TARGET_CHAIN" ] || [ "$CURRENT_GTIME" != "$TARGET_GTIME" ]; then NEW_CHAIN=1; fi
+CURRENT_LABEL="${CURRENT_CHAIN:-?}" TARGET_LABEL="$TARGET_CHAIN"
+if [ "$CURRENT_CHAIN" = "$TARGET_CHAIN" ]; then
+  CURRENT_LABEL="$CURRENT_CHAIN (genesis ${CURRENT_GTIME:-?})" TARGET_LABEL="$TARGET_CHAIN (genesis $TARGET_GTIME)"
+fi
 if [ "$REJOIN_ONLY" = "1" ]; then
-  [ "$NEW_CHAIN" = "0" ] || die "--rejoin-only: this node is still on '$CURRENT_CHAIN', not '$TARGET_CHAIN' — run ./reset.sh without it first."
+  [ "$NEW_CHAIN" = "0" ] || die "--rejoin-only: this node is still on '$CURRENT_LABEL', not '$TARGET_LABEL' — run ./reset.sh without it first."
   docker exec "$CONTAINER" true 2>/dev/null || die "--rejoin-only needs the node running: $COMPOSE up -d steemvm"
 fi
 [ "$REJOIN_ONLY" = "1" ] && [ "$NO_REJOIN" = "1" ] && die "--rejoin-only and --no-rejoin contradict each other."
@@ -614,7 +630,7 @@ fi
 echo
 if [ "$REJOIN_ONLY" = "0" ]; then
   if [ "$NEW_CHAIN" = "1" ]; then
-    log "This moves this node from '${CURRENT_CHAIN:-?}' to '$TARGET_CHAIN':"
+    log "This moves this node from '$CURRENT_LABEL' to '$TARGET_LABEL':"
     log "  wipes local chain data and the old chain's peers + cosmovisor upgrade slots,"
     log "  installs the $TARGET_CHAIN genesis, chain-id and EVM chain-id $EVM_CHAIN_ID, and state-syncs."
   else

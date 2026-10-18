@@ -79,7 +79,7 @@ GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 VALIDATOR_KEY="${VALIDATOR_KEY:-}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-}"
 
-NODE_IPS="${NODE_IPS:-62.169.19.142}"
+NODE_IPS="${NODE_IPS:-62.169.19.142 45.151.123.214 57.131.13.43}"
 export NODE_IPS
 # Public CometBFT RPCs (full URLs) tried first for the state-sync trust anchor;
 # NODE_IPS' plain :RPC_PORT is only a fallback (validators keep RPC private).
@@ -171,9 +171,16 @@ else
 fi
 ok "At $(git rev-parse --short HEAD) ($(git describe --tags --always 2>/dev/null))."
 
-# chain_id_of <genesis.json>: no jq needed (bare metal may not have it).
-chain_id_of() { tr -d '\r' < "$1" 2>/dev/null | sed -n 's/^ *"chain_id": *"\([^"]*\)".*/\1/p' | head -1; }
-TARGET_CHAIN="$(chain_id_of Instructions/genesis.json)"
+# genesis_of <genesis.json>: "<chain_id> (genesis <genesis_time>)", no jq
+# needed (bare metal may not have it). A relaunch can keep the chain-id, so
+# the genesis time tells two launches apart.
+genesis_of() {
+  local id t
+  id="$(tr -d '\r' < "$1" 2>/dev/null | sed -n 's/^ *"chain_id": *"\([^"]*\)".*/\1/p' | head -1)"
+  t="$(tr -d '\r' < "$1" 2>/dev/null | sed -n 's/^ *"genesis_time": *"\([^"]*\)".*/\1/p' | head -1)"
+  [ -n "$id" ] && printf '%s (genesis %s)' "$id" "$t"
+}
+TARGET_CHAIN="$(genesis_of Instructions/genesis.json || true)"
 
 # ══ Bare metal: build + stage into cosmovisor, nothing else ════════════════════
 if [ "$BARE_METAL" = "1" ]; then
@@ -197,9 +204,9 @@ if [ "$BARE_METAL" = "1" ]; then
   DAEMON_HOME="${DAEMON_HOME:-$HOME/.steemvm}"
   CV="$DAEMON_HOME/cosmovisor"
 
-  NODE_CHAIN="$(chain_id_of "$DAEMON_HOME/config/genesis.json")"
+  NODE_CHAIN="$(genesis_of "$DAEMON_HOME/config/genesis.json" || true)"
   if [ -n "$TARGET_CHAIN" ] && [ -n "$NODE_CHAIN" ] && [ "$NODE_CHAIN" != "$TARGET_CHAIN" ]; then
-    die "this release moves the network from $NODE_CHAIN to $TARGET_CHAIN (a new chain, not an upgrade) — staging a binary won't do it. On bare metal: stop the node, back up $DAEMON_HOME/config, run 'steemvmd comet unsafe-reset-all --home $DAEMON_HOME', copy Instructions/genesis.json to $DAEMON_HOME/config/genesis.json, set chain-id = \"$TARGET_CHAIN\" in client.toml and [evm] evm-chain-id from Instructions/app.toml.example in app.toml, set persistent_peers and [statesync] like Instructions/config.toml.example, install the v$(sed -n 's/^[[:space:]]*VERSION[[:space:]]*:=[[:space:]]*\([0-9][^[:space:]]*\).*/\1/p' Makefile | head -1) binary as cosmovisor/genesis/bin/steemvmd (current -> genesis), start it, then rejoin as a validator (Instructions/README.md). Nothing was changed."
+    die "this release moves the network from $NODE_CHAIN to $TARGET_CHAIN (a new chain, not an upgrade) — staging a binary won't do it. On bare metal: stop the node, back up $DAEMON_HOME/config, run 'steemvmd comet unsafe-reset-all --home $DAEMON_HOME', copy Instructions/genesis.json to $DAEMON_HOME/config/genesis.json, set chain-id = \"${TARGET_CHAIN%% (*}\" in client.toml and [evm] evm-chain-id from Instructions/app.toml.example in app.toml, set persistent_peers and [statesync] like Instructions/config.toml.example, install the v$(sed -n 's/^[[:space:]]*VERSION[[:space:]]*:=[[:space:]]*\([0-9][^[:space:]]*\).*/\1/p' Makefile | head -1) binary as cosmovisor/genesis/bin/steemvmd (current -> genesis), start it, then rejoin as a validator (Instructions/README.md). Nothing was changed."
   fi
 
   if [ ! -e "$CV/current/bin/steemvmd" ]; then
@@ -316,7 +323,7 @@ fi
 [ -f "$KEY_FILE" ] || die "$KEY_FILE not found — this isn't an existing validator home. Use new-validator.sh for a first-time setup instead."
 
 # A release that moves the network to a new chain is a reset, not an update.
-NODE_CHAIN="$(chain_id_of "$STEEMVM_HOME/config/genesis.json")"
+NODE_CHAIN="$(genesis_of "$STEEMVM_HOME/config/genesis.json" || true)"
 if [ -n "$TARGET_CHAIN" ] && [ -n "$NODE_CHAIN" ] && [ "$NODE_CHAIN" != "$TARGET_CHAIN" ]; then
   log "This release moves the network from $NODE_CHAIN to $TARGET_CHAIN — handing over to reset.sh…"
   exec bash ./reset.sh
