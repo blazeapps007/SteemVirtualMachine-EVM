@@ -74,7 +74,7 @@ STEEMVM_HOME_FROM_ENV="${STEEMVM_HOME:-}"   # set explicitly by the operator?
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"
 export STEEMVM_HOME
 CHAIN_ID="${CHAIN_ID:-steemvm-2}"
-KEYRING="${KEYRING:-test}"
+KEYRING="${KEYRING:-}"   # default: keyring-backend in the node home's client.toml
 GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 VALIDATOR_KEY="${VALIDATOR_KEY:-}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-}"
@@ -309,6 +309,10 @@ $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=d
 
 CONFIG_TOML="$STEEMVM_HOME/config/config.toml"
 KEY_FILE="$STEEMVM_HOME/config/priv_validator_key.json"
+if [ -z "$KEYRING" ]; then
+  KEYRING="$(sed -n 's/^keyring-backend = "\(.*\)"/\1/p' "$STEEMVM_HOME/config/client.toml" 2>/dev/null | head -1)"
+  KEYRING="${KEYRING:-os}"   # the SDK's default when client.toml doesn't say
+fi
 [ -f "$KEY_FILE" ] || die "$KEY_FILE not found — this isn't an existing validator home. Use new-validator.sh for a first-time setup instead."
 
 # A release that moves the network to a new chain is a reset, not an update.
@@ -574,11 +578,27 @@ done
 ok "Node restarted and caught up."
 
 # ── 10. unjail if needed ──────────────────────────────────────────────────────
+# The key name comes from the keyring's *.info files (the moniker's, else the
+# only one) and the validator from this node's consensus key, so a
+# password-protected keyring is only opened if an unjail is actually sent.
 if [ -z "$VALIDATOR_KEY" ]; then
-  VALIDATOR_KEY="$(kf keys list --output json 2>/dev/null | jq -r 'if length==1 then .[0].name else empty end' 2>/dev/null || true)"
+  case "$KEYRING" in
+    test) KDIR="$STEEMVM_HOME/keyring-test" ;;
+    file) KDIR="$STEEMVM_HOME/keyring-file" ;;
+    *)    KDIR="$STEEMVM_HOME" ;;   # os: in a container it is files in the home itself
+  esac
+  KEY_NAMES="$(find "$KDIR" -maxdepth 1 -name '*.info' -printf '%f\n' 2>/dev/null | sed 's/\.info$//' || true)"
+  MONIKER="$(sed -n 's/^moniker = "\(.*\)"/\1/p' "$CONFIG_TOML" 2>/dev/null | head -1)"
+  if [ -n "$MONIKER" ] && printf '%s\n' "$KEY_NAMES" | grep -qxF "$MONIKER"; then VALIDATOR_KEY="$MONIKER"
+  elif [ "$(printf '%s\n' "$KEY_NAMES" | grep -c .)" = "1" ]; then VALIDATOR_KEY="$KEY_NAMES"; fi
 fi
 if [ -n "$VALIDATOR_KEY" ]; then
-  VALOPER="$(kf keys show "$VALIDATOR_KEY" --bech val -a 2>/dev/null | tr -d '\r' || true)"
+  CONS_KEY="$(node comet show-validator --home "$HOME_DIR" 2>/dev/null | jq -r '.key // empty' 2>/dev/null || true)"
+  VALOPER=""
+  if [ -n "$CONS_KEY" ]; then
+    VALOPER="$(kf query staking validators --limit 1000 --output json 2>/dev/null \
+      | jq -r --arg k "$CONS_KEY" '.validators[]? | select(.consensus_pubkey.value == $k) | .operator_address' 2>/dev/null | head -1 || true)"
+  fi
   if [ -n "$VALOPER" ]; then
     JAILED="$(kf query staking validator "$VALOPER" --output json 2>/dev/null | jq -r '.jailed // empty' 2>/dev/null || true)"
     if [ "$JAILED" = "true" ]; then
@@ -593,7 +613,7 @@ if [ -n "$VALIDATOR_KEY" ]; then
       ok "$VALOPER is not jailed."
     fi
   else
-    warn "could not resolve a valoper address for key '$VALIDATOR_KEY' — skipping the unjail check. Run it manually if needed."
+    warn "no validator on this chain uses this node's consensus key — skipping the unjail check (not a validator here yet?)."
   fi
 else
   warn "could not auto-detect your validator's keyring key (found none, or more than one) — set VALIDATOR_KEY=<name> to enable the automatic unjail check. Skipping."

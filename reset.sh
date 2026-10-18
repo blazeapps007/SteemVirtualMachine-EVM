@@ -70,7 +70,7 @@ HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME_FROM_ENV="${STEEMVM_HOME:-}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # must match docker-compose.yml's bind mount
 export STEEMVM_HOME
-KEYRING="${KEYRING:-test}"
+KEYRING="${KEYRING:-}"   # default: keyring-backend in the node home's client.toml
 GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 VALIDATOR_KEY="${VALIDATOR_KEY:-}"
 STEEM_USERNAME="${STEEM_USERNAME:-}"
@@ -105,14 +105,20 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 node() { docker exec "$CONTAINER" "$BIN" "$@"; }
 kf() { node "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
-# A non-test keyring prompts for its password, which needs a real TTY.
-kf_tx() {
-  if [ "$KEYRING" = "test" ]; then kf "$@"
-  else docker exec -it "$CONTAINER" "$BIN" "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; fi
-}
 # The node CLI against the bind-mounted home without a running node (the
 # entrypoint's bootstrap is bypassed).
 offline() { $COMPOSE run --rm -T --no-deps --entrypoint "$BIN" steemvm "$@" --home "$HOME_DIR"; }
+# kcmd: a command that opens the keyring (keys show/list, tx …), on the
+# running node or else a one-off container. A password-protected keyring
+# (os/file) gets its passphrase on stdin: asked once, never on a command line.
+KEYRING_PASS=""
+kcmd() {
+  local run
+  # shellcheck disable=SC2206 # $COMPOSE is a command line on purpose
+  if docker exec "$CONTAINER" true 2>/dev/null; then run=(docker exec -i "$CONTAINER" "$BIN")
+  else run=($COMPOSE run --rm -T --no-deps --entrypoint "$BIN" steemvm); fi
+  printf '%s\n' "$KEYRING_PASS" | "${run[@]}" "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"
+}
 
 steem_atoms() { awk -v a="${1%asteem}" 'BEGIN{printf "%.3f", a/1e18}'; }
 
@@ -314,6 +320,10 @@ KEY_FILE="$STEEMVM_HOME/config/priv_validator_key.json"
 
 [ -f "$KEY_FILE" ] || die "$KEY_FILE not found — this isn't an existing validator home. Use new-validator.sh for a first-time setup instead."
 [ -f "$CONFIG_TOML" ] || die "$CONFIG_TOML not found."
+if [ -z "$KEYRING" ]; then
+  KEYRING="$(sed -n 's/^keyring-backend = "\(.*\)"/\1/p' "$CLIENT_TOML" 2>/dev/null | head -1)"
+  KEYRING="${KEYRING:-os}"   # the SDK's default when client.toml doesn't say
+fi
 [ -w "$CONFIG_TOML" ] || die "can't write $CONFIG_TOML — run this as the owner of the node home (usually root: sudo ./reset.sh)."
 
 # During a coordinated upgrade (the branch carries a stage-vX.Y.Z service), which
@@ -420,24 +430,39 @@ if [ "$REJOIN" = "1" ]; then
   DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
 
   # The account key: VALIDATOR_KEY, else the key named after the moniker, else
-  # the only key in the keyring.
-  KEYS_JSON="$(offline keys list --keyring-backend "$KEYRING" --output json 2>/dev/null || echo '[]')"
+  # the only key. Found by the keyring's *.info file names, so a
+  # password-protected keyring needs no passphrase just to find it.
+  case "$KEYRING" in
+    test) KDIR="$STEEMVM_HOME/keyring-test" ;;
+    file) KDIR="$STEEMVM_HOME/keyring-file" ;;
+    *)    KDIR="$STEEMVM_HOME" ;;   # os: in a container it is files in the home itself
+  esac
+  KEY_NAMES="$(find "$KDIR" -maxdepth 1 -name '*.info' -printf '%f\n' 2>/dev/null | sed 's/\.info$//' | sort || true)"
   if [ -z "$VALIDATOR_KEY" ]; then
-    if printf '%s' "$KEYS_JSON" | jq -e --arg n "$STEEM_USERNAME" 'any(.[]; .name == $n)' >/dev/null 2>&1; then
-      VALIDATOR_KEY="$STEEM_USERNAME"
-    else
-      VALIDATOR_KEY="$(printf '%s' "$KEYS_JSON" | jq -r 'if length == 1 then .[0].name else empty end' 2>/dev/null || true)"
-    fi
+    if printf '%s\n' "$KEY_NAMES" | grep -qxF "$STEEM_USERNAME"; then VALIDATOR_KEY="$STEEM_USERNAME"
+    elif [ "$(printf '%s\n' "$KEY_NAMES" | grep -c .)" = "1" ]; then VALIDATOR_KEY="$KEY_NAMES"; fi
   fi
-  [ -n "$VALIDATOR_KEY" ] || die "can't tell which keyring key is your validator's (keys: $(printf '%s' "$KEYS_JSON" | jq -r '[.[].name] | join(", ")' 2>/dev/null)) — set VALIDATOR_KEY=<name>. Nothing was touched."
-  ADDR="$(printf '%s' "$KEYS_JSON" | jq -r --arg n "$VALIDATOR_KEY" '.[] | select(.name == $n) | .address')"
-  [ -n "$ADDR" ] || die "key '$VALIDATOR_KEY' is not in the keyring (backend '$KEYRING'). Nothing was touched."
-  VALOPER="$(offline keys show "$VALIDATOR_KEY" --bech val -a --keyring-backend "$KEYRING" 2>/dev/null | tr -d '\r' | tail -1)"
+  [ -n "$VALIDATOR_KEY" ] || die "can't tell which key is your validator's (keyring-backend '$KEYRING', keys: $(printf '%s' "$KEY_NAMES" | tr '\n' ' ')) — set VALIDATOR_KEY=<name>, and KEYRING=<backend> if that one is wrong. Nothing was touched."
+
+  if [ "$KEYRING" != "test" ]; then
+    # Exporting from a password-protected keyring asks an extra question, so
+    # the oracle's key must already be in oracle/.env.
+    [ -n "$(env_get ORACLE_PRIVATE_KEY)$(env_get ORACLE_MNEMONIC)" ] \
+      || die "oracle/.env has no ORACLE_PRIVATE_KEY. Export it (docker exec -it $CONTAINER $BIN keys unsafe-export-eth-key $VALIDATOR_KEY --keyring-backend $KEYRING --home $HOME_DIR), put ORACLE_PRIVATE_KEY=<hex> in oracle/.env, then retry. Nothing was touched."
+    log "Your keyring (backend '$KEYRING') is password-protected."
+    read -rsp "Keyring passphrase (what 'steemvmd keys list' asks for): " KEYRING_PASS < /dev/tty || die "no passphrase entered."
+    echo
+  fi
+  ADDR="$(kcmd keys show "$VALIDATOR_KEY" -a 2>/dev/null | tr -d '\r' | tail -1 || true)"
+  [[ "$ADDR" == steem1* ]] || die "could not read key '$VALIDATOR_KEY' from the '$KEYRING' keyring (wrong passphrase?). Nothing was touched."
+  VALOPER="$(offline debug addr "$ADDR" 2>/dev/null | tr -d '\r' | sed -n 's/^Bech32 Val: //p')"
+  [ -n "$VALOPER" ] || die "could not derive the operator address of $ADDR. Nothing was touched."
+  ok "Validator key '$VALIDATOR_KEY': $ADDR"
 
   # The oracle must sign as this same account, or it never acts for the validator.
   ORACLE_KEY="$(env_get ORACLE_PRIVATE_KEY)"
   if [ -n "$ORACLE_KEY" ] && [ "$KEYRING" = "test" ]; then
-    KEYRING_HEX="$(offline keys unsafe-export-eth-key "$VALIDATOR_KEY" --keyring-backend "$KEYRING" 2>/dev/null | tail -1 | tr -d '[:space:]' || true)"
+    KEYRING_HEX="$(kcmd keys unsafe-export-eth-key "$VALIDATOR_KEY" 2>/dev/null | tr -d '\r' | tail -1 | tr -d '[:space:]' || true)"
     norm() { printf '%s' "${1#0x}" | tr 'A-F' 'a-f'; }
     if [ -n "$KEYRING_HEX" ] && [ "$(norm "$ORACLE_KEY")" != "$(norm "$KEYRING_HEX")" ]; then
       die "oracle/.env's ORACLE_PRIVATE_KEY is not the key of '$VALIDATOR_KEY' ($ADDR) — fix oracle/.env or set VALIDATOR_KEY. Nothing was touched."
@@ -494,7 +519,7 @@ if [ "$REJOIN" = "1" ]; then
   [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
   chmod 600 "$ENV_FILE"
   if [ -z "$(env_get ORACLE_PRIVATE_KEY)" ] && [ -z "$(env_get ORACLE_MNEMONIC)" ] && [ "$KEYRING" = "test" ]; then
-    PRIVKEY="$(offline keys unsafe-export-eth-key "$VALIDATOR_KEY" --keyring-backend "$KEYRING" 2>/dev/null | tail -1 | tr -d '[:space:]' || true)"
+    PRIVKEY="$(kcmd keys unsafe-export-eth-key "$VALIDATOR_KEY" 2>/dev/null | tr -d '\r' | tail -1 | tr -d '[:space:]' || true)"
     [ -n "$PRIVKEY" ] && env_set_if_missing ORACLE_PRIVATE_KEY "$PRIVKEY"
     unset PRIVKEY
     env_set_if_missing ORACLE_START_BLOCK latest
@@ -621,11 +646,12 @@ if [ "$REJOIN_ONLY" = "0" ] && [ "$USE_STATESYNC" = "1" ]; then
 fi
 
 # ── 7. confirm keys are all still there ────────────────────────────────────
-if kf keys list --output json >/dev/null 2>&1; then
-  N="$(kf keys list --output json 2>/dev/null | jq 'length' 2>/dev/null || echo '?')"
+if [ "$KEYRING" != "test" ] && [ -z "$KEYRING_PASS" ]; then
+  log "Keyring (backend '$KEYRING') not opened — check it with: docker exec -it $CONTAINER $BIN keys list --home $HOME_DIR"
+elif N="$(kcmd keys list --output json 2>/dev/null | tr -d '\r' | grep -m1 '^\[' | jq 'length' 2>/dev/null)" && [ -n "$N" ]; then
   ok "Keyring intact — $N key(s) found under keyring-backend '$KEYRING'."
 else
-  warn "could not list keys with keyring-backend '$KEYRING' — if you use a different backend, check manually: docker exec -it $CONTAINER $BIN keys list --keyring-backend <yours> --home $HOME_DIR"
+  warn "could not list keys with keyring-backend '$KEYRING' — check manually: docker exec -it $CONTAINER $BIN keys list --keyring-backend $KEYRING --home $HOME_DIR"
 fi
 
 # ── 8. rejoin: name registration -> stake -> create-validator ──────────────
@@ -673,7 +699,7 @@ register_name() {
   ok "Registration #$reg_id is awaiting confirmation — confirming…"
   local attempt out
   for attempt in 1 2 3; do
-    if out="$(kf_tx tx steembridge confirm-name "$reg_id" --from "$VALIDATOR_KEY" --chain-id "$TARGET_CHAIN" \
+    if out="$(kcmd tx steembridge confirm-name "$reg_id" --from "$VALIDATOR_KEY" --chain-id "$TARGET_CHAIN" \
           --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y --output json 2>&1)" \
        && ! printf '%s' "$out" | grep -qE '"code": ?[1-9]|does not exist|unauthorized'; then
       break
@@ -755,7 +781,7 @@ create_validator() {
 }
 EOF
   log "Creating validator '$STEEM_USERNAME' with $(steem_atoms "$STAKE_AMOUNT") STEEM…"
-  out="$(kf_tx tx staking create-validator "/workspace/$VALIDATOR_JSON" --from "$VALIDATOR_KEY" --chain-id "$TARGET_CHAIN" \
+  out="$(kcmd tx staking create-validator "/workspace/$VALIDATOR_JSON" --from "$VALIDATOR_KEY" --chain-id "$TARGET_CHAIN" \
         --gas auto --gas-adjustment 1.5 --gas-prices "$GAS_PRICES" -y --output json 2>&1)" \
     || die "create-validator failed: $(printf '%s' "$out" | tail -3)"
   printf '%s' "$out" | grep -qE '"code": ?[1-9]' && die "create-validator was rejected: $(printf '%s' "$out" | tail -3)"
