@@ -7,7 +7,8 @@
 #      most validators no longer do (docker-compose.yml binds it to 127.0.0.1);
 #   2. this node's own /net_info — the peers it is connected to right now;
 #   3. the entry config.toml already has for that IP. Node IDs survive resets
-#      (node_key.json is kept), so a known entry stays valid.
+#      (node_key.json is kept), so a known entry stays valid;
+#   4. KNOWN_PEERS, the published id@ip:port of nodes like the genesis node.
 # An IP found by none of them is left out.
 #
 # Standalone: patches config.toml, prints the result, and reminds you a
@@ -18,7 +19,9 @@
 #
 # Overridable via env:
 #   NODE_IPS    space-separated list of known validator IPs (default: the
-#               four below)
+#               steemvm-2 genesis node)
+#   KNOWN_PEERS space-separated id@ip:port entries used when nothing else
+#               knows an IP's node ID
 #   SELF_IP     skip self-detection and use this IP as "self" instead
 #   P2P_PORT    p2p port appended to each peer entry (default: 26656)
 #   RPC_PORT    RPC port queried for each IP's node ID (default: 26657)
@@ -38,7 +41,8 @@ fi
 
 set -euo pipefail
 
-NODE_IPS="${NODE_IPS:-95.217.44.178 62.169.19.142 57.131.13.43 167.235.9.31}"
+NODE_IPS="${NODE_IPS:-62.169.19.142}"
+KNOWN_PEERS="${KNOWN_PEERS:-4cf3ee09021d3d0f55ce07b5106a00d4478061bf@62.169.19.142:26656}"
 P2P_PORT="${P2P_PORT:-26656}"
 RPC_PORT="${RPC_PORT:-26657}"
 LOCAL_RPC="${LOCAL_RPC:-http://127.0.0.1:${RPC_PORT}}"
@@ -99,6 +103,14 @@ id_from_config() {
   printf '%s' "$id"
 }
 
+id_from_known() {
+  local id
+  # shellcheck disable=SC2086 # word-split the list on purpose
+  id="$(printf '%s\n' $KNOWN_PEERS | awk -F@ -v ip="$1" '{ split($2, a, ":") } a[1] == ip { print $1; exit }')"
+  [ -n "$id" ] || return 1
+  printf '%s' "$id"
+}
+
 if detect_self_ip; then
   ok "This host's IP: $SELF_IP (excluded from its own persistent_peers)"
 else
@@ -118,6 +130,8 @@ for ip in $NODE_IPS; do
     ok "$ip -> $id (connected to this node now)"
   elif id="$(id_from_config "$ip")"; then
     ok "$ip -> $id (kept from config.toml — its RPC is private and it isn't connected right now)"
+  elif id="$(id_from_known "$ip")"; then
+    ok "$ip -> $id (from KNOWN_PEERS)"
   else
     warn "$ip -> node ID unknown (RPC private, not connected, not in config.toml), skipping"
     continue

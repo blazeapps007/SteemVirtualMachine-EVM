@@ -121,12 +121,21 @@ fetch_statesync_trust() {
   return 0
 }
 
-# Standing extra peers (xpilar.witness, blaze.apps), always included
-# alongside whatever $SEED_RPC resolves to, so every new validator connects
-# to multiple independent nodes instead of a single point of failure.
-# Space-separated "id@host:26656" entries — add more here as needed, or
-# update an entry if that node's identity/address ever changes.
-EXTRA_PERSISTENT_PEERS="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:26656 9ce6a5ecd05e9bd8a7f455976b308094329d7937@167.235.9.31:26656"
+# Standing extra peers (the steemvm-2 genesis node, blaze.apps), always
+# included alongside whatever $SEED_RPC resolves to. Space-separated
+# "id@host:26656" entries — add more here as validators join, or update an
+# entry if that node's identity/address ever changes.
+EXTRA_PERSISTENT_PEERS="4cf3ee09021d3d0f55ce07b5106a00d4478061bf@62.169.19.142:26656"
+
+# rpc_with_port: CometBFT's light client wants an explicit port.
+rpc_with_port() {
+  local u="${1%/}" rest
+  rest="${u#*://}"
+  case "$rest" in
+    *:*) printf '%s' "$u" ;;
+    *) case "$u" in https://*) printf '%s:443' "$u" ;; *) printf '%s:80' "$u" ;; esac ;;
+  esac
+}
 
 # fetch_seed_peer derives this network's persistent_peers/rpc_servers entries
 # LIVE from $SEED_RPC, instead of relying on Instructions/config.toml's
@@ -142,21 +151,30 @@ EXTRA_PERSISTENT_PEERS="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:2
 fetch_seed_peer() {
   SEED_PEER="" SEED_RPC_LIST=""
   command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
-  local node_id host p
-  node_id="$(curl -fsS "${SEED_RPC%/}/status" 2>/dev/null | jq -r '.result.node_info.id // empty' 2>/dev/null)"
+  local status node_id host addr p rpc
+  status="$(curl -fsS -m 15 "${SEED_RPC%/}/status" 2>/dev/null)" || return 1
+  node_id="$(printf '%s' "$status" | jq -r '.result.node_info.id // empty' 2>/dev/null)"
   [ -n "$node_id" ] || return 1
-  host="$(printf '%s' "$SEED_RPC" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')"
-  [ -n "$host" ] || return 1
-  SEED_PEER="${node_id}@${host}:26656"
-  # Append the standing extras, skipping any whose host matches $SEED_RPC's
-  # own (avoids a duplicate self-peer entry).
+  # The node's advertised p2p address; else the RPC's host on :26656 (an RPC
+  # behind a TLS proxy has a hostname, not the p2p IP).
+  addr="$(printf '%s' "$status" | jq -r '.result.node_info.listen_addr // empty' 2>/dev/null)"
+  addr="${addr#tcp://}"
+  case "$addr" in
+    ""|0.0.0.0:*|127.*|localhost:*|"[::]:"*)
+      host="$(printf '%s' "$SEED_RPC" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')"
+      [ -n "$host" ] || return 1
+      addr="${host}:26656" ;;
+  esac
+  SEED_PEER="${node_id}@${addr}"
+  # Append the standing extras, skipping the seed itself.
   for p in $EXTRA_PERSISTENT_PEERS; do
     case "$p" in
-      *"@${host}:"*) ;;
+      "${node_id}@"*) ;;
       *) SEED_PEER="${SEED_PEER},${p}" ;;
     esac
   done
-  SEED_RPC_LIST="${SEED_RPC},${SEED_RPC}"
+  rpc="$(rpc_with_port "$SEED_RPC")"
+  SEED_RPC_LIST="${rpc},${rpc}"
   return 0
 }
 
@@ -335,6 +353,44 @@ fi
 [ -n "$OWNER_KEY" ] && [ -n "$ACTIVE_KEY" ] && [ -n "$POSTING_KEY" ] || die "owner, active, and posting keys are all required."
 DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
 
+# ── 2b. Steem ACTIVE private key ───────────────────────────────────────────
+# Pays the 0.001 STEEM name registration (step 7) and runs the oracle's
+# svm.bank signer. The signing runs in the published oracle-python image
+# (oracle/tools/steem_transfer.py), so the host needs no Steem library.
+if [ "${STEEM_RPC%/}" = "https://api.steemit.com" ]; then STEEM_RPCS="${STEEM_RPCS:-$STEEM_RPC,https://api.justyy.com}"
+else STEEM_RPCS="${STEEM_RPCS:-$STEEM_RPC,https://api.steemit.com}"; fi
+STEEM_IMG=""
+steem_helper() {
+  if [ -z "$STEEM_IMG" ]; then
+    STEEM_IMG="$($COMPOSE --profile python config --format json 2>/dev/null | jq -r '.services["oracle-python"].image // empty')"
+    STEEM_IMG="${STEEM_IMG:-steemblazer/steemvm-oracle-python:latest}"
+    docker pull -q "$STEEM_IMG" >/dev/null 2>&1 || docker image inspect "$STEEM_IMG" >/dev/null 2>&1 \
+      || die "could not pull $STEEM_IMG (it signs the Steem registration transfer)."
+  fi
+  ORACLE_STEEM_ACTIVE_WIF="$ACTIVE_WIF" STEEM_RPCS="$STEEM_RPCS" \
+    docker run --rm -i -e ORACLE_STEEM_ACTIVE_WIF -e STEEM_RPCS --entrypoint python "$STEEM_IMG" \
+    -I - "$@" < oracle/tools/steem_transfer.py
+}
+# steem_memo_sent <account> <memo> <from-block>: that transfer to svm.bank is
+# in the account's last 100 history entries, at or after <from-block>.
+steem_memo_sent() {
+  curl -fsS -m 30 "$STEEM_RPC" -H 'Content-Type: application/json' \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"condenser_api.get_account_history\",\"params\":[\"$1\",-1,100]}" 2>/dev/null \
+    | jq -e --arg m "$2" --argjson b "$3" \
+        '[.result[]? | .[1] | select(.block >= $b and .op[0] == "transfer" and .op[1].to == "svm.bank" and .op[1].memo == $m)] | length > 0' >/dev/null 2>&1
+}
+
+echo
+log "Your Steem ACTIVE private key for @$STEEM_USERNAME (starts with 5)."
+log "It pays the 0.001 STEEM name registration and is saved to oracle/.env for your oracle's svm.bank signer."
+log "Never the owner key, posting key or master password."
+read -rp "Steem active key: " ACTIVE_WIF < /dev/tty
+ACTIVE_WIF="$(printf '%s' "$ACTIVE_WIF" | tr -d '[:space:]')"
+[[ "$ACTIVE_WIF" =~ ^5[1-9A-HJ-NP-Za-km-z]{50}$ ]] || die "that is not a Steem private key (51 base58 characters starting with 5)."
+log "Checking the key against @$STEEM_USERNAME's active authority…"
+ACTIVE_PUB="$(steem_helper check "$STEEM_USERNAME")" || die "the Steem active key was rejected (see above)."
+ok "Active key matches @$STEEM_USERNAME ($ACTIVE_PUB)."
+
 # ── 3. Price source for the STEEM/USD + SBD/USD feed ────────────────────────
 read -rp "Price source — CoinMarketCap or CoinGecko? [cmc/coingecko] (default: cmc): " PRICE_SOURCE < /dev/tty
 PRICE_SOURCE="${PRICE_SOURCE:-cmc}"
@@ -354,8 +410,8 @@ esac
 
 # ── 4. fetch the network's live genesis.json ───────────────────────────────
 # Fetched live (not from Instructions/genesis.json) so it can't go stale vs the running network.
-read -rp "Existing node's RPC to fetch genesis + sync from [http://57.131.13.43:26657]: " SEED_RPC < /dev/tty
-SEED_RPC="${SEED_RPC:-http://57.131.13.43:26657}"
+read -rp "Existing node's RPC to fetch genesis + sync from [https://rpc.steemvmscan.com]: " SEED_RPC < /dev/tty
+SEED_RPC="${SEED_RPC:-https://rpc.steemvmscan.com}"
 mkdir -p "$STEEMVM_HOME/config"
 
 if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
@@ -452,6 +508,21 @@ while :; do
 done
 ok "Node is fully synced (height $height)."
 
+# The EVM JSON-RPC indexer (cosmos/evm, --json-rpc.enable-indexer) starts
+# while state-sync is still running, asks for block 1 — which a state-synced
+# node never has — and then stops for good (it never retries a failed fetch).
+# One restart once synced makes it start at the synced height instead.
+if [ -n "${TRUST_HEIGHT:-}" ]; then
+  log "Restarting the node once so its EVM indexer starts at the synced height…"
+  docker restart "$CONTAINER" >/dev/null
+  deadline=$(( $(date +%s) + START_TIMEOUT ))
+  until [ "$(node status 2>/dev/null | jq -r '.sync_info.catching_up' 2>/dev/null || true)" = "false" ]; do
+    [ "$(date +%s)" -ge "$deadline" ] && die "the node did not come back within ${START_TIMEOUT}s of its restart. Check: \`$COMPOSE logs -f steemvm\`."
+    sleep 5
+  done
+  ok "Node restarted and caught up."
+fi
+
 # ── 6. generate a fresh SteemVM key and save the address ────────────────────
 log "Generating SteemVM key '$STEEM_USERNAME'…"
 # The leftover-home check earlier already guarantees a fresh or freshly-wiped
@@ -498,7 +569,21 @@ RESOLVED_ADDR="$(kf query steembridge resolve-name "$STEEM_USERNAME" --output js
 if [ "$RESOLVED_ADDR" = "$ADDR" ]; then
   ok "'$STEEM_USERNAME' already ACTIVE for $ADDR — skipping name registration."
 else
-  log "Send $MIN_STEEM+ STEEM from '$STEEM_USERNAME' to 'svm.bank', memo EXACTLY: svm-register $ADDR"
+  REG_MEMO="svm-register $ADDR"
+  # A registration sent before this chain's Steem anchor (an earlier chain's)
+  # doesn't count, so it is never mistaken for this one.
+  ANCHOR="$(kf query steembridge params --output json 2>/dev/null | jq -r '.params.relayer_start_block // "0"' 2>/dev/null || true)"
+  [[ "$ANCHOR" =~ ^[0-9]+$ ]] || ANCHOR=0
+  if steem_memo_sent "$STEEM_USERNAME" "$REG_MEMO" "$ANCHOR"; then
+    ok "The registration transfer was already sent."
+  else
+    log "Sending $MIN_STEEM STEEM from @$STEEM_USERNAME to svm.bank (memo: $REG_MEMO)…"
+    if TXID="$(steem_helper transfer "$STEEM_USERNAME" svm.bank "$MIN_STEEM STEEM" "$REG_MEMO")"; then
+      ok "Sent (Steem transaction $TXID)."
+    else
+      warn "the automatic transfer failed — send $MIN_STEEM+ STEEM from '$STEEM_USERNAME' to 'svm.bank' by hand, memo EXACTLY: $REG_MEMO"
+    fi
+  fi
   log "Waiting for attestation (timeout ${NAME_TIMEOUT}s)…"
   deadline=$(( $(date +%s) + NAME_TIMEOUT ))
   REG_ID=""
@@ -635,10 +720,15 @@ PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail 
 [ -n "$PRIVKEY" ] || die "could not export the private key — set it up manually in oracle/.env and run: $COMPOSE --profile $ORACLE_PROFILE up -d"
 
 [ -f oracle/.env ] && warn "oracle/.env already exists — overwriting."
+: > oracle/.env
+chmod 600 oracle/.env    # before any key is written into it
 {
   echo "ORACLE_PRIVATE_KEY=$PRIVKEY"
   echo "ORACLE_START_BLOCK=latest"
-  echo "ORACLE_STEEM_RPC=https://api.steemit.com"
+  echo "ORACLE_STEEM_RPC=$STEEM_RPC"
+  echo "ORACLE_MULTISIG_ENABLED=true"
+  echo "ORACLE_STEEM_ACTIVE_WIF=$ACTIVE_WIF"
+  echo "ORACLE_STEEM_RPCS=$STEEM_RPCS"
   echo "ORACLE_PRICE_SOURCE=$PRICE_SOURCE"
   if [ "$PRICE_SOURCE" = "cmc" ]; then
     echo "ORACLE_CMC_API_KEY=$CMC_KEY"
@@ -647,7 +737,9 @@ PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail 
   fi
   echo "ORACLE_SBD_SYMBOL=SBD"
 } > oracle/.env
-ok "oracle/.env written."
+chmod 600 oracle/.env
+unset ACTIVE_WIF PRIVKEY
+ok "oracle/.env written (mode 600)."
 
 log "Starting the oracle ($ORACLE_PROFILE profile)…"
 $COMPOSE --profile "$ORACLE_PROFILE" up -d

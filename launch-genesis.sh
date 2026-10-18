@@ -214,8 +214,7 @@ if [ "$NO_ORACLE" = "0" ]; then
   if [ -z "$ACTIVE_WIF" ]; then
     if [ -t 0 ]; then
       echo "Enter @$MONIKER's Steem ACTIVE private key (WIF, starts with 5; public key $ACTIVE_KEY)."
-      read -rsp "It is not shown; it is stored only in oracle/.env (root-only): " ACTIVE_WIF || die "no active key entered."
-      echo
+      read -rp "Shown as you paste it; stored only in oracle/.env (root-only): " ACTIVE_WIF || die "no active key entered."
     else
       # piped (automation): the active WIF on the first line of stdin
       read -r ACTIVE_WIF || die "no Steem active key on stdin."

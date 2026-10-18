@@ -214,7 +214,7 @@ external_address = ""
 seeds = ""
 
 # Comma separated list of nodes to keep persistent connections to
-persistent_peers = "54452516b79dd59f525a9f3a8f1094553bd48945@57.131.13.43:26656"
+persistent_peers = "4cf3ee09021d3d0f55ce07b5106a00d4478061bf@62.169.19.142:26656"
 
 # Path to address book
 addr_book_file = "config/addrbook.json"
@@ -374,13 +374,14 @@ enable = false
 #
 # For Cosmos SDK-based chains, trust_period should usually be about 2/3 of the unbonding time (~2
 # weeks) during which they can be financially punished (slashed) for misbehavior.
-# New validators joining the already-upgraded chain MUST state-sync (a fresh
-# node can't replay across the v0.0.2-Beta1 upgrade). Before your first start,
-# set enable = true above and fill trust_height/trust_hash from a recent block
-# — see "Joining with state-sync" in Instructions/README.md. rpc_servers is
-# pre-filled with a public endpoint; add a second, different RPC as a witness
-# if you have one.
-rpc_servers = "https://svm-rpc.steemscanner.com,http://57.131.13.43:26657"
+# State-sync is the fast way to join (a fresh node can also replay from
+# genesis, just slower). Before your first start, set enable = true above and
+# fill trust_height/trust_hash from a recent block — see "Joining with
+# state-sync" in Instructions/README.md (reset.sh and new-validator.sh do this
+# for you). rpc_servers is pre-filled with the public steemvm-2 RPC, twice (the
+# light client wants two entries); put a second, different RPC as a witness if
+# you have one.
+rpc_servers = "https://rpc.steemvmscan.com:443,https://rpc.steemvmscan.com:443"
 trust_height = 0
 trust_hash = ""
 trust_period = "168h0m0s"

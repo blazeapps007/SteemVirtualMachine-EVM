@@ -80,9 +80,9 @@ query-gas-limit = "0"
   cors_allowed_origins = ["*"]
 
 [state-sync]
-  # Serve state-sync snapshots so new validators can fast-bootstrap (the chain
-  # has upgraded, so they can't replay from genesis). A snapshot every 1000
-  # blocks, keeping the last 2. Set 0 to disable serving on this node.
+  # Serve state-sync snapshots so new validators can fast-bootstrap instead of
+  # replaying every block from genesis. A snapshot every 1000 blocks, keeping
+  # the last 2. Set 0 to disable serving on this node.
   snapshot-interval = 1000
   snapshot-keep-recent = 2
 

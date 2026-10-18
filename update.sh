@@ -20,6 +20,11 @@
 #
 # What it does depends on the checked-out release:
 #
+#   NEW CHAIN (the release's Instructions/genesis.json has a different
+#   chain-id than this node's genesis, e.g. steemvm -> steemvm-2): Docker
+#   hands over to ./reset.sh, which moves the node to the new chain with the
+#   same keys and rejoins it as a validator. Bare metal stops with the steps.
+#
 #   Docker, coordinated upgrade PENDING (the branch's docker-compose.yml has a
 #   `stage-vX.Y.Z` service): stages the new binary into cosmovisor's upgrade
 #   slot, moves the running oracle (if any) to its published image, and
@@ -74,8 +79,11 @@ GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 VALIDATOR_KEY="${VALIDATOR_KEY:-}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-}"
 
-NODE_IPS="${NODE_IPS:-95.217.44.178 62.169.19.142 57.131.13.43 167.235.9.31}"
+NODE_IPS="${NODE_IPS:-62.169.19.142}"
 export NODE_IPS
+# Public CometBFT RPCs (full URLs) tried first for the state-sync trust anchor;
+# NODE_IPS' plain :RPC_PORT is only a fallback (validators keep RPC private).
+STATESYNC_RPCS="${STATESYNC_RPCS:-https://rpc.steemvmscan.com:443}"
 P2P_PORT="${P2P_PORT:-26656}"
 RPC_PORT="${RPC_PORT:-26657}"
 export P2P_PORT RPC_PORT
@@ -163,6 +171,10 @@ else
 fi
 ok "At $(git rev-parse --short HEAD) ($(git describe --tags --always 2>/dev/null))."
 
+# chain_id_of <genesis.json>: no jq needed (bare metal may not have it).
+chain_id_of() { tr -d '\r' < "$1" 2>/dev/null | sed -n 's/^ *"chain_id": *"\([^"]*\)".*/\1/p' | head -1; }
+TARGET_CHAIN="$(chain_id_of Instructions/genesis.json)"
+
 # ══ Bare metal: build + stage into cosmovisor, nothing else ════════════════════
 if [ "$BARE_METAL" = "1" ]; then
   command -v go   >/dev/null 2>&1 || die "go not found on PATH."
@@ -184,6 +196,11 @@ if [ "$BARE_METAL" = "1" ]; then
   fi
   DAEMON_HOME="${DAEMON_HOME:-$HOME/.steemvm}"
   CV="$DAEMON_HOME/cosmovisor"
+
+  NODE_CHAIN="$(chain_id_of "$DAEMON_HOME/config/genesis.json")"
+  if [ -n "$TARGET_CHAIN" ] && [ -n "$NODE_CHAIN" ] && [ "$NODE_CHAIN" != "$TARGET_CHAIN" ]; then
+    die "this release moves the network from $NODE_CHAIN to $TARGET_CHAIN (a new chain, not an upgrade) — staging a binary won't do it. On bare metal: stop the node, back up $DAEMON_HOME/config, run 'steemvmd comet unsafe-reset-all --home $DAEMON_HOME', copy Instructions/genesis.json to $DAEMON_HOME/config/genesis.json, set chain-id = \"$TARGET_CHAIN\" in client.toml and [evm] evm-chain-id from Instructions/app.toml.example in app.toml, set persistent_peers and [statesync] like Instructions/config.toml.example, install the v$(sed -n 's/^[[:space:]]*VERSION[[:space:]]*:=[[:space:]]*\([0-9][^[:space:]]*\).*/\1/p' Makefile | head -1) binary as cosmovisor/genesis/bin/steemvmd (current -> genesis), start it, then rejoin as a validator (Instructions/README.md). Nothing was changed."
+  fi
 
   if [ ! -e "$CV/current/bin/steemvmd" ]; then
     # No cosmovisor home. If steemvmd runs directly (and no cosmovisor does),
@@ -293,6 +310,13 @@ $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=d
 CONFIG_TOML="$STEEMVM_HOME/config/config.toml"
 KEY_FILE="$STEEMVM_HOME/config/priv_validator_key.json"
 [ -f "$KEY_FILE" ] || die "$KEY_FILE not found — this isn't an existing validator home. Use new-validator.sh for a first-time setup instead."
+
+# A release that moves the network to a new chain is a reset, not an update.
+NODE_CHAIN="$(chain_id_of "$STEEMVM_HOME/config/genesis.json")"
+if [ -n "$TARGET_CHAIN" ] && [ -n "$NODE_CHAIN" ] && [ "$NODE_CHAIN" != "$TARGET_CHAIN" ]; then
+  log "This release moves the network from $NODE_CHAIN to $TARGET_CHAIN — handing over to reset.sh…"
+  exec bash ./reset.sh
+fi
 
 # Which oracle runs here (read before anything is stopped).
 if [ -z "$ORACLE_PROFILE" ]; then
@@ -442,21 +466,21 @@ command -v jq   >/dev/null 2>&1 || die "jq is required."
 # while the node's data is still intact.
 fetch_statesync_trust_from_nodes() {
   TRUST_HEIGHT="" TRUST_HASH="" TRUST_SEED=""
-  local ip latest h hash
-  for ip in $NODE_IPS; do
-    latest="$(curl -fsS --max-time 5 "http://${ip}:${RPC_PORT}/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null)"
+  local rpc ip latest h hash
+  for rpc in $STATESYNC_RPCS $(for ip in $NODE_IPS; do printf 'http://%s:%s ' "$ip" "$RPC_PORT"; done); do
+    latest="$(curl -fsS --max-time 10 "${rpc%/}/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null)"
     [ -n "$latest" ] || continue
     [ "$latest" -ge "$MIN_STATESYNC_HEIGHT" ] || continue
     h=$((latest - 1000)); [ "$h" -lt 1 ] && h=1
-    hash="$(curl -fsS --max-time 5 "http://${ip}:${RPC_PORT}/commit?height=$h" 2>/dev/null | jq -r '.result.signed_header.commit.block_id.hash // empty' 2>/dev/null)"
+    hash="$(curl -fsS --max-time 10 "${rpc%/}/commit?height=$h" 2>/dev/null | jq -r '.result.signed_header.commit.block_id.hash // empty' 2>/dev/null)"
     [ -n "$hash" ] || continue
-    TRUST_HEIGHT="$h" TRUST_HASH="$hash" TRUST_SEED="$ip"
+    TRUST_HEIGHT="$h" TRUST_HASH="$hash" TRUST_SEED="${rpc%/}"
     return 0
   done
   return 1
 }
 
-fetch_statesync_trust_from_nodes || die "no state-sync trust anchor from any of: $NODE_IPS — refusing to wipe chain data that could not be resynced. Nothing was touched. (Needs at least one of them serving CometBFT RPC on :$RPC_PORT; set NODE_IPS/RPC_PORT to reachable peers.)"
+fetch_statesync_trust_from_nodes || die "no state-sync trust anchor from any of: $STATESYNC_RPCS $NODE_IPS — refusing to wipe chain data that could not be resynced. Nothing was touched. (Set STATESYNC_RPCS to a reachable CometBFT RPC URL.)"
 ok "State-sync trust anchor from $TRUST_SEED: height $TRUST_HEIGHT."
 
 # ── 4. the oracle profile (detected above, before anything was stopped) ─────
@@ -498,6 +522,7 @@ log "Refreshing persistent_peers…"
 [ -f "$CONFIG_TOML" ] || die "$CONFIG_TOML not found."
 sed -i.bak \
   -e '/^\[statesync\]/,/^\[/{s/^enable = false/enable = true/}' \
+  -e "/^\[statesync\]/,/^\[/{s|^rpc_servers = .*|rpc_servers = \"$TRUST_SEED,$TRUST_SEED\"|}" \
   -e "/^\[statesync\]/,/^\[/{s/^trust_height = .*/trust_height = $TRUST_HEIGHT/}" \
   -e "/^\[statesync\]/,/^\[/{s/^trust_hash = .*/trust_hash = \"$TRUST_HASH\"/}" \
   "$CONFIG_TOML"
@@ -534,6 +559,19 @@ while :; do
   sleep 10
 done
 ok "Node is caught up (height $height)."
+
+# The EVM JSON-RPC indexer (cosmos/evm, --json-rpc.enable-indexer) starts
+# while state-sync is still running, asks for a block a state-synced node
+# never has, and then stops for good (it never retries a failed fetch). One
+# restart once synced makes it start at the synced height instead.
+log "Restarting the node once so its EVM indexer starts at the synced height…"
+docker restart "$CONTAINER" >/dev/null
+deadline=$(( $(date +%s) + START_TIMEOUT ))
+until [ "$(node status 2>/dev/null | jq -r '.sync_info.catching_up' 2>/dev/null || true)" = "false" ]; do
+  [ "$(date +%s)" -ge "$deadline" ] && die "the node did not come back within ${START_TIMEOUT}s of its restart. Check: \`$COMPOSE logs -f steemvm\`."
+  sleep 5
+done
+ok "Node restarted and caught up."
 
 # ── 10. unjail if needed ──────────────────────────────────────────────────────
 if [ -z "$VALIDATOR_KEY" ]; then

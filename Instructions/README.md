@@ -31,10 +31,12 @@ under Docker at all.
   (CoinMarketCap or CoinGecko), fetches the live genesis and peer list, starts
   the node and waits for it to sync (with automatic state-sync when the chain
   is old enough to serve snapshots — see the state-sync note in step 3), makes
-  your key, walks the Steem-side name registration and confirmation with
-  retries, claims faucet coins, builds `validator.json`, creates the
-  validator, and wires up the oracle client. Still requires Docker. Run it
-  from the repository root:
+  your key, sends the 0.001 STEEM name registration itself (signed with your
+  Steem **active** key, which it asks for once — shown as you paste it,
+  checked against your account — and saves to `oracle/.env` for the oracle's
+  svm.bank signer), confirms the name with retries, claims faucet coins,
+  builds `validator.json`, creates the validator, and wires up the oracle
+  client. Still requires Docker. Run it from the repository root:
 
   ```sh
   ./new-validator.sh
@@ -45,6 +47,17 @@ under Docker at all.
   (`STAKE_AMOUNT`, `ORACLE_PROFILE`, etc.). If anything about your setup is
   non-standard, or you'd rather understand/control each step yourself, use the
   manual path below instead — it's exactly what the script automates.
+- **Already a validator on the previous chain (`steemvm`)? Run `./reset.sh`**
+  from the repository root (or `./update.sh`, which hands over to it when the
+  release moves to a new chain). It keeps your keys, address and
+  `oracle/.env`, moves the node to `steemvm-2` (its genesis, checked against
+  the network's; chain-id `steemvm-2`; EVM chain-id `81630`; state-sync from
+  `https://rpc.steemvmscan.com`), then rejoins as a validator: it asks for your
+  Steem **active** key once (unless `oracle/.env` already has it), sends the
+  0.001 STEEM name registration, confirms the name, waits until your address
+  holds the stake (`STAKE_AMOUNT`, default 4000 STEEM, plus 1 for fees), creates
+  the validator and restarts your oracle on its latest image.
+  `./reset.sh --rejoin-only` resumes after a funding timeout.
 - **Manual Docker Compose** — steps 1–10 below, one command at a time. Use
   this if the script doesn't fit your setup, or you want to understand what
   each step actually does before trusting it to automation.
@@ -876,7 +889,7 @@ node after a manual wipe.
    height's block hash:
 
    ```sh
-   SEED_RPC=http://<a-live-peer>:26657
+   SEED_RPC=https://rpc.steemvmscan.com    # or http://<a-live-peer>:26657
    LATEST=$(curl -fsS "$SEED_RPC/status" | jq -r '.result.sync_info.latest_block_height')
    TRUST_HEIGHT=$((LATEST - 1000))
    TRUST_HASH=$(curl -fsS "$SEED_RPC/commit?height=$TRUST_HEIGHT" | jq -r '.result.signed_header.commit.block_id.hash')
@@ -887,7 +900,7 @@ node after a manual wipe.
    ```toml
    [statesync]
    enable = true
-   rpc_servers = "http://<a-live-peer>:26657,http://<another-live-peer>:26657"
+   rpc_servers = "https://rpc.steemvmscan.com:443,http://<another-live-peer>:26657"
    trust_height = <TRUST_HEIGHT from above>
    trust_hash = "<TRUST_HASH from above>"
    ```
