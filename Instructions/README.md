@@ -19,6 +19,42 @@ config from the templates in this directory (`app.toml.example`,
 > Steps 5 and 6 below do the linking; `create-validator` (step 9) is rejected
 > until they are done.
 
+## One-click validator on DigitalOcean
+
+[![Run a SteemVM validator on DigitalOcean](https://img.shields.io/badge/DigitalOcean-Run%20a%20validator-0080FF?style=for-the-badge&logo=digitalocean&logoColor=white)](https://m.do.co/c/ca4fa7f3ca18)
+
+The button is a DigitalOcean referral link: new accounts get trial credit. A
+validator runs on a Droplet (a normal VPS). DigitalOcean's App Platform
+"Deploy" button can't host one, because App Platform has no persistent disk
+(the validator's keys and chain data would be lost on every restart) and no
+raw TCP port for p2p.
+
+1. Click the button and sign up (or log in).
+2. **Create → Droplets**: **Ubuntu 24.04 LTS**, a Basic plan with at least
+   **2 vCPU / 4 GB RAM / 80 GB SSD** (4 vCPU / 8 GB recommended), any region,
+   and an SSH key or a root password.
+3. Open the Droplet and click **Console** (a terminal in your browser — no
+   SSH client needed).
+4. Paste:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.6/install.sh | sudo bash
+   ```
+
+5. Enter your **Steem username** and your **Steem active private key** (shown
+   as you paste it, so you can check it). It is checked against your account,
+   used to pay the 0.001 STEEM name registration, and saved only in
+   `oracle/.env` on your Droplet for the oracle's svm.bank signer. Never enter
+   your owner key, posting key or master password.
+
+The installer ([`install.sh`](../install.sh)) installs Docker, git and jq,
+opens p2p port 26656 if `ufw` is on, clones this repository to `/opt/steemvm`,
+and runs `new-validator.sh` with your answers (CoinGecko prices, state-sync
+from `https://rpc.steemvmscan.com`). The setup then registers your name,
+waits for your stake to arrive, creates the validator and starts the oracle.
+If it stops part-way (a registration or funding timeout), finish with
+`cd /opt/steemvm && ./reset.sh --rejoin-only`.
+
 ## Three ways to run a node
 
 Pick one before diving in — all three end up as the same bonded validator,

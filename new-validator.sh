@@ -16,6 +16,14 @@
 # Overridable via env: STAKE_AMOUNT, COMMISSION_RATE, COMMISSION_MAX_RATE,
 # COMMISSION_MAX_CHANGE_RATE, MIN_SELF_DELEGATION, GAS_PRICES, START_TIMEOUT,
 # FUND_TIMEOUT, NAME_TIMEOUT, ORACLE_PROFILE, FAUCET_URL
+#
+# Preset answers skip their prompts (install.sh uses these): STEEM_USERNAME,
+# ORACLE_STEEM_ACTIVE_WIF, PRICE_SOURCE (cmc|coingecko) with CMC_KEY or
+# COINGECKO_KEY, SEED_RPC.
+#
+# Stopped after the node synced (a registration or funding timeout)? Don't
+# re-run this script — it would start over with a new key. Finish with:
+#   ./reset.sh --rejoin-only
 
 # re-exec under bash if run as `sh new-validator.sh` (needs set -o pipefail)
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -307,7 +315,15 @@ if [ -f "$STEEMVM_HOME/config/priv_validator_key.json" ]; then
 fi
 
 # ── 1. Steem username → moniker + key name ────────────────────────────────
-read -rp "Steem username (becomes your validator moniker): " STEEM_USERNAME < /dev/tty
+# Preset answers (e.g. from install.sh) skip their prompts: STEEM_USERNAME,
+# ORACLE_STEEM_ACTIVE_WIF, PRICE_SOURCE (+ CMC_KEY / COINGECKO_KEY), SEED_RPC.
+PRESET_USERNAME=0
+if [ -n "${STEEM_USERNAME:-}" ]; then
+  PRESET_USERNAME=1
+  ok "Steem username: $STEEM_USERNAME"
+else
+  read -rp "Steem username (becomes your validator moniker): " STEEM_USERNAME < /dev/tty
+fi
 [ -n "$STEEM_USERNAME" ] || die "a Steem username is required."
 
 # ── 2. Steem owner / active / posting public keys ─────────────────────────
@@ -338,7 +354,8 @@ if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && fetch_ste
   echo "  owner:   $OWNER_KEY"
   echo "  active:  $ACTIVE_KEY"
   echo "  posting: $POSTING_KEY"
-  read -rp "Use these? [Y/n]: " USE_FETCHED < /dev/tty
+  if [ "$PRESET_USERNAME" = "1" ]; then USE_FETCHED=y
+  else read -rp "Use these? [Y/n]: " USE_FETCHED < /dev/tty; fi
   case "$USE_FETCHED" in
     [nN]*) OWNER_KEY="" ACTIVE_KEY="" POSTING_KEY="" ;;
   esac
@@ -380,11 +397,14 @@ steem_memo_sent() {
         '[.result[]? | .[1] | select(.block >= $b and .op[0] == "transfer" and .op[1].to == "svm.bank" and .op[1].memo == $m)] | length > 0' >/dev/null 2>&1
 }
 
-echo
-log "Your Steem ACTIVE private key for @$STEEM_USERNAME (starts with 5)."
-log "It pays the 0.001 STEEM name registration and is saved to oracle/.env for your oracle's svm.bank signer."
-log "Never the owner key, posting key or master password."
-read -rp "Steem active key: " ACTIVE_WIF < /dev/tty
+ACTIVE_WIF="${ORACLE_STEEM_ACTIVE_WIF:-}"
+if [ -z "$ACTIVE_WIF" ]; then
+  echo
+  log "Your Steem ACTIVE private key for @$STEEM_USERNAME (starts with 5)."
+  log "It pays the 0.001 STEEM name registration and is saved to oracle/.env for your oracle's svm.bank signer."
+  log "Never the owner key, posting key or master password."
+  read -rp "Steem active key: " ACTIVE_WIF < /dev/tty
+fi
 ACTIVE_WIF="$(printf '%s' "$ACTIVE_WIF" | tr -d '[:space:]')"
 [[ "$ACTIVE_WIF" =~ ^5[1-9A-HJ-NP-Za-km-z]{50}$ ]] || die "that is not a Steem private key (51 base58 characters starting with 5)."
 log "Checking the key against @$STEEM_USERNAME's active authority…"
@@ -392,25 +412,35 @@ ACTIVE_PUB="$(steem_helper check "$STEEM_USERNAME")" || die "the Steem active ke
 ok "Active key matches @$STEEM_USERNAME ($ACTIVE_PUB)."
 
 # ── 3. Price source for the STEEM/USD + SBD/USD feed ────────────────────────
-read -rp "Price source — CoinMarketCap or CoinGecko? [cmc/coingecko] (default: cmc): " PRICE_SOURCE < /dev/tty
+PRESET_PRICE=0
+if [ -n "${PRICE_SOURCE:-}" ]; then
+  PRESET_PRICE=1
+else
+  read -rp "Price source — CoinMarketCap or CoinGecko? [cmc/coingecko] (default: cmc): " PRICE_SOURCE < /dev/tty
+fi
 PRICE_SOURCE="${PRICE_SOURCE:-cmc}"
 case "$PRICE_SOURCE" in
   cmc)
-    CMC_KEY=""
+    CMC_KEY="${CMC_KEY:-}"
     while [ -z "$CMC_KEY" ]; do
       read -rp "CoinMarketCap API key (REQUIRED — free at coinmarketcap.com/api): " CMC_KEY < /dev/tty
       [ -z "$CMC_KEY" ] && warn "required — without it your oracle misses price-feed duty and risks jailing."
     done
     ;;
   coingecko)
-    read -rp "CoinGecko API key (optional — press Enter to skip, uses the public rate limit): " COINGECKO_KEY < /dev/tty
+    COINGECKO_KEY="${COINGECKO_KEY:-}"
+    if [ "$PRESET_PRICE" = "0" ]; then
+      read -rp "CoinGecko API key (optional — press Enter to skip, uses the public rate limit): " COINGECKO_KEY < /dev/tty
+    fi
     ;;
   *) die "unknown price source '$PRICE_SOURCE' — must be 'cmc' or 'coingecko'." ;;
 esac
 
 # ── 4. fetch the network's live genesis.json ───────────────────────────────
 # Fetched live (not from Instructions/genesis.json) so it can't go stale vs the running network.
-read -rp "Existing node's RPC to fetch genesis + sync from [https://rpc.steemvmscan.com]: " SEED_RPC < /dev/tty
+if [ -z "${SEED_RPC:-}" ]; then
+  read -rp "Existing node's RPC to fetch genesis + sync from [https://rpc.steemvmscan.com]: " SEED_RPC < /dev/tty
+fi
 SEED_RPC="${SEED_RPC:-https://rpc.steemvmscan.com}"
 mkdir -p "$STEEMVM_HOME/config"
 
@@ -607,7 +637,7 @@ else
       REG_ID=""
       break
     fi
-    [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Then run: $BIN tx steembridge confirm-name <id> --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
+    [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Once it is attested, finish with: ./reset.sh --rejoin-only"
     sleep 15
   done
   if [ -n "$REG_ID" ]; then
@@ -671,7 +701,7 @@ while :; do
   if [ $((poll_n % 6)) -eq 0 ]; then
     log "still waiting — balance ${BAL}, need ${STAKE_NUM}"
   fi
-  [ "$(date +%s)" -ge "$deadline" ] && die "balance still below stake requirement after ${FUND_TIMEOUT}s (current: ${BAL}). Fund more, then run create-validator manually."
+  [ "$(date +%s)" -ge "$deadline" ] && die "balance still below stake requirement after ${FUND_TIMEOUT}s (current: ${BAL}). Once funded, finish with: ./reset.sh --rejoin-only"
   sleep 10
 done
 ok "Funded (balance ${BAL})."

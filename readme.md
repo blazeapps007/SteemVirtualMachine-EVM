@@ -109,6 +109,19 @@ identical on any chain built on it:
 
 ## Running a node / becoming a validator
 
+[![Run a SteemVM validator on DigitalOcean](https://img.shields.io/badge/DigitalOcean-Run%20a%20validator-0080FF?style=for-the-badge&logo=digitalocean&logoColor=white)](https://m.do.co/c/ca4fa7f3ca18)
+
+**One command on a fresh Ubuntu server** (e.g. a DigitalOcean Droplet; the
+button above is a referral link that signs you up). It asks only for your
+Steem username and Steem active key, then installs Docker and runs the whole
+validator setup:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.6/install.sh | sudo bash
+```
+
+Step by step: [One-click validator on DigitalOcean](Instructions/README.md#one-click-validator-on-digitalocean).
+
 **→ See [`Instructions/README.md`](Instructions/README.md).**
 
 That guide is the authoritative path and covers all three ways to run a node:
