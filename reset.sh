@@ -546,11 +546,16 @@ if [ "$REJOIN" = "1" ]; then
     PRIVKEY="$(kcmd keys unsafe-export-eth-key "$VALIDATOR_KEY" 2>/dev/null | tr -d '\r' | tail -1 | tr -d '[:space:]' || true)"
     [ -n "$PRIVKEY" ] && env_set_if_missing ORACLE_PRIVATE_KEY "$PRIVKEY"
     unset PRIVKEY
-    env_set_if_missing ORACLE_START_BLOCK latest
-    env_set_if_missing ORACLE_STEEM_RPC "$STEEM_RPC"
-    env_set_if_missing ORACLE_PRICE_SOURCE coingecko
-    env_set_if_missing ORACLE_SBD_SYMBOL SBD
   fi
+  # What every oracle needs, for a file that's missing them (e.g. recreated by
+  # hand with only the key): it exits without a Steem RPC, and the default
+  # price source (CoinMarketCap) needs an API key.
+  env_set_if_missing ORACLE_START_BLOCK latest
+  env_set_if_missing ORACLE_STEEM_RPC "$STEEM_RPC"
+  if [ -z "$(env_get ORACLE_PRICE_SOURCE)" ] && [ -z "$(env_get ORACLE_CMC_API_KEY)" ]; then
+    env_set_if_missing ORACLE_PRICE_SOURCE coingecko
+  fi
+  env_set_if_missing ORACLE_SBD_SYMBOL SBD
   env_set_if_missing ORACLE_STEEM_ACTIVE_WIF "$ACTIVE_WIF"
   env_set_if_missing ORACLE_MULTISIG_ENABLED true
   env_set_if_missing ORACLE_STEEM_RPCS "$STEEM_RPCS"
