@@ -706,6 +706,13 @@ while :; do
 done
 ok "Funded (balance ${BAL})."
 
+# Stake STAKE_AMOUNT, or less so 1 STEEM stays liquid for the oracle's price-feed
+# fees (those txs are not fee-exempt). Whole STEEM, so the amount is exact.
+STAKE_WHOLE="$(awk -v b="$BAL" -v s="$STAKE_NUM" 'BEGIN{x = b - 1e18; if (x > s) x = s; printf "%d", x / 1e18}')"
+[ "$STAKE_WHOLE" -ge 1 ] 2>/dev/null || die "the balance leaves nothing to stake after 1 STEEM for fees."
+STAKE_AMOUNT="${STAKE_WHOLE}000000000000000000asteem"
+log "Staking $STAKE_WHOLE STEEM; the rest stays liquid for fees."
+
 # ── 9. build validator.json + create the validator ──────────────────────────
 PUBKEY="$(node comet show-validator --home "$HOME_DIR")"
 [ -n "$PUBKEY" ] || die "could not read the node consensus pubkey."

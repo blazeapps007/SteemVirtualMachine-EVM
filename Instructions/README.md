@@ -91,7 +91,8 @@ under Docker at all.
   `https://rpc.steemvmscan.com`), then rejoins as a validator: it asks for your
   Steem **active** key once (unless `oracle/.env` already has it), sends the
   0.001 STEEM name registration, confirms the name, waits until your address
-  holds the stake (`STAKE_AMOUNT`, default 4000 STEEM, plus 1 for fees), creates
+  holds the stake (claiming faucet coins first; `STAKE_AMOUNT`, default 4000
+  STEEM — it keeps 1 STEEM liquid for fees), creates
   the validator and restarts your oracle on its latest image.
   `./reset.sh --rejoin-only` resumes after a funding timeout.
 - **Manual Docker Compose** — steps 1–10 below, one command at a time. Use

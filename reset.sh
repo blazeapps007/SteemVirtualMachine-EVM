@@ -21,10 +21,11 @@
 #        signed with your Steem ACTIVE key, then confirm-name. The key is read
 #        from oracle/.env (ORACLE_STEEM_ACTIVE_WIF) or asked for once and saved
 #        there — your oracle's svm.bank signer uses it too;
-#     2. waits until your address holds STAKE_AMOUNT plus 1 STEEM for fees.
-#        A new chain starts with only its genesis validator funded, so bring
-#        STEEM over: bridge it (Steem transfer to svm.bank, memo = your
-#        address) or ask an existing validator to send it;
+#     2. claims faucet coins (FAUCET_URL) and waits until your address holds
+#        STAKE_AMOUNT — it stakes up to that, keeping 1 STEEM liquid for fees.
+#        If the faucet doesn't cover it, bring STEEM over: bridge it (Steem
+#        transfer to svm.bank, memo = your address) or ask an existing
+#        validator to send it;
 #     3. create-validator with your Steem public keys (the identity gate).
 #   If funding takes longer than FUND_TIMEOUT, re-run with --rejoin-only.
 #
@@ -45,7 +46,7 @@
 #
 # Overridable via env: SEED_RPC, STEEMVM_HOME, START_TIMEOUT, COMPOSE,
 # CONTAINER, BIN, HOME_DIR, KEYRING, VALIDATOR_KEY, STEEM_USERNAME, STEEM_RPC,
-# STAKE_AMOUNT, GAS_PRICES, COMMISSION_RATE, COMMISSION_MAX_RATE,
+# STAKE_AMOUNT, FAUCET_URL, GAS_PRICES, COMMISSION_RATE, COMMISSION_MAX_RATE,
 # COMMISSION_MAX_CHANGE_RATE, MIN_SELF_DELEGATION, ORACLE_PROFILE,
 # NAME_TIMEOUT, FUND_TIMEOUT
 
@@ -87,6 +88,7 @@ COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
 COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
 MIN_SELF_DELEGATION="${MIN_SELF_DELEGATION:-1}"
 NAME_TIMEOUT="${NAME_TIMEOUT:-1800}"
+FAUCET_URL="${FAUCET_URL-https://faucet.steemscanner.com/faucet}"   # empty: skip the faucet
 FUND_TIMEOUT="${FUND_TIMEOUT:-3600}"
 VALIDATOR_JSON="validator.json"
 
@@ -480,7 +482,7 @@ fi
 if [ "$REJOIN" = "1" ]; then
   log "Then it rejoins $TARGET_CHAIN as validator '$STEEM_USERNAME' ($ADDR):"
   log "  sends 0.001 STEEM from @$STEEM_USERNAME to svm.bank (memo: svm-register $ADDR) if not yet registered,"
-  log "  waits for $(steem_atoms "$STAKE_AMOUNT") STEEM + 1 STEEM for fees, and creates the validator."
+  log "  claims faucet coins, waits for $(steem_atoms "$STAKE_AMOUNT") STEEM, and creates the validator."
 fi
 [ -n "$ORACLE_PROFILE" ] && log "Finally it restarts the $ORACLE_PROFILE oracle on its published image."
 [ "$REJOIN_ONLY" = "0" ] && warn "Your node will be out of sync until it catches up."
@@ -687,27 +689,50 @@ register_name() {
   die "confirm-name was broadcast but @$STEEM_USERNAME isn't ACTIVE yet. Check: docker exec $CONTAINER $BIN query steembridge resolve-name $STEEM_USERNAME — then ./reset.sh --rejoin-only"
 }
 
+# fit_stake <balance>: STAKE_AMOUNT, or less so 1 STEEM stays liquid for the
+# oracle's price-feed fees (those txs are not fee-exempt). Whole STEEM, so the
+# amount is exact despite awk's floating point.
+fit_stake() {
+  local whole
+  whole="$(awk -v b="$1" -v s="${STAKE_AMOUNT%asteem}" 'BEGIN{x = b - 1e18; if (x > s) x = s; printf "%d", x / 1e18}')"
+  [ "$whole" -ge 1 ] 2>/dev/null || die "the balance ($(steem_atoms "$1") STEEM) leaves nothing to stake after 1 STEEM for fees."
+  STAKE_AMOUNT="${whole}000000000000000000asteem"
+}
+
 wait_for_stake() {
-  local need bal poll_n=0
-  need="$(awk -v s="${STAKE_AMOUNT%asteem}" 'BEGIN{printf "%.0f", s + 1e18}')"
+  local need bal poll_n=0 out
+  need="${STAKE_AMOUNT%asteem}"
   balance() { kf query bank balances "$ADDR" --output json 2>/dev/null | jq -r '.balances[]? | select(.denom=="asteem") | .amount' 2>/dev/null || true; }
+  covered() { awk -v b="$1" -v n="$need" 'BEGIN{exit !(b+0 >= n+0)}'; }
   bal="$(balance)"; bal="${bal:-0}"
-  awk -v b="$bal" -v n="$need" 'BEGIN{exit !(b+0 >= n+0)}' && { ok "Funded: $(steem_atoms "$bal") STEEM."; return 0; }
-  echo
-  warn "$ADDR holds $(steem_atoms "$bal") STEEM on $TARGET_CHAIN; it needs $(steem_atoms "$need") (stake + 1 for fees)."
-  echo "   Bridge it from Steem: send STEEM from @$STEEM_USERNAME to svm.bank with memo EXACTLY:"
-  echo "       $ADDR"
-  echo "   or ask an existing $TARGET_CHAIN validator to send it. (Smaller stake: STAKE_AMOUNT=<n>asteem ./reset.sh --rejoin-only)"
-  log "Waiting for the balance (timeout ${FUND_TIMEOUT}s)…"
-  local deadline=$(( $(date +%s) + FUND_TIMEOUT ))
-  while :; do
-    sleep 15
-    poll_n=$((poll_n + 1))
-    bal="$(balance)"; bal="${bal:-0}"
-    awk -v b="$bal" -v n="$need" 'BEGIN{exit !(b+0 >= n+0)}' && { ok "Funded: $(steem_atoms "$bal") STEEM."; return 0; }
-    [ $((poll_n % 8)) -eq 0 ] && log "still waiting — $(steem_atoms "$bal") of $(steem_atoms "$need") STEEM"
-    [ "$(date +%s)" -ge "$deadline" ] && die "still $(steem_atoms "$bal") of $(steem_atoms "$need") STEEM after ${FUND_TIMEOUT}s. Once funded, run: ./reset.sh --rejoin-only"
-  done
+  if ! covered "$bal"; then
+    if [ -n "$FAUCET_URL" ]; then
+      log "Claiming faucet coins for $ADDR…"
+      out="$(curl -fsS -m 60 -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
+      if printf '%s' "$out" | jq -e '.success == true' >/dev/null 2>&1; then
+        ok "Faucet sent $(printf '%s' "$out" | jq -r '.amount') STEEM (tx $(printf '%s' "$out" | jq -r '.txHash'))."
+      else
+        warn "faucet claim failed: $(printf '%s' "$out" | head -c 300)"
+      fi
+    fi
+    echo
+    warn "$ADDR needs $(steem_atoms "$need") STEEM on $TARGET_CHAIN for the stake (it holds $(steem_atoms "$bal"))."
+    echo "   If the faucet didn't cover it, bridge STEEM from Steem: send it from @$STEEM_USERNAME to"
+    echo "   svm.bank with memo EXACTLY:  $ADDR"
+    echo "   or ask an existing $TARGET_CHAIN validator to send it. (Smaller stake: STAKE_AMOUNT=<n>asteem ./reset.sh --rejoin-only)"
+    log "Waiting for the balance (timeout ${FUND_TIMEOUT}s)…"
+    local deadline=$(( $(date +%s) + FUND_TIMEOUT ))
+    while :; do
+      sleep 15
+      poll_n=$((poll_n + 1))
+      bal="$(balance)"; bal="${bal:-0}"
+      covered "$bal" && break
+      [ $((poll_n % 8)) -eq 0 ] && log "still waiting — $(steem_atoms "$bal") of $(steem_atoms "$need") STEEM"
+      [ "$(date +%s)" -ge "$deadline" ] && die "still $(steem_atoms "$bal") of $(steem_atoms "$need") STEEM after ${FUND_TIMEOUT}s. Once funded, run: ./reset.sh --rejoin-only"
+    done
+  fi
+  fit_stake "$bal"
+  ok "Funded: $(steem_atoms "$bal") STEEM — staking $(steem_atoms "$STAKE_AMOUNT"), the rest stays liquid for fees."
 }
 
 create_validator() {
