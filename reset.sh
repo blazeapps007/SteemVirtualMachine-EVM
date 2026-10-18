@@ -286,7 +286,7 @@ STEEM_IMG=""
 steem_helper() {
   if [ -z "$STEEM_IMG" ]; then
     STEEM_IMG="$($COMPOSE --profile python config --format json 2>/dev/null | jq -r '.services["oracle-python"].image // empty')"
-    STEEM_IMG="${STEEM_IMG:-steemblazer/steemvm-oracle-python:latest}"
+    STEEM_IMG="${STEEM_IMG:-steemblazer/steemvm-oracle-python:v0.0.6}"
     docker pull -q "$STEEM_IMG" >/dev/null 2>&1 || docker image inspect "$STEEM_IMG" >/dev/null 2>&1 \
       || die "could not pull $STEEM_IMG (it signs the Steem registration transfer)."
   fi
@@ -376,6 +376,26 @@ if [ "$REJOIN_ONLY" = "0" ]; then
   fi
 fi
 
+WANT_VER="$(sed -n 's/^[[:space:]]*VERSION[[:space:]]*:=[[:space:]]*\([0-9][^[:space:]]*\).*/\1/p' Makefile | head -1)"
+
+# Repo-root .env: a move to a new chain (or a rejoin) runs THIS release's
+# images, node and oracle alike. Other pins there (an old chain's tags) are
+# overridden for this run and commented out after YES.
+ROOT_ENV=".env"
+ROOT_FIXES=()
+if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
+  [ -n "$WANT_VER" ] || die "the Makefile has no VERSION. Nothing was touched."
+  for pair in "STEEMVM_IMAGE=steemblazer/steemvmd:v$WANT_VER" \
+              "ORACLE_GO_IMAGE=steemblazer/steemvm-oracle-go:v$WANT_VER" \
+              "ORACLE_PYTHON_IMAGE=steemblazer/steemvm-oracle-python:v$WANT_VER" \
+              "ORACLE_JS_IMAGE=steemblazer/steemvm-oracle-js:v$WANT_VER"; do
+    v="${pair%%=*}" want="${pair#*=}"
+    have="$(ENV_FILE="$ROOT_ENV" env_get "$v")"
+    [ -n "$have" ] && [ "$have" != "$want" ] && ROOT_FIXES+=("$v|$v=$have (this release runs $want)")
+    export "${v}=${want}"
+  done
+fi
+
 if [ "$NEW_CHAIN" = "1" ]; then
   # The genesis must be the one the network actually runs (a stale checkout
   # would split this node off at block 1).
@@ -390,14 +410,119 @@ if [ "$NEW_CHAIN" = "1" ]; then
 
   # The node image must be this release's (a new chain's genesis can't run on
   # an older binary).
-  WANT_VER="$(sed -n 's/^[[:space:]]*VERSION[[:space:]]*:=[[:space:]]*\([0-9][^[:space:]]*\).*/\1/p' Makefile | head -1)"
-  log "Pulling the node image…"
+  log "Pulling $STEEMVM_IMAGE…"
   $COMPOSE pull steemvm || warn "image pull failed — checking the cached image."
   GOT_VER="$(offline version 2>/dev/null | tr -d '\r' | tail -1 || true)"
-  [ -n "$WANT_VER" ] && [ "$GOT_VER" = "$WANT_VER" ] \
-    || die "the steemvm image reports version '${GOT_VER:-?}', but this release is '${WANT_VER:-?}' — check STEEMVM_IMAGE in the repo-root .env. Nothing was touched."
+  [ "$GOT_VER" = "$WANT_VER" ] \
+    || die "$STEEMVM_IMAGE reports version '${GOT_VER:-?}', but this release is '$WANT_VER'. Nothing was touched."
   ok "Node image is v$GOT_VER."
 fi
+
+# ── oracle/.env review (new chain / rejoin): what can't be right any more ────
+# Each problem becomes a "VAR|reason" entry in ENV_FIXES — commented out after
+# YES (secrets are removed instead) — and each replacement a "VAR=value" in
+# ENV_SETS, added after YES. Nothing else in the file is touched.
+#   - a node URL override pointing away from this node (the old chain's RPC/
+#     REST): the compose default http://steemvm:… is this node;
+#   - a Steem RPC that doesn't serve this chain's Steem anchor (unreachable,
+#     a dead domain, another network): replaced by working public nodes;
+#   - an owner/posting key or password: only the active key belongs on the
+#     server, and the svm.bank signer refuses to start next to them;
+#   - ORACLE_GAS_PRICES far from this chain's floor (an old chain's value):
+#     price-feed txs pay it, and they aren't fee-exempt;
+#   - ORACLE_PRICE_SOURCE=cmc without a CoinMarketCap key (CoinGecko is keyless);
+#   - an unreachable price-API base URL (the client's default is used).
+ENV_FIXES=()
+ENV_SETS=()
+# Owner/posting keys and passwords are removed, not commented out: a secret
+# must not stay on disk.
+secret_var() {
+  case "$1" in
+    ORACLE_STEEM_OWNER_WIF|ORACLE_STEEM_OWNER|ORACLE_STEEM_POSTING_WIF|ORACLE_STEEM_MASTER_PASSWORD|ORACLE_STEEM_PASSWORD|OWNER|POSTING|MASTER_PASSWORD) return 0 ;;
+  esac
+  return 1
+}
+# Public Steem nodes to fall back on (all checked against the anchor first).
+STEEM_FALLBACKS="https://api.steemit.com https://api.justyy.com https://steemd.steemworld.org https://api.steememory.com https://api.pennsif.net"
+ANCHOR_BLOCK="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block // "0"')"
+ANCHOR_ID="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block_id // empty')"
+# steem_ok <url>: it answers get_block for this chain's Steem anchor with the
+# anchor's ID — reachable, the API the oracle uses, the right network.
+steem_ok() {
+  local id
+  id="$(curl -fsS -m 15 "$1" -H 'Content-Type: application/json' \
+          -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"condenser_api.get_block\",\"params\":[$ANCHOR_BLOCK]}" 2>/dev/null \
+        | jq -r '.result.block_id // empty' 2>/dev/null || true)"
+  [ -n "$ANCHOR_ID" ] && [ "$id" = "$ANCHOR_ID" ]
+}
+# A host without a dot (a compose service, localhost) is only reachable from
+# the oracle's container, not from here: it is trusted as it is.
+steem_unverifiable() { case "$1" in *://*.*) return 1 ;; *) return 0 ;; esac; }
+
+STEEM_RPC_ARG="${STEEM_RPC:-}"
+STEEM_RPC="" STEEM_RPCS=""
+if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
+  log "Checking the Steem and API URLs in oracle/.env…"
+  for v in ORACLE_NODE_RPC ORACLE_NODE_REST; do
+    u="$(env_get "$v")"
+    case "$u" in
+      ""|http://steemvm:*|http://steemvm-node:*) ;;
+      *) ENV_FIXES+=("$v|$v=$u points away from this node — the oracle uses http://steemvm:…") ;;
+    esac
+  done
+
+  # The main Steem RPC: the configured one if it works, else STEEM_RPC= from
+  # the command line, else the first working fallback.
+  u="$(env_get ORACLE_STEEM_RPC)"
+  if [ -n "$u" ]; then
+    if steem_unverifiable "$u" || steem_ok "$u"; then STEEM_RPC="$u"
+    else ENV_FIXES+=("ORACLE_STEEM_RPC|ORACLE_STEEM_RPC=$u doesn't serve $TARGET_CHAIN's Steem anchor (unreachable, or another network)"); fi
+  fi
+  if [ -z "$STEEM_RPC" ]; then
+    for c in $STEEM_RPC_ARG $STEEM_FALLBACKS; do
+      if steem_ok "$c"; then STEEM_RPC="$c"; break; fi
+    done
+    [ -n "$STEEM_RPC" ] || die "no Steem RPC answers for block $ANCHOR_BLOCK — check this server's internet access. Nothing was touched."
+    ENV_SETS+=("ORACLE_STEEM_RPC=$STEEM_RPC")
+  fi
+
+  # The signer's node list: keep the working entries, top up to two.
+  u="$(env_get ORACLE_STEEM_RPCS)"
+  n=0
+  for c in $(printf '%s' "$u" | tr ',' ' '); do
+    if steem_unverifiable "$c" || steem_ok "$c"; then STEEM_RPCS="${STEEM_RPCS:+$STEEM_RPCS,}$c"; n=$((n + 1)); fi
+  done
+  for c in $STEEM_RPC $STEEM_FALLBACKS; do
+    [ "$n" -ge 2 ] && break
+    case ",$STEEM_RPCS," in *",$c,"*) continue ;; esac
+    if steem_ok "$c"; then STEEM_RPCS="${STEEM_RPCS:+$STEEM_RPCS,}$c"; n=$((n + 1)); fi
+  done
+  if [ "$STEEM_RPCS" != "$u" ]; then
+    [ -n "$u" ] && ENV_FIXES+=("ORACLE_STEEM_RPCS|ORACLE_STEEM_RPCS=$u (not all of it serves $TARGET_CHAIN's Steem anchor, or fewer than two nodes)")
+    ENV_SETS+=("ORACLE_STEEM_RPCS=$STEEM_RPCS")
+  fi
+
+  for v in ORACLE_STEEM_OWNER_WIF ORACLE_STEEM_OWNER ORACLE_STEEM_POSTING_WIF ORACLE_STEEM_MASTER_PASSWORD ORACLE_STEEM_PASSWORD OWNER POSTING MASTER_PASSWORD; do
+    [ -n "$(env_get "$v")" ] && ENV_FIXES+=("$v|$v (value not shown) — only the active key belongs on this server")
+  done
+  CHAIN_GAS="$(sed -n 's/^minimum-gas-prices = "\([0-9]*\)asteem".*/\1/p' Instructions/app.toml.example | head -1)"
+  GAS="$(env_get ORACLE_GAS_PRICES)"
+  if [ -n "$GAS" ] && [ -n "$CHAIN_GAS" ] \
+     && ! awk -v g="${GAS%asteem}" -v m="$CHAIN_GAS" 'BEGIN{exit !(g+0 >= m+0 && g+0 <= 10*m)}'; then
+    ENV_FIXES+=("ORACLE_GAS_PRICES|ORACLE_GAS_PRICES=$GAS is not near $TARGET_CHAIN's ${CHAIN_GAS}asteem floor — the default is that floor")
+  fi
+  if [ "$(env_get ORACLE_PRICE_SOURCE)" = "cmc" ] && [ -z "$(env_get ORACLE_CMC_API_KEY)" ]; then
+    ENV_FIXES+=("ORACLE_PRICE_SOURCE|ORACLE_PRICE_SOURCE=cmc has no ORACLE_CMC_API_KEY — CoinGecko (keyless) instead")
+  fi
+  for v in ORACLE_COINGECKO_BASE_URL ORACLE_CMC_BASE_URL; do
+    u="$(env_get "$v")"
+    [ -n "$u" ] || continue
+    code="$(curl -sS -o /dev/null -m 15 -w '%{http_code}' "$u" 2>/dev/null || true)"
+    [ "${code:-000}" = "000" ] && ENV_FIXES+=("$v|$v=$u is unreachable — the client's default is used")
+  done
+fi
+STEEM_RPC="${STEEM_RPC:-${STEEM_RPC_ARG:-https://api.steemit.com}}"
+STEEM_RPCS="${STEEM_RPCS:-$STEEM_RPC}"
 
 # ── rejoin pre-flight: everything it needs, asked/checked before any change ─
 if [ "$REJOIN" = "1" ]; then
@@ -406,14 +531,6 @@ if [ "$REJOIN" = "1" ]; then
   fi
   valid_steem_name "$STEEM_USERNAME" \
     || die "the moniker '$STEEM_USERNAME' in $CONFIG_TOML is not a Steem account name — set STEEM_USERNAME=<your Steem username>. Nothing was touched."
-
-  STEEM_RPC="${STEEM_RPC:-$(env_get ORACLE_STEEM_RPC)}"
-  STEEM_RPC="${STEEM_RPC:-https://api.steemit.com}"
-  STEEM_RPCS="$(env_get ORACLE_STEEM_RPCS)"
-  if [ -z "$STEEM_RPCS" ]; then
-    if [ "${STEEM_RPC%/}" = "https://api.steemit.com" ]; then STEEM_RPCS="$STEEM_RPC,https://api.justyy.com"
-    else STEEM_RPCS="$STEEM_RPC,https://api.steemit.com"; fi
-  fi
 
   ACCT="$(steem condenser_api.get_accounts "[[\"$STEEM_USERNAME\"]]" | jq -c '.result[0] // empty' 2>/dev/null || true)"
   [ -n "$ACCT" ] || die "Steem account @$STEEM_USERNAME not found (via $STEEM_RPC). Nothing was touched."
@@ -493,46 +610,6 @@ if [ "$REJOIN" = "1" ]; then
   ok "Active key matches @$STEEM_USERNAME ($ACTIVE_PUB)."
 fi
 
-# oracle/.env lines that can't be right on the new chain, commented out after
-# YES (secrets are removed instead). "VAR|reason" entries:
-#   - a node URL override pointing away from this node (the old chain's RPC/
-#     REST): the compose default http://steemvm:… is this node;
-#   - an owner/posting key or password: only the active key belongs on the
-#     server, and the svm.bank signer refuses to start next to them;
-#   - ORACLE_GAS_PRICES far from this chain's floor (an old chain's value):
-#     price-feed txs pay it, and they aren't fee-exempt;
-#   - ORACLE_PRICE_SOURCE=cmc without a CoinMarketCap key (CoinGecko is keyless).
-ENV_FIXES=()
-# Owner/posting keys and passwords are removed, not commented out: a secret
-# must not stay on disk.
-secret_var() {
-  case "$1" in
-    ORACLE_STEEM_OWNER_WIF|ORACLE_STEEM_OWNER|ORACLE_STEEM_POSTING_WIF|ORACLE_STEEM_MASTER_PASSWORD|ORACLE_STEEM_PASSWORD|OWNER|POSTING|MASTER_PASSWORD) return 0 ;;
-  esac
-  return 1
-}
-if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
-  for v in ORACLE_NODE_RPC ORACLE_NODE_REST; do
-    u="$(env_get "$v")"
-    case "$u" in
-      ""|http://steemvm:*|http://steemvm-node:*) ;;
-      *) ENV_FIXES+=("$v|$v=$u points away from this node — the oracle uses http://steemvm:…") ;;
-    esac
-  done
-  for v in ORACLE_STEEM_OWNER_WIF ORACLE_STEEM_OWNER ORACLE_STEEM_POSTING_WIF ORACLE_STEEM_MASTER_PASSWORD ORACLE_STEEM_PASSWORD OWNER POSTING MASTER_PASSWORD; do
-    [ -n "$(env_get "$v")" ] && ENV_FIXES+=("$v|$v (value not shown) — only the active key belongs on this server")
-  done
-  CHAIN_GAS="$(sed -n 's/^minimum-gas-prices = "\([0-9]*\)asteem".*/\1/p' Instructions/app.toml.example | head -1)"
-  GAS="$(env_get ORACLE_GAS_PRICES)"
-  if [ -n "$GAS" ] && [ -n "$CHAIN_GAS" ] \
-     && ! awk -v g="${GAS%asteem}" -v m="$CHAIN_GAS" 'BEGIN{exit !(g+0 >= m+0 && g+0 <= 10*m)}'; then
-    ENV_FIXES+=("ORACLE_GAS_PRICES|ORACLE_GAS_PRICES=$GAS is not near $TARGET_CHAIN's ${CHAIN_GAS}asteem floor — the default is that floor")
-  fi
-  if [ "$(env_get ORACLE_PRICE_SOURCE)" = "cmc" ] && [ -z "$(env_get ORACLE_CMC_API_KEY)" ]; then
-    ENV_FIXES+=("ORACLE_PRICE_SOURCE|ORACLE_PRICE_SOURCE=cmc has no ORACLE_CMC_API_KEY — CoinGecko (keyless) instead")
-  fi
-fi
-
 # ── confirm ──────────────────────────────────────────────────────────────────
 echo
 if [ "$REJOIN_ONLY" = "0" ]; then
@@ -551,15 +628,32 @@ if [ "$REJOIN" = "1" ]; then
   log "  sends 0.001 STEEM from @$STEEM_USERNAME to svm.bank (memo: svm-register $ADDR) if not yet registered,"
   log "  claims faucet coins, waits for $(steem_atoms "$STAKE_AMOUNT") STEEM, and creates the validator."
 fi
+for f in ${ROOT_FIXES[@]+"${ROOT_FIXES[@]}"}; do
+  log ".env: comments out ${f#*|}."
+done
 for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
   if secret_var "${f%%|*}"; then log "oracle/.env: removes ${f#*|}."
   else log "oracle/.env: comments out ${f#*|}."; fi
 done
+for p in ${ENV_SETS[@]+"${ENV_SETS[@]}"}; do
+  log "oracle/.env: sets $p."
+done
+if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
+  case "$ORACLE_PROFILE" in
+    go) OIMG="$ORACLE_GO_IMAGE" ;; python) OIMG="$ORACLE_PYTHON_IMAGE" ;; js) OIMG="$ORACLE_JS_IMAGE" ;; *) OIMG="" ;;
+  esac
+  log "Images: $STEEMVM_IMAGE${OIMG:+ and $OIMG}."
+fi
 [ -n "$ORACLE_PROFILE" ] && log "Finally it restarts the $ORACLE_PROFILE oracle on its published image."
 [ "$REJOIN_ONLY" = "0" ] && warn "Your node will be out of sync until it catches up."
 read -rp "Type YES to confirm: " CONFIRM < /dev/tty
 [ "$CONFIRM" = "YES" ] || die "reset cancelled — nothing was touched."
 
+for f in ${ROOT_FIXES[@]+"${ROOT_FIXES[@]}"}; do
+  v="${f%%|*}"
+  sed -i.bak -E "s/($(env_line "$v"))/# (reset.sh: this release runs v$WANT_VER) \1/" "$ROOT_ENV" && rm -f "$ROOT_ENV.bak"
+  ok ".env: commented out $v."
+done
 for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
   v="${f%%|*}"
   if secret_var "$v"; then
@@ -571,24 +665,30 @@ for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
   fi
 done
 
-# Save the active key first, so a later --rejoin-only never asks again.
-if [ "$REJOIN" = "1" ]; then
+# The replacements, and what every oracle needs, for a file that's missing
+# them (e.g. recreated by hand with only the key): it exits without a Steem
+# RPC, and the default price source (CoinMarketCap) needs an API key.
+if [ -f "$ENV_FILE" ] || [ "$REJOIN" = "1" ]; then
   [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  if [ -z "$(env_get ORACLE_PRIVATE_KEY)" ] && [ -z "$(env_get ORACLE_MNEMONIC)" ] && [ "$KEYRING" = "test" ]; then
-    PRIVKEY="$(kcmd keys unsafe-export-eth-key "$VALIDATOR_KEY" 2>/dev/null | tr -d '\r' | tail -1 | tr -d '[:space:]' || true)"
-    [ -n "$PRIVKEY" ] && env_set_if_missing ORACLE_PRIVATE_KEY "$PRIVKEY"
-    unset PRIVKEY
-  fi
-  # What every oracle needs, for a file that's missing them (e.g. recreated by
-  # hand with only the key): it exits without a Steem RPC, and the default
-  # price source (CoinMarketCap) needs an API key.
+  for p in ${ENV_SETS[@]+"${ENV_SETS[@]}"}; do
+    env_set_if_missing "${p%%=*}" "${p#*=}"
+  done
   env_set_if_missing ORACLE_START_BLOCK latest
   env_set_if_missing ORACLE_STEEM_RPC "$STEEM_RPC"
   if [ -z "$(env_get ORACLE_PRICE_SOURCE)" ] && [ -z "$(env_get ORACLE_CMC_API_KEY)" ]; then
     env_set_if_missing ORACLE_PRICE_SOURCE coingecko
   fi
   env_set_if_missing ORACLE_SBD_SYMBOL SBD
+fi
+
+# Save the active key first, so a later --rejoin-only never asks again.
+if [ "$REJOIN" = "1" ]; then
+  if [ -z "$(env_get ORACLE_PRIVATE_KEY)" ] && [ -z "$(env_get ORACLE_MNEMONIC)" ] && [ "$KEYRING" = "test" ]; then
+    PRIVKEY="$(kcmd keys unsafe-export-eth-key "$VALIDATOR_KEY" 2>/dev/null | tr -d '\r' | tail -1 | tr -d '[:space:]' || true)"
+    [ -n "$PRIVKEY" ] && env_set_if_missing ORACLE_PRIVATE_KEY "$PRIVKEY"
+    unset PRIVKEY
+  fi
   env_set_if_missing ORACLE_STEEM_ACTIVE_WIF "$ACTIVE_WIF"
   env_set_if_missing ORACLE_MULTISIG_ENABLED true
   env_set_if_missing ORACLE_STEEM_RPCS "$STEEM_RPCS"

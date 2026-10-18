@@ -330,6 +330,33 @@ fi
 # Auto-fetched (public data); falls back to manual entry for multisig/delegated accounts.
 STEEM_RPC="${STEEM_RPC:-https://api.steemit.com}"
 
+# The Steem nodes the oracle will use must answer get_block for this chain's
+# Steem anchor with the anchor's ID (reachable, the API the oracle uses, the
+# right network). A failing STEEM_RPC is swapped for a working public node;
+# the signer's list (STEEM_RPCS) gets two working nodes.
+STEEM_FALLBACKS="https://api.steemit.com https://api.justyy.com https://steemd.steemworld.org https://api.steememory.com https://api.pennsif.net"
+ANCHOR_BLOCK="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block // "0"' 2>/dev/null || echo 0)"
+ANCHOR_ID="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block_id // empty' 2>/dev/null || true)"
+steem_ok() {
+  local id
+  id="$(curl -fsS -m 15 "$1" -H 'Content-Type: application/json' \
+          -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"condenser_api.get_block\",\"params\":[$ANCHOR_BLOCK]}" 2>/dev/null \
+        | jq -r '.result.block_id // empty' 2>/dev/null || true)"
+  [ -n "$ANCHOR_ID" ] && [ "$id" = "$ANCHOR_ID" ]
+}
+if [ -n "$ANCHOR_ID" ] && ! steem_ok "$STEEM_RPC"; then
+  for c in $STEEM_FALLBACKS; do
+    if steem_ok "$c"; then warn "$STEEM_RPC doesn't serve this chain's Steem anchor — using $c."; STEEM_RPC="$c"; break; fi
+  done
+fi
+if [ -z "${STEEM_RPCS:-}" ]; then
+  STEEM_RPCS="$STEEM_RPC"
+  for c in $STEEM_FALLBACKS; do
+    [ "$c" = "$STEEM_RPC" ] && continue
+    if [ -z "$ANCHOR_ID" ] || steem_ok "$c"; then STEEM_RPCS="$STEEM_RPC,$c"; break; fi
+  done
+fi
+
 fetch_steem_keys() {
   local resp
   resp="$(curl -fsS -X POST "$STEEM_RPC" -H 'content-type: application/json' \
@@ -374,13 +401,11 @@ DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
 # Pays the 0.001 STEEM name registration (step 7) and runs the oracle's
 # svm.bank signer. The signing runs in the published oracle-python image
 # (oracle/tools/steem_transfer.py), so the host needs no Steem library.
-if [ "${STEEM_RPC%/}" = "https://api.steemit.com" ]; then STEEM_RPCS="${STEEM_RPCS:-$STEEM_RPC,https://api.justyy.com}"
-else STEEM_RPCS="${STEEM_RPCS:-$STEEM_RPC,https://api.steemit.com}"; fi
 STEEM_IMG=""
 steem_helper() {
   if [ -z "$STEEM_IMG" ]; then
     STEEM_IMG="$($COMPOSE --profile python config --format json 2>/dev/null | jq -r '.services["oracle-python"].image // empty')"
-    STEEM_IMG="${STEEM_IMG:-steemblazer/steemvm-oracle-python:latest}"
+    STEEM_IMG="${STEEM_IMG:-steemblazer/steemvm-oracle-python:v0.0.6}"
     docker pull -q "$STEEM_IMG" >/dev/null 2>&1 || docker image inspect "$STEEM_IMG" >/dev/null 2>&1 \
       || die "could not pull $STEEM_IMG (it signs the Steem registration transfer)."
   fi

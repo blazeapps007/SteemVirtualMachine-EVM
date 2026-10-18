@@ -332,7 +332,7 @@ if [ -z "$ORACLE_PROFILE" ]; then
 fi
 
 # Moves the oracle to its published image (the compose file's tag, normally
-# :latest). Only the oracle service is touched — --no-deps keeps compose
+# this release's tag). Only the oracle service is touched — --no-deps keeps compose
 # from starting, rebuilding or recreating the node — and compose recreates
 # the container only if the pulled image differs from the one it runs.
 update_oracle() {
