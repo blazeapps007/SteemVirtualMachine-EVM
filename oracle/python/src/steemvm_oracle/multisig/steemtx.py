@@ -43,7 +43,7 @@ class UnsupportedOperation(SteemTxError):
 # JSON-RPC
 # --------------------------------------------------------------------------
 
-_TRANSIENT = re.compile(r"(?i)upstream|circuit breaker|timeout|unavailable|too many requests")
+_TRANSIENT = re.compile(r"(?i)upstream|circuit breaker|timeout|unavailable|too many requests|bad cast")
 
 
 class ChainError(RuntimeError):

@@ -31,7 +31,10 @@ type ChainError struct{ Message string }
 
 func (e *ChainError) Error() string { return e.Message }
 
-var transient = regexp.MustCompile(`(?i)upstream|circuit breaker|timeout|unavailable|too many requests`)
+// Node-side errors worth trying the next node for. "Bad Cast" comes from a
+// misbehaving backend behind a load balancer (api.steemit.com), not from
+// Steem itself; the same call succeeds on the next node or a moment later.
+var transient = regexp.MustCompile(`(?i)upstream|circuit breaker|timeout|unavailable|too many requests|bad cast`)
 
 // NewRPC returns an RPC client over the given nodes (own node first is best).
 func NewRPC(nodes ...string) *RPC {

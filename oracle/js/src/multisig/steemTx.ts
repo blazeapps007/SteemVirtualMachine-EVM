@@ -41,7 +41,7 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 // JSON-RPC
 // ---------------------------------------------------------------------------
 
-const TRANSIENT = /upstream|circuit breaker|timeout|unavailable|too many requests/i;
+const TRANSIENT = /upstream|circuit breaker|timeout|unavailable|too many requests|bad cast/i;
 
 export interface SteemRpc {
   call(method: string, params: unknown[]): Promise<any>;
