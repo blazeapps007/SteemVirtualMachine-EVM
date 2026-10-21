@@ -66,6 +66,17 @@ const UpgradeNameV005 = "v0.0.5"
 // and the Plan.Name of the governance MsgSoftwareUpgrade.
 const UpgradeNameV006 = "v0.0.6"
 
+// UpgradeNameV007 blocks every module account in x/bank (the SDK default; an
+// app-config override had left steemblackhole, bridge_reward, gov and others
+// unblocked). cosmos/evm mirrors a precompile's bank transfers into the EVM
+// state except for blocked addresses and refuses to write a module account's
+// balance, so bridgeOut through the 0x…0900 precompile failed with "is not
+// allowed to receive funds". Logic-only: no store or parameter changes.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV007 = "v0.0.7"
+
 // RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On
 // the IN-PLACE upgrade path this: runs module migrations, registers the native
 // SBD coin (bank metadata + ERC20 precompile, via the same registerSBD helper the
@@ -139,6 +150,15 @@ func (app *App) RegisterUpgradeHandlers() {
 	// keys and no parameter changes.
 	app.UpgradeKeeper.SetUpgradeHandler(
 		UpgradeNameV006,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+		},
+	)
+
+	// v0.0.7: every module account blocked in x/bank (see UpgradeNameV007).
+	// No new store keys and no parameter changes.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV007,
 		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 		},

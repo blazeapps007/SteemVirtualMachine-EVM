@@ -375,20 +375,13 @@ func GetMaccPerms() map[string][]string {
 	return dup
 }
 
-// BlockedAddresses returns all the app's blocked account addresses.
+// BlockedAddresses returns the addresses the bank module blocks: every module
+// account (x/bank's default, see app_config.go), keyed by bech32 address.
 func BlockedAddresses() map[string]bool {
 	result := make(map[string]bool)
-
-	if len(blockAccAddrs) > 0 {
-		for _, addr := range blockAccAddrs {
-			result[addr] = true
-		}
-	} else {
-		for addr := range GetMaccPerms() {
-			result[addr] = true
-		}
+	for name := range GetMaccPerms() {
+		result[authtypes.NewModuleAddress(name).String()] = true
 	}
-
 	return result
 }
 

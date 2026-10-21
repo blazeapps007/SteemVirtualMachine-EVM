@@ -90,15 +90,6 @@ var (
 		// it is routed to stakers (no special perms).
 		{Account: steembridgemoduletypes.BlackHoleModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
 		{Account: steembridgemoduletypes.BridgeRewardModuleName}}
-	blockAccAddrs = []string{
-		authtypes.FeeCollectorName,
-		distrtypes.ModuleName,
-		minttypes.ModuleName,
-		stakingtypes.BondedPoolName,
-		stakingtypes.NotBondedPoolName,
-		// We allow the following module accounts to receive funds:
-		// govtypes.ModuleName
-	}
 
 	// application configuration (used by depinject)
 	appConfig = appconfig.Compose(&appv1alpha1.Config{
@@ -216,9 +207,14 @@ var (
 			},
 			{
 				Name: banktypes.ModuleName,
-				Config: appconfig.WrapAny(&bankmodulev1.Module{
-					BlockedModuleAccountsOverride: getBlockAccAddrs(),
-				}),
+				// No BlockedModuleAccountsOverride: the default blocks EVERY
+				// module account. cosmos/evm requires that — a precompile's
+				// bank transfers are mirrored into the EVM state except for
+				// blocked addresses, and the EVM refuses to write a module
+				// account's balance, so a precompile paying an unblocked module
+				// account (bridgeOut's steemblackhole/bridge_reward, gov's
+				// deposit) fails "is not allowed to receive funds".
+				Config: appconfig.WrapAny(&bankmodulev1.Module{}),
 			},
 			{
 				Name:   stakingtypes.ModuleName,
@@ -291,11 +287,3 @@ var (
 			}},
 	})
 )
-
-func getBlockAccAddrs() []string {
-	for _, precompile := range evmmoduletypes.AvailableStaticPrecompiles {
-		blockAccAddrs = append(blockAccAddrs, precompile)
-	}
-
-	return blockAccAddrs
-}
