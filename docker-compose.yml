@@ -17,6 +17,10 @@ services:
     # named below isn't already pulled, compose falls back to building it
     # locally from ./Dockerfile (same as always, just now cached properly
     # instead of rebuilding from scratch every start).
+    # v0.0.7 UPGRADE PENDING: this stays on v0.0.6 (the applied version) until
+    # the v0.0.7 upgrade applies on-chain; ./update.sh stages v0.0.7 through the
+    # stage-v0.0.7 service below. Flip this to v0.0.7 (and drop that service)
+    # only once `steemvmd query upgrade applied v0.0.7` returns a height.
     image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.6}
     build:
       context: .
@@ -64,6 +68,45 @@ services:
       - "127.0.0.1:26657:26657"  # CometBFT RPC
       - "127.0.0.1:1317:1317"    # Cosmos REST API
       - "127.0.0.1:9090:9090"    # gRPC
+
+  # One-off: stage the v0.0.7 binary into cosmovisor's upgrade slot WITHOUT
+  # running it or touching the live node — ./update.sh runs this. cosmovisor
+  # swaps to it on its own at the v0.0.7 upgrade height. It never writes
+  # cosmovisor/genesis or `current`, so it is safe on any node. Uses its own
+  # image variable (not STEEMVM_IMAGE) so an override of the live image can't
+  # stage the wrong binary, and refuses anything that doesn't report 0.0.7.
+  #
+  #     docker compose --profile stage run --rm stage-v0.0.7
+  stage-v0.0.7:
+    image: ${STEEMVM_STAGE_IMAGE:-steemblazer/steemvmd:v0.0.7}
+    # Always fetch the published image: an older build cached from an earlier
+    # pull reports the same "0.0.7" version but would split this node off the
+    # network at the upgrade height.
+    pull_policy: always
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        ver="$$(/root/go/bin/steemvmd version)"
+        if [ "$$ver" != "0.0.7" ]; then
+          echo "refusing to stage: image reports version '$$ver', expected 0.0.7" >&2
+          exit 1
+        fi
+        d=/root/.steemvm/cosmovisor/upgrades/v0.0.7/bin
+        mkdir -p "$$d"
+        if [ -f "$$d/steemvmd" ] && [ "$$(sha256sum < "$$d/steemvmd")" = "$$(sha256sum < /root/go/bin/steemvmd)" ]; then
+          echo "already staged (identical binary)"
+        else
+          # Copy, then rename over: once cosmovisor RUNS this binary (after the
+          # upgrade height), a plain cp onto it fails with "Text file busy".
+          cp /root/go/bin/steemvmd "$$d/.steemvmd.new"
+          mv -f "$$d/.steemvmd.new" "$$d/steemvmd"
+        fi
+        echo "staged: $$("$$d/steemvmd" version) -> cosmovisor/upgrades/v0.0.7/bin/steemvmd"
+        echo "sha256: $$(sha256sum /root/.steemvm/cosmovisor/upgrades/v0.0.7/bin/steemvmd | cut -d' ' -f1)  (compare with the value in the upgrade proposal)"
+    volumes:
+      - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
+    profiles: ["stage"]
 
   # Standalone Steem bridge oracle — pick ONE language and bring it up with its
   # profile (never more than one at a time; they'd race on the same signing key
