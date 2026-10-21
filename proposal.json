@@ -4,17 +4,17 @@
       "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
       "authority": "steem10d07y265gmmuvt4z0w9aw880jnsr700jvhcqmf",
       "plan": {
-        "name": "v0.0.6",
+        "name": "v0.0.7",
         "time": "0001-01-01T00:00:00Z",
-        "height": "830000",
-        "info": "steemvmd v0.0.6 — dependency/security refresh (cosmos/evm v0.7.3, ibc-go v11.2.0, Go 1.26.9) + bridge attestation hardening. Image steemblazer/steemvmd:v0.0.6, binary sha256 cf0148411dd28b9c3116735b504dd425dbc9aee9e421160cfce82caf5b13b3eb. Stage with: git fetch && git checkout release/v0.0.6 && ./update.sh (see Instructions/UPGRADE_v0.0.6.md).",
+        "height": "79664",
+        "info": "steemvmd v0.0.7: every module account blocked in x/bank, fixing bridgeOut through the 0x...0900 EVM precompile ('is not allowed to receive funds'). Image steemblazer/steemvmd:v0.0.7, binary sha256 dce7841719984b4c385dee7f4131b6d58f424562c1c7dcdd78dafb189b0936cc. Stage with: git fetch origin && git checkout release/v0.0.6 && git pull --ff-only && ./update.sh (see Instructions/UPGRADE_v0.0.7.md).",
         "upgraded_client_state": null
       }
     }
   ],
   "metadata": "",
-  "deposit": "10000000asteem",
-  "title": "Coordinated upgrade v0.0.6: security dependencies + bridge hardening",
-  "summary": "Coordinated software upgrade to v0.0.6 at block height 830000. Bumps to the latest stable dependencies compatible with cosmos/evm — cosmos/evm v0.7.3 (upstream state-breaking security release), ibc-go v11.2.0, cosmos go-ethereum v1.17.2-cosmos-1, gRPC v1.84.0, Go 1.26.9 — and closes the October security review's bridge findings: per-fact-set attestation tallying (fixes a withdrawal double-payout and deposit/name front-running), field size limits, bounded end-block work, and fair bridge-duty credit. Validators: stage ahead of the height with `git fetch && git checkout release/v0.0.6 && ./update.sh`; cosmovisor switches automatically at height 830000. Binary sha256 cf0148411dd28b9c3116735b504dd425dbc9aee9e421160cfce82caf5b13b3eb.",
-  "expedited": false
+  "deposit": "50000000000000000000asteem",
+  "title": "Upgrade v0.0.7: fix EVM bridge-out (block module accounts)",
+  "summary": "Coordinated software upgrade to v0.0.7 at block height 79664 (about 2026-10-24 00:00 UTC). Bridge-outs through the EVM precompile (0x...0900, e.g. from MetaMask) fail with 'is not allowed to receive funds': cosmos/evm copies a precompile's bank transfers into the EVM state, skipping only blocked accounts, and refuses to write a module account's balance, while the bridge's module accounts (steemblackhole, bridge_reward) were not blocked. v0.0.7 blocks every module account in x/bank, as upstream cosmos/evm does. No state or parameter changes; the upgrade handler only runs module migrations. Validators: stage before the height with `git fetch origin && git checkout release/v0.0.6 && git pull --ff-only && ./update.sh`; cosmovisor switches automatically at height 79664. Binary sha256 dce7841719984b4c385dee7f4131b6d58f424562c1c7dcdd78dafb189b0936cc.",
+  "expedited": true
 }
