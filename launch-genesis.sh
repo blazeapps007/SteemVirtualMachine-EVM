@@ -387,7 +387,8 @@ if [ "$NO_ORACLE" = "0" ]; then
       *) die "ORACLE_PROFILE must be go, python or js" ;;
     esac
   fi
-  set_env "ORACLE_$(printf '%s' "$ORACLE_PROFILE" | tr a-z A-Z)_IMAGE" .env "$ORACLE_IMAGE"
+  # The oracle's image reaches compose through $ORACLE_IMAGE_VAR, exported
+  # above — not .env (see step 4).
   [ -f oracle/.env ] && mv oracle/.env "oracle/.env.bak.$(date +%s)"
   umask 077
   {
