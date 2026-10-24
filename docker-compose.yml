@@ -6,8 +6,10 @@ services:
     # upgrade applied at height 79664). A node whose cosmovisor still points
     # at `genesis` (one that missed staging and halted at 79664) runs this
     # image's binary on its next start and applies the upgrade itself.
-    # Override with STEEMVM_IMAGE (env var or repo-root .env) to point at a
-    # different tag: STEEMVM_IMAGE=you/steemvmd:tag
+    # To run a different image once, set it on the command line
+    # (STEEMVM_IMAGE=you/steemvmd:tag docker compose up -d steemvm). Don't pin it
+    # in the repo-root .env: that overrides this default on every later release;
+    # the scripts comment such pins out (unpin_images.sh).
     #
     # For a future coordinated upgrade, keep this default on the APPLIED
     # version and add a one-off `stage-vX.Y.Z` service (profile "stage") that
@@ -86,7 +88,7 @@ services:
   # version tag as the node (no local build unless that image can't be pulled;
   # same pull-or-fallback-build pattern as the `steemvm` service above). Bump
   # all four tags together on a release. Override with ORACLE_GO_IMAGE /
-  # ORACLE_PYTHON_IMAGE / ORACLE_JS_IMAGE (env var or repo-root .env).
+  # ORACLE_PYTHON_IMAGE / ORACLE_JS_IMAGE on the command line — not in .env (see above).
   oracle-go:
     image: ${ORACLE_GO_IMAGE:-steemblazer/steemvm-oracle-go:v0.0.7}
     build:

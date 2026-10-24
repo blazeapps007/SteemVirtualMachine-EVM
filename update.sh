@@ -300,6 +300,16 @@ fi
 # ══ Docker ═════════════════════════════════════════════════════════════════════
 command -v docker >/dev/null || die "docker not found on PATH (for a node that runs steemvmd directly, use --bare-metal)"
 
+# Images: this release's, from docker-compose.yml's defaults (just pulled). An
+# image pin in the repo-root .env would override them and keep the node on an
+# old version, so this run uses the defaults — unless set on the command line —
+# and the pins are commented out.
+for v in STEEMVM_IMAGE ORACLE_GO_IMAGE ORACLE_PYTHON_IMAGE ORACLE_JS_IMAGE; do
+  d="$(sed -n "s/.*\${$v:-\([^}]*\)}.*/\1/p" docker-compose.yml | head -1)"
+  [ -z "${!v:-}" ] && [ -n "$d" ] && export "$v=$d"
+done
+./unpin_images.sh
+
 # Use the node home the RUNNING container actually mounts, not a guess from
 # $HOME: running this as root on a node whose compose was started by another
 # user would otherwise stage the binary into the wrong home.

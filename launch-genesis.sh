@@ -239,9 +239,14 @@ sv() { $DOCKER run --rm -v "$STEEMVM_HOME:/root/.steemvm" --entrypoint "$BIN" "$
 sv_stdin() { $DOCKER run --rm -i -v "$STEEMVM_HOME:/root/.steemvm" --entrypoint "$BIN" "$STEEMVM_IMAGE" "$@" --home /root/.steemvm; }
 ok "steemvmd $($DOCKER run --rm --entrypoint "$BIN" "$STEEMVM_IMAGE" version)"
 
-# Compose reads the image names from the repo-root .env.
+# The images go to compose through this run's environment, NOT the repo-root
+# .env: a pin there would override docker-compose.yml's defaults on every later
+# release and keep the node on this version after `git pull`.
+export STEEMVM_IMAGE
+ORACLE_IMAGE_VAR="ORACLE_$(printf '%s' "$ORACLE_PROFILE" | tr 'a-z' 'A-Z')_IMAGE"
+export "$ORACLE_IMAGE_VAR=$ORACLE_IMAGE"
+./unpin_images.sh >/dev/null
 set_env() { touch "$2"; if grep -q "^$1=" "$2"; then sed -i "s|^$1=.*|$1=$3|" "$2"; else printf '%s=%s\n' "$1" "$3" >> "$2"; fi; }
-set_env STEEMVM_IMAGE .env "$STEEMVM_IMAGE"
 set_env STEEMVM_HOME .env "$STEEMVM_HOME"   # compose mounts exactly this home
 
 # ── 5. node home + validator key ─────────────────────────────────────────────

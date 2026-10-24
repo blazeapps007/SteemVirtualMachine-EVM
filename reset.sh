@@ -295,7 +295,7 @@ STEEM_IMG=""
 steem_helper() {
   if [ -z "$STEEM_IMG" ]; then
     STEEM_IMG="$($COMPOSE --profile python config --format json 2>/dev/null | jq -r '.services["oracle-python"].image // empty')"
-    STEEM_IMG="${STEEM_IMG:-steemblazer/steemvm-oracle-python:v0.0.6}"
+    STEEM_IMG="${STEEM_IMG:-${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:latest}}"
     docker pull -q "$STEEM_IMG" >/dev/null 2>&1 || docker image inspect "$STEEM_IMG" >/dev/null 2>&1 \
       || die "could not pull $STEEM_IMG (it signs the Steem registration transfer)."
   fi
@@ -397,23 +397,16 @@ fi
 
 WANT_VER="$(sed -n 's/^[[:space:]]*VERSION[[:space:]]*:=[[:space:]]*\([0-9][^[:space:]]*\).*/\1/p' Makefile | head -1)"
 
-# Repo-root .env: a move to a new chain (or a rejoin) runs THIS release's
-# images, node and oracle alike. Other pins there (an old chain's tags) are
-# overridden for this run and commented out after YES.
-ROOT_ENV=".env"
-ROOT_FIXES=()
-if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
-  [ -n "$WANT_VER" ] || die "the Makefile has no VERSION. Nothing was touched."
-  for pair in "STEEMVM_IMAGE=steemblazer/steemvmd:v$WANT_VER" \
-              "ORACLE_GO_IMAGE=steemblazer/steemvm-oracle-go:v$WANT_VER" \
-              "ORACLE_PYTHON_IMAGE=steemblazer/steemvm-oracle-python:v$WANT_VER" \
-              "ORACLE_JS_IMAGE=steemblazer/steemvm-oracle-js:v$WANT_VER"; do
-    v="${pair%%=*}" want="${pair#*=}"
-    have="$(ENV_FILE="$ROOT_ENV" env_get "$v")"
-    [ -n "$have" ] && [ "$have" != "$want" ] && ROOT_FIXES+=("$v|$v=$have (this release runs $want)")
-    export "${v}=${want}"
-  done
-fi
+# Images: this release's, from docker-compose.yml's defaults. An image pin in
+# the repo-root .env would override them (and go stale on every later release),
+# so this run uses the defaults — unless set on the command line — and the
+# pins are commented out after YES (unpin_images.sh).
+[ -n "$WANT_VER" ] || die "the Makefile has no VERSION. Nothing was touched."
+for v in STEEMVM_IMAGE ORACLE_GO_IMAGE ORACLE_PYTHON_IMAGE ORACLE_JS_IMAGE; do
+  d="$(sed -n "s/.*\${$v:-\([^}]*\)}.*/\1/p" docker-compose.yml | head -1)"
+  [ -z "${!v:-}" ] && [ -n "$d" ] && export "$v=$d"
+done
+ROOT_PINS="$(./unpin_images.sh --check)"
 
 if [ "$NEW_CHAIN" = "1" ]; then
   # The genesis must be the one the network actually runs (a stale checkout
@@ -647,9 +640,7 @@ if [ "$REJOIN" = "1" ]; then
   log "  sends 0.001 STEEM from @$STEEM_USERNAME to svm.bank (memo: svm-register $ADDR) if not yet registered,"
   log "  claims faucet coins, waits for $(steem_atoms "$STAKE_AMOUNT") STEEM, and creates the validator."
 fi
-for f in ${ROOT_FIXES[@]+"${ROOT_FIXES[@]}"}; do
-  log ".env: comments out ${f#*|}."
-done
+[ -z "$ROOT_PINS" ] || printf '%s\n' "$ROOT_PINS" | while IFS= read -r l; do log ".env: comments out $l."; done
 for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
   if secret_var "${f%%|*}"; then log "oracle/.env: removes ${f#*|}."
   else log "oracle/.env: comments out ${f#*|}."; fi
@@ -657,22 +648,16 @@ done
 for p in ${ENV_SETS[@]+"${ENV_SETS[@]}"}; do
   log "oracle/.env: sets $p."
 done
-if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
-  case "$ORACLE_PROFILE" in
-    go) OIMG="$ORACLE_GO_IMAGE" ;; python) OIMG="$ORACLE_PYTHON_IMAGE" ;; js) OIMG="$ORACLE_JS_IMAGE" ;; *) OIMG="" ;;
-  esac
-  log "Images: $STEEMVM_IMAGE${OIMG:+ and $OIMG}."
-fi
+case "$ORACLE_PROFILE" in
+  go) OIMG="$ORACLE_GO_IMAGE" ;; python) OIMG="$ORACLE_PYTHON_IMAGE" ;; js) OIMG="$ORACLE_JS_IMAGE" ;; *) OIMG="" ;;
+esac
+log "Images: $STEEMVM_IMAGE${OIMG:+ and $OIMG}."
 [ -n "$ORACLE_PROFILE" ] && log "Finally it restarts the $ORACLE_PROFILE oracle on its published image."
 [ "$REJOIN_ONLY" = "0" ] && warn "Your node will be out of sync until it catches up."
 read -rp "Type YES to confirm: " CONFIRM < /dev/tty
 [ "$CONFIRM" = "YES" ] || die "reset cancelled — nothing was touched."
 
-for f in ${ROOT_FIXES[@]+"${ROOT_FIXES[@]}"}; do
-  v="${f%%|*}"
-  sed -i.bak -E "s/($(env_line "$v"))/# (reset.sh: this release runs v$WANT_VER) \1/" "$ROOT_ENV" && rm -f "$ROOT_ENV.bak"
-  ok ".env: commented out $v."
-done
+[ -z "$ROOT_PINS" ] || ./unpin_images.sh
 for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
   v="${f%%|*}"
   if secret_var "$v"; then

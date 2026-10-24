@@ -80,6 +80,16 @@ command -v docker >/dev/null || die "docker not found on PATH"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
 [ -f docker-compose.yml ] || die "run this from the repository root."
 
+# Images: this release's, from docker-compose.yml's defaults. An image pin in
+# the repo-root .env (an earlier release's) would override them, so this run
+# uses the defaults — unless set on the command line — and the pins are
+# commented out.
+for v in STEEMVM_IMAGE ORACLE_GO_IMAGE ORACLE_PYTHON_IMAGE ORACLE_JS_IMAGE; do
+  d="$(sed -n "s/.*\${$v:-\([^}]*\)}.*/\1/p" docker-compose.yml | head -1)"
+  [ -z "${!v:-}" ] && [ -n "$d" ] && export "$v=$d"
+done
+./unpin_images.sh
+
 # fix_mempool_type patches a known-stale config.toml value: an old/carried-over
 # config.toml (repo-level Instructions/ cache, or an already-initialized node's
 # own ~/.steemvm/config/config.toml) can still have [mempool] type = "flood"
@@ -408,7 +418,7 @@ STEEM_IMG=""
 steem_helper() {
   if [ -z "$STEEM_IMG" ]; then
     STEEM_IMG="$($COMPOSE --profile python config --format json 2>/dev/null | jq -r '.services["oracle-python"].image // empty')"
-    STEEM_IMG="${STEEM_IMG:-steemblazer/steemvm-oracle-python:v0.0.6}"
+    STEEM_IMG="${STEEM_IMG:-${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:latest}}"
     docker pull -q "$STEEM_IMG" >/dev/null 2>&1 || docker image inspect "$STEEM_IMG" >/dev/null 2>&1 \
       || die "could not pull $STEEM_IMG (it signs the Steem registration transfer)."
   fi
