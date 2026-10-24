@@ -487,7 +487,10 @@ fi
 if fetch_statesync_trust; then
   ok "State-sync trust anchor: height $TRUST_HEIGHT."
 else
-  warn "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — will fall back to a full replay from genesis (cheap at this height)."
+  # steemvm-2 has been through a coordinated upgrade (v0.0.7 at 79664): no
+  # single binary can replay both sides of it, so without a snapshot a new
+  # node can't sync at all.
+  die "state-sync unavailable ($SEED_RPC unreachable, or no recent block to trust) — and a full replay from genesis can't cross the v0.0.7 upgrade. Retry later, or give another node's RPC when asked (SEED_RPC=<url>)."
 fi
 
 if fetch_seed_peer; then

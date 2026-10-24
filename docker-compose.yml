@@ -1,10 +1,13 @@
 services:
   steemvm:
     # Pre-built image (see Dockerfile) — no more `make install` inside the
-    # container on every start. Defaults to the published v0.0.6 image: the
-    # steemvm-2 network runs v0.0.6 from its genesis block. Override with
-    # STEEMVM_IMAGE (env var or repo-root .env) to point at a different tag:
-    # STEEMVM_IMAGE=you/steemvmd:tag
+    # container on every start. Defaults to the published v0.0.7 image, the
+    # version applied on-chain (steemvm-2 launched on v0.0.6; the v0.0.7
+    # upgrade applied at height 79664). A node whose cosmovisor still points
+    # at `genesis` (one that missed staging and halted at 79664) runs this
+    # image's binary on its next start and applies the upgrade itself.
+    # Override with STEEMVM_IMAGE (env var or repo-root .env) to point at a
+    # different tag: STEEMVM_IMAGE=you/steemvmd:tag
     #
     # For a future coordinated upgrade, keep this default on the APPLIED
     # version and add a one-off `stage-vX.Y.Z` service (profile "stage") that
@@ -17,11 +20,7 @@ services:
     # named below isn't already pulled, compose falls back to building it
     # locally from ./Dockerfile (same as always, just now cached properly
     # instead of rebuilding from scratch every start).
-    # v0.0.7 UPGRADE PENDING: this stays on v0.0.6 (the applied version) until
-    # the v0.0.7 upgrade applies on-chain; ./update.sh stages v0.0.7 through the
-    # stage-v0.0.7 service below. Flip this to v0.0.7 (and drop that service)
-    # only once `steemvmd query upgrade applied v0.0.7` returns a height.
-    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.6}
+    image: ${STEEMVM_IMAGE:-steemblazer/steemvmd:v0.0.7}
     build:
       context: .
       dockerfile: Dockerfile
@@ -69,45 +68,6 @@ services:
       - "127.0.0.1:1317:1317"    # Cosmos REST API
       - "127.0.0.1:9090:9090"    # gRPC
 
-  # One-off: stage the v0.0.7 binary into cosmovisor's upgrade slot WITHOUT
-  # running it or touching the live node — ./update.sh runs this. cosmovisor
-  # swaps to it on its own at the v0.0.7 upgrade height. It never writes
-  # cosmovisor/genesis or `current`, so it is safe on any node. Uses its own
-  # image variable (not STEEMVM_IMAGE) so an override of the live image can't
-  # stage the wrong binary, and refuses anything that doesn't report 0.0.7.
-  #
-  #     docker compose --profile stage run --rm stage-v0.0.7
-  stage-v0.0.7:
-    image: ${STEEMVM_STAGE_IMAGE:-steemblazer/steemvmd:v0.0.7}
-    # Always fetch the published image: an older build cached from an earlier
-    # pull reports the same "0.0.7" version but would split this node off the
-    # network at the upgrade height.
-    pull_policy: always
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        ver="$$(/root/go/bin/steemvmd version)"
-        if [ "$$ver" != "0.0.7" ]; then
-          echo "refusing to stage: image reports version '$$ver', expected 0.0.7" >&2
-          exit 1
-        fi
-        d=/root/.steemvm/cosmovisor/upgrades/v0.0.7/bin
-        mkdir -p "$$d"
-        if [ -f "$$d/steemvmd" ] && [ "$$(sha256sum < "$$d/steemvmd")" = "$$(sha256sum < /root/go/bin/steemvmd)" ]; then
-          echo "already staged (identical binary)"
-        else
-          # Copy, then rename over: once cosmovisor RUNS this binary (after the
-          # upgrade height), a plain cp onto it fails with "Text file busy".
-          cp /root/go/bin/steemvmd "$$d/.steemvmd.new"
-          mv -f "$$d/.steemvmd.new" "$$d/steemvmd"
-        fi
-        echo "staged: $$("$$d/steemvmd" version) -> cosmovisor/upgrades/v0.0.7/bin/steemvmd"
-        echo "sha256: $$(sha256sum /root/.steemvm/cosmovisor/upgrades/v0.0.7/bin/steemvmd | cut -d' ' -f1)  (compare with the value in the upgrade proposal)"
-    volumes:
-      - ${STEEMVM_HOME:-${HOME}/.steemvm}:/root/.steemvm
-    profiles: ["stage"]
-
   # Standalone Steem bridge oracle — pick ONE language and bring it up with its
   # profile (never more than one at a time; they'd race on the same signing key
   # and scan cursor):
@@ -128,7 +88,7 @@ services:
   # all four tags together on a release. Override with ORACLE_GO_IMAGE /
   # ORACLE_PYTHON_IMAGE / ORACLE_JS_IMAGE (env var or repo-root .env).
   oracle-go:
-    image: ${ORACLE_GO_IMAGE:-steemblazer/steemvm-oracle-go:v0.0.6}
+    image: ${ORACLE_GO_IMAGE:-steemblazer/steemvm-oracle-go:v0.0.7}
     build:
       context: .
       dockerfile: oracle/go/Dockerfile
@@ -144,7 +104,7 @@ services:
     profiles: ["go"]
 
   oracle-python:
-    image: ${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:v0.0.6}
+    image: ${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:v0.0.7}
     build:
       # oracle/, not oracle/python: the image ships oracle/multisig/vectors.json.
       context: ./oracle
@@ -161,7 +121,7 @@ services:
     profiles: ["python"]
 
   oracle-js:
-    image: ${ORACLE_JS_IMAGE:-steemblazer/steemvm-oracle-js:v0.0.6}
+    image: ${ORACLE_JS_IMAGE:-steemblazer/steemvm-oracle-js:v0.0.7}
     build:
       # oracle/, not oracle/js: the image ships oracle/multisig/vectors.json.
       context: ./oracle

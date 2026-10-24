@@ -35,8 +35,9 @@
 #
 # Usage: ./reset.sh [--drop-addrbook] [--no-statesync] [--seed-rpc URL] [--rejoin-only | --no-rejoin]
 #   --drop-addrbook   also wipe config/addrbook.json (always done on a new chain)
-#   --no-statesync    replay from genesis instead of state-sync (slow; only
-#                     works while the chain has had no coordinated upgrade)
+#   --no-statesync    replay from genesis instead of state-sync — refused on
+#                     steemvm-2: no single binary can replay across the v0.0.7
+#                     upgrade at height 79664
 #   --seed-rpc URL    CometBFT RPC of a synced node, for the state-sync trust
 #                     anchor and peer (default: see SEED_RPC below)
 #   --rejoin-only     no reset: just finish rejoining (registration, stake,
@@ -388,7 +389,9 @@ if [ "$REJOIN_ONLY" = "0" ]; then
     fetch_statesync_trust || die "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — refusing to wipe data that could not be resynced. Nothing was touched. Try --seed-rpc <live peer>."
     ok "State-sync trust anchor from $SEED_RPC: height $TRUST_HEIGHT."
   else
-    warn "--no-statesync: the node will replay from genesis. That only works while the chain has had no coordinated upgrade."
+    # A replay from genesis can't cross a coordinated upgrade with one binary,
+    # and steemvm-2 has had one (v0.0.7 at height 79664).
+    die "--no-statesync: a replay from genesis can't cross the v0.0.7 upgrade (height 79664) — state-sync is the only way to resync. Nothing was touched."
   fi
 fi
 
