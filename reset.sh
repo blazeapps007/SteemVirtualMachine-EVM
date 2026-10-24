@@ -418,6 +418,23 @@ for v in STEEMVM_IMAGE ORACLE_GO_IMAGE ORACLE_PYTHON_IMAGE ORACLE_JS_IMAGE; do
 done
 ROOT_PINS="$(./unpin_images.sh --check)"
 
+# A reset on the same chain needs no rejoin, unless this node's validator isn't
+# on it: a first run that moved chains but stopped before create-validator
+# (unfunded, a failed registration…) leaves the new genesis installed, so a
+# re-run no longer sees a new chain. Checked by consensus key against every
+# validator on the seed, any status (jailed ones too).
+if [ "$NEW_CHAIN" = "0" ] && [ "$REJOIN_ONLY" = "0" ] && [ "$NO_REJOIN" = "0" ]; then
+  CONS_PUB="$(jq -r '.pub_key.value // empty' "$STEEMVM_HOME/config/priv_validator_key.json" 2>/dev/null || true)"
+  VALS="$(offline query staking validators --node "$(rpc_with_port "$SEED_RPC")" --page-limit 1000 --output json 2>/dev/null | tr -d '\r' | sed -n '/^{/,$p' || true)"
+  if [ -z "$CONS_PUB" ] || ! printf '%s' "$VALS" | jq -e '.validators | type == "array"' >/dev/null 2>&1; then
+    warn "could not check whether this node is a validator on $TARGET_CHAIN — if it isn't, run ./reset.sh --rejoin-only afterwards."
+  elif ! printf '%s' "$VALS" | jq -e --arg k "$CONS_PUB" 'any(.. | strings; . == $k)' >/dev/null 2>&1; then
+    warn "this node's validator key is not on $TARGET_CHAIN yet — the rejoin runs too (registration, faucet, create-validator)."
+    REJOIN=1
+    [ -n "$ORACLE_PROFILE" ] || ORACLE_PROFILE=go
+  fi
+fi
+
 if [ "$NEW_CHAIN" = "1" ]; then
   # The genesis must be the one the network actually runs (a stale checkout
   # would split this node off at block 1).
@@ -641,7 +658,7 @@ if [ "$REJOIN_ONLY" = "0" ]; then
     log "  installs the $TARGET_CHAIN genesis, chain-id and EVM chain-id $EVM_CHAIN_ID, and state-syncs."
   else
     log "This wipes local chain data (blocks/state/tx-index) under $STEEMVM_HOME and"
-    log "resyncs it via state-sync."
+    if [ "$USE_STATESYNC" = "1" ]; then log "resyncs it via state-sync."; else log "replays it from genesis."; fi
   fi
   log "Kept: priv_validator_key.json, node_key.json, your keyring and oracle/.env."
 fi
