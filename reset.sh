@@ -927,11 +927,11 @@ wait_for_stake() {
   if ! covered "$bal"; then
     if [ -n "$FAUCET_URL" ]; then
       log "Claiming faucet coins for $ADDR…"
-      out="$(curl -fsS -m 60 -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
+      out="$(curl -sS -m 60 -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
       if printf '%s' "$out" | jq -e '.success == true' >/dev/null 2>&1; then
         ok "Faucet sent $(printf '%s' "$out" | jq -r '.amount') STEEM (tx $(printf '%s' "$out" | jq -r '.txHash'))."
       else
-        warn "faucet claim failed: $(printf '%s' "$out" | head -c 300)"
+        warn "faucet claim failed: $(printf '%s' "$out" | jq -r '.error // empty' 2>/dev/null | grep . || printf '%s' "$out" | head -c 300)"
       fi
     fi
     echo

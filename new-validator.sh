@@ -719,11 +719,11 @@ fi
 STAKE_NUM="${STAKE_AMOUNT%asteem}"   # awk, not [ -ge ]: these numbers exceed bash's 64-bit arithmetic
 
 log "Claiming faucet…"
-FAUCET_OUT="$(curl -fsS -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
+FAUCET_OUT="$(curl -sS -m 60 -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
 if echo "$FAUCET_OUT" | jq -e '.success == true' >/dev/null 2>&1; then
   ok "Faucet sent $(echo "$FAUCET_OUT" | jq -r '.amount') STEEM (tx $(echo "$FAUCET_OUT" | jq -r '.txHash'))."
 else
-  warn "faucet claim failed: $FAUCET_OUT"
+  warn "faucet claim failed: $(printf '%s' "$FAUCET_OUT" | jq -r '.error // empty' 2>/dev/null | grep . || printf '%s' "$FAUCET_OUT" | head -c 300)"
   echo "  Send STEEM to 'svm.bank', memo EXACTLY your address: $ADDR"
   read -rp "Press ENTER once funded… " _unused < /dev/tty
 fi
