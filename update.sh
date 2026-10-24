@@ -79,7 +79,7 @@ GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 VALIDATOR_KEY="${VALIDATOR_KEY:-}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-}"
 
-NODE_IPS="${NODE_IPS:-62.169.19.142 45.151.123.214 57.131.13.43}"
+NODE_IPS="${NODE_IPS:-62.169.19.142}"
 export NODE_IPS
 # Public CometBFT RPCs (full URLs) tried first for the state-sync trust anchor;
 # NODE_IPS' plain :RPC_PORT is only a fallback (validators keep RPC private).

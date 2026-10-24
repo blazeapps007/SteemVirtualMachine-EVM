@@ -35,9 +35,9 @@
 #
 # Usage: ./reset.sh [--drop-addrbook] [--no-statesync] [--seed-rpc URL] [--rejoin-only | --no-rejoin]
 #   --drop-addrbook   also wipe config/addrbook.json (always done on a new chain)
-#   --no-statesync    replay from genesis instead of state-sync — refused on
-#                     steemvm-2: no single binary can replay across the v0.0.7
-#                     upgrade at height 79664
+#   --no-statesync    replay from genesis instead of state-sync (slow; only
+#                     works while the chain has had no coordinated upgrade).
+#                     Automatic on a chain younger than one snapshot interval
 #   --seed-rpc URL    CometBFT RPC of a synced node, for the state-sync trust
 #                     anchor and peer (default: see SEED_RPC below)
 #   --rejoin-only     no reset: just finish rejoining (registration, stake,
@@ -165,10 +165,11 @@ done
 # ── state-sync / peer discovery helpers (same logic as new-validator.sh) ────
 MIN_STATESYNC_HEIGHT=1500
 
-# Standing peers, always added to whatever $SEED_RPC resolves to: blaze.apps
-# (the steemvm-2 genesis node), xpilar.witness, blazed007 — validators with
-# their p2p port open. Space-separated "id@host:26656" entries.
-EXTRA_PERSISTENT_PEERS="371e1665e6cff2e3317fe9befa48a69d8ba0f8b9@62.169.19.142:26656 276517876869cbb4b2f130983646ea6945920629@45.151.123.214:26656 36e386e3aaac8f892d8498c4c83355964a6458c2@57.131.13.43:26656"
+# Standing peers, always added to whatever $SEED_RPC resolves to: blaze.apps,
+# the steemvm-2 genesis node. Keep this to nodes known to run THIS launch — a
+# node of an earlier launch shares the chain-id and would be accepted. Add
+# validators as they join; space-separated "id@host:26656" entries.
+EXTRA_PERSISTENT_PEERS="c45b7eb5b59f2f86c270e0971df1f74ee1776348@62.169.19.142:26656"
 
 fetch_statesync_trust() {
   TRUST_HEIGHT="" TRUST_HASH=""
@@ -384,14 +385,23 @@ if [ "$REJOIN_ONLY" = "0" ]; then
   [ "$SEED_NET" = "$TARGET_CHAIN" ] || die "$SEED_RPC runs '$SEED_NET', but this checkout's genesis is '$TARGET_CHAIN' — run git pull, or fix --seed-rpc. Nothing was touched."
 
   # Fetch the trust anchor BEFORE touching anything: a wipe that can't resync
-  # must be found out while the data is still intact.
+  # must be found out while the data is still intact. A chain younger than one
+  # snapshot interval has no snapshot yet, so it is replayed from genesis
+  # instead — fast at that height, and possible while the chain has had no
+  # coordinated upgrade (one binary can't replay both sides of one).
+  if [ "$USE_STATESYNC" = "1" ] && ! fetch_statesync_trust; then
+    SEED_HEIGHT="$(curl -fsS -m 15 "${SEED_RPC%/}/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null || true)"
+    if [[ "$SEED_HEIGHT" =~ ^[0-9]+$ ]] && [ "$SEED_HEIGHT" -lt "$MIN_STATESYNC_HEIGHT" ]; then
+      warn "the chain is at height $SEED_HEIGHT, younger than one snapshot interval — replaying it from genesis instead of state-sync."
+      USE_STATESYNC=0
+    else
+      die "state-sync unavailable ($SEED_RPC unreachable, or no recent block to trust) — refusing to wipe data that could not be resynced. Nothing was touched. Try --seed-rpc <live peer>."
+    fi
+  fi
   if [ "$USE_STATESYNC" = "1" ]; then
-    fetch_statesync_trust || die "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — refusing to wipe data that could not be resynced. Nothing was touched. Try --seed-rpc <live peer>."
     ok "State-sync trust anchor from $SEED_RPC: height $TRUST_HEIGHT."
   else
-    # A replay from genesis can't cross a coordinated upgrade with one binary,
-    # and steemvm-2 has had one (v0.0.7 at height 79664).
-    die "--no-statesync: a replay from genesis can't cross the v0.0.7 upgrade (height 79664) — state-sync is the only way to resync. Nothing was touched."
+    warn "replaying from genesis: this only works while the chain has had no coordinated upgrade."
   fi
 fi
 

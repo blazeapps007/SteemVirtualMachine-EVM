@@ -139,12 +139,12 @@ fetch_statesync_trust() {
   return 0
 }
 
-# Standing extra peers (blaze.apps — the steemvm-2 genesis node —,
-# xpilar.witness, blazed007: validators with their p2p port open), always
+# Standing extra peers (blaze.apps, the steemvm-2 genesis node — only nodes
+# known to run THIS launch: an earlier launch shares the chain-id), always
 # included alongside whatever $SEED_RPC resolves to. Space-separated
 # "id@host:26656" entries — add more here as validators join, or update an
 # entry if that node's identity/address ever changes.
-EXTRA_PERSISTENT_PEERS="371e1665e6cff2e3317fe9befa48a69d8ba0f8b9@62.169.19.142:26656 276517876869cbb4b2f130983646ea6945920629@45.151.123.214:26656 36e386e3aaac8f892d8498c4c83355964a6458c2@57.131.13.43:26656"
+EXTRA_PERSISTENT_PEERS="c45b7eb5b59f2f86c270e0971df1f74ee1776348@62.169.19.142:26656"
 
 # rpc_with_port: CometBFT's light client wants an explicit port.
 rpc_with_port() {
@@ -497,10 +497,10 @@ fi
 if fetch_statesync_trust; then
   ok "State-sync trust anchor: height $TRUST_HEIGHT."
 else
-  # steemvm-2 has been through a coordinated upgrade (v0.0.7 at 79664): no
-  # single binary can replay both sides of it, so without a snapshot a new
-  # node can't sync at all.
-  die "state-sync unavailable ($SEED_RPC unreachable, or no recent block to trust) — and a full replay from genesis can't cross the v0.0.7 upgrade. Retry later, or give another node's RPC when asked (SEED_RPC=<url>)."
+  # A young chain has no snapshot yet: replay it from genesis instead. That
+  # only works while the chain has had no coordinated upgrade (one binary
+  # can't replay both sides of one).
+  warn "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — replaying from genesis instead."
 fi
 
 if fetch_seed_peer; then
