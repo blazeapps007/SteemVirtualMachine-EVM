@@ -3,8 +3,8 @@
 # launch-genesis.sh — create a brand-new SteemVM chain and start its FIRST node
 # (the genesis validator) on a fresh Linux VPS.
 #
-# It installs Docker if needed, builds the node and oracle images from this
-# checkout, then:
+# It installs Docker if needed, downloads this release's published node and
+# oracle images (tagged v<VERSION> from the Makefile), then:
 #   1. records the Steem anchor: Steem's current last irreversible block and
 #      its block ID. The chain never accepts Steem history from before it, and
 #      every oracle checks its Steem node against the ID before attesting;
@@ -30,12 +30,12 @@
 #   cd SteemVirtualMachine-EVM && git checkout <release branch>
 #   ./launch-genesis.sh
 #
-# Usage: ./launch-genesis.sh [--import-mnemonic] [--skip-install] [--pull] [--no-oracle] [--yes]
+# Usage: ./launch-genesis.sh [--import-mnemonic] [--skip-install] [--build] [--no-oracle] [--yes]
 #   --import-mnemonic  use an existing account key: type its mnemonic (not
 #                      shown), or pipe it in. Default: create a new key.
 #   --skip-install     don't install Docker/jq/curl (they must already be there)
-#   --pull             use the published images (pulled if not already loaded)
-#                      instead of building them here
+#   --build            build the images from this checkout instead of using the
+#                      published ones (--pull, the default, is still accepted)
 #   --no-oracle        don't configure or start the bridge oracle
 #   --yes              don't ask for confirmation before creating the chain
 #
@@ -43,7 +43,7 @@
 #   CHAIN_ID [steemvm-2]   MONIKER [asked]  the genesis validator's Steem username (its moniker)
 #   MNEMONIC_FILE [validator-mnemonic.txt]   where a new key's mnemonic is saved
 #   EXPECTED_ADDRESS [""]  with --import-mnemonic: refuse if the key's address differs
-#   ALLOC_STEEM [250]  ALLOC_SBD [0]  SELF_STAKE_STEEM [240]
+#   ALLOC_STEEM [414]  ALLOC_SBD [0]  SELF_STAKE_STEEM [400]
 #   UNBACKED_GENESIS [0]   1 = TESTNET ONLY: skip the funding check. The allocation
 #                          can then be spent on the chain but not bridged out.
 #   COMMISSION_RATE [0.10]  COMMISSION_MAX_RATE [0.20]  COMMISSION_MAX_CHANGE_RATE [0.01]
@@ -63,9 +63,9 @@ CHAIN_ID="${CHAIN_ID:-steemvm-2}"
 MONIKER="${MONIKER:-}"
 EXPECTED_ADDRESS="${EXPECTED_ADDRESS:-}"
 MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}"
-ALLOC_STEEM="${ALLOC_STEEM:-250}"
+ALLOC_STEEM="${ALLOC_STEEM:-414}"
 ALLOC_SBD="${ALLOC_SBD:-0}"
-SELF_STAKE_STEEM="${SELF_STAKE_STEEM:-240}"
+SELF_STAKE_STEEM="${SELF_STAKE_STEEM:-400}"
 UNBACKED_GENESIS="${UNBACKED_GENESIS:-0}"
 COMMISSION_RATE="${COMMISSION_RATE:-0.10}"
 COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
@@ -82,12 +82,13 @@ GATEWAY=svm.bank
 GENTX_GAS=400000
 GENTX_FEE="400000000000000asteem"   # 400000 gas at the 1 gwei minimum gas price
 
-SKIP_INSTALL=0 PULL=0 NO_ORACLE=0 ASSUME_YES=0 IMPORT_MNEMONIC=0
+SKIP_INSTALL=0 PULL=1 NO_ORACLE=0 ASSUME_YES=0 IMPORT_MNEMONIC=0
 for arg in "$@"; do
   case "$arg" in
     --import-mnemonic) IMPORT_MNEMONIC=1 ;;
     --skip-install) SKIP_INSTALL=1 ;;
     --pull) PULL=1 ;;
+    --build) PULL=0 ;;
     --no-oracle) NO_ORACLE=1 ;;
     --yes) ASSUME_YES=1 ;;
     *) echo "unknown argument: $arg (see the header for usage)" >&2; exit 1 ;;
@@ -262,6 +263,12 @@ if [ "$PULL" = "1" ]; then
   if ! $DOCKER image inspect "$STEEMVM_IMAGE" >/dev/null 2>&1; then
     log "Pulling $STEEMVM_IMAGE…"
     $DOCKER pull "$STEEMVM_IMAGE"
+  fi
+  # Now, not at step 9: a missing oracle image must stop this run before the
+  # chain exists, not after it has started.
+  if [ "$NO_ORACLE" = "0" ] && ! $DOCKER image inspect "$ORACLE_IMAGE" >/dev/null 2>&1; then
+    log "Pulling $ORACLE_IMAGE…"
+    $DOCKER pull "$ORACLE_IMAGE"
   fi
 else
   log "Building $STEEMVM_IMAGE from this checkout (a few minutes)…"
