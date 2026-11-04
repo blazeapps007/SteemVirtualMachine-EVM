@@ -113,12 +113,15 @@ func (p *Policy) Checkpoint(tip int64) int64 {
 // Review decides on one live proposal. myVotes are this signer's own
 // published votes (to enforce "at most one live approval per withdrawal").
 func (p *Policy) Review(ctx context.Context, prop *Proposal, v *View, st *SVMState, myVotes map[string]Vote) (Decision, string) {
+	if t, id, ok := PayoutOf(prop.Tx, p.Cfg.BankAccount); ok {
+		return p.reviewTransfer(ctx, prop, t, id, v, st, myVotes)
+	}
 	if len(prop.Tx.Operations) != 1 {
-		return Deny, "more than one operation"
+		return Deny, "more than one operation, and not a withdrawal payout"
 	}
 	switch op := prop.Tx.Operations[0].Value.(type) {
 	case steemtx.Transfer:
-		return p.reviewTransfer(ctx, prop, op, v, st, myVotes)
+		return Deny, "a transfer must come with its withdrawal link"
 	case steemtx.AccountUpdate:
 		return p.reviewAccountUpdate(ctx, prop, op, v, st, myVotes)
 	case steemtx.TransferToVesting, steemtx.WithdrawVesting, steemtx.ChangeRecoveryAccount:
@@ -129,57 +132,48 @@ func (p *Policy) Review(ctx context.Context, prop *Proposal, v *View, st *SVMSta
 }
 
 // payoutFacts checks a transfer against the SVM withdrawal it pays. It returns
-// the withdrawal ID and Approve when the content is a correct payout, Deny when
+// Approve when the content is a correct payout, Deny when
 // it is wrong and can never become right (a deny vote is final), and Abstain
 // when it can't be judged yet (a read failed, or this signer's SVM node hasn't
 // seen the withdrawal), so the next pass looks again.
-func (p *Policy) payoutFacts(ctx context.Context, t steemtx.Transfer, v *View, st *SVMState) (uint64, Decision, string) {
+func (p *Policy) payoutFacts(ctx context.Context, t steemtx.Transfer, id uint64, v *View, st *SVMState) (Decision, string) {
 	if t.From != p.Cfg.BankAccount {
-		return 0, Deny, "not from " + p.Cfg.BankAccount
-	}
-	id, ok := ParseWithdrawalMemo(t.Memo)
-	if !ok {
-		return 0, Deny, "memo is not exactly \"svm-withdrawal <id>\""
+		return Deny, "not from " + p.Cfg.BankAccount
 	}
 	if v.History.IsPaid(id) {
-		return id, Deny, "withdrawal already paid on Steem"
+		return Deny, "withdrawal already paid on Steem"
 	}
 	w, ok := st.Requested[id]
 	if !ok {
 		got, found, err := p.SVM.Withdrawal(ctx, id)
 		switch {
 		case err != nil:
-			return id, Abstain, "cannot read withdrawal: " + err.Error()
+			return Abstain, "cannot read withdrawal: " + err.Error()
 		case !found:
-			return id, Abstain, "SVM withdrawal not found (yet)"
+			return Abstain, "SVM withdrawal not found (yet)"
 		case got.Status != "REQUESTED":
-			return id, Deny, "SVM withdrawal is " + got.Status
+			return Deny, "SVM withdrawal is " + got.Status
 		}
 		w = got
 	}
 	if t.To != w.Destination {
-		return id, Deny, "recipient differs from the SVM withdrawal destination"
+		return Deny, "recipient differs from the SVM withdrawal destination"
 	}
 	if t.Amount != steemtx.FormatMilli(w.AmountMilli, w.Symbol) {
-		return id, Deny, "amount differs from the SVM withdrawal net amount"
+		return Deny, "amount differs from the SVM withdrawal net amount"
+	}
+	if t.Memo != w.Memo {
+		return Deny, "memo differs from the SVM withdrawal memo"
 	}
 	deadline := w.CreatedAt + st.Timeout
 	if uint64(st.Height)+p.Cfg.PayoutMarginBlocks > deadline {
-		return id, Deny, "too close to the automatic SVM refund"
+		return Deny, "too close to the automatic SVM refund"
 	}
-	return id, Approve, ""
+	return Approve, ""
 }
 
-func memoOf(prop *Proposal) (string, bool) {
-	if len(prop.Tx.Operations) != 1 {
-		return "", false
-	}
-	t, ok := prop.Tx.Operations[0].Value.(steemtx.Transfer)
-	return t.Memo, ok
-}
-
-func (p *Policy) reviewTransfer(ctx context.Context, prop *Proposal, t steemtx.Transfer, v *View, st *SVMState, myVotes map[string]Vote) (Decision, string) {
-	id, d, reason := p.payoutFacts(ctx, t, v, st)
+func (p *Policy) reviewTransfer(ctx context.Context, prop *Proposal, t steemtx.Transfer, id uint64, v *View, st *SVMState, myVotes map[string]Vote) (Decision, string) {
+	d, reason := p.payoutFacts(ctx, t, id, v, st)
 	if d != Approve {
 		return d, reason
 	}
@@ -198,8 +192,8 @@ func (p *Policy) reviewTransfer(ctx context.Context, prop *Proposal, t steemtx.T
 	}
 	earliest := ""
 	for _, q := range v.Proposal { // sorted by (Created, ID)
-		memo, ok := memoOf(q)
-		if !ok || memo != t.Memo {
+		qt, qid, ok := PayoutOf(q.Tx, p.Cfg.BankAccount)
+		if !ok || qid != id {
 			continue
 		}
 		// Not just live ones: a "rejected" proposal can still execute if a
@@ -210,8 +204,7 @@ func (p *Policy) reviewTransfer(ctx context.Context, prop *Proposal, t steemtx.T
 			}
 		}
 		if earliest == "" && q.Live() {
-			qt := q.Tx.Operations[0].Value.(steemtx.Transfer)
-			if _, qd, _ := p.payoutFacts(ctx, qt, v, st); qd == Approve {
+			if qd, _ := p.payoutFacts(ctx, qt, qid, v, st); qd == Approve {
 				earliest = q.ID
 			}
 		}
@@ -307,20 +300,18 @@ func (p *Policy) Intents(ctx context.Context, v *View, st *SVMState, firstSeen m
 		rank := rankOf(members, p.Self, designated)
 		return rank == 0 || now.Sub(firstSeen[key]) >= time.Duration(rank)*p.Cfg.FallbackDelay
 	}
-	live := map[string]bool{}
+	live := map[uint64]bool{}
 	liveUpdate := false
 	for _, q := range v.Proposal {
 		if !q.Live() {
 			continue
 		}
-		if memo, ok := memoOf(q); ok {
-			live[memo] = true
+		if _, id, ok := PayoutOf(q.Tx, p.Cfg.BankAccount); ok {
+			live[id] = true
 			// Restart the fallback clock while a proposal is live, so if it
 			// expires unexecuted the designated member re-proposes first
 			// instead of every member at once.
-			if id, ok := ParseWithdrawalMemo(memo); ok {
-				delete(firstSeen, "w:"+strconv.FormatUint(id, 10))
-			}
+			delete(firstSeen, "w:"+strconv.FormatUint(id, 10))
 		}
 		if _, ok := q.Tx.Operations[0].Value.(steemtx.AccountUpdate); ok && len(q.Tx.Operations) == 1 {
 			liveUpdate = true
@@ -342,8 +333,7 @@ func (p *Policy) Intents(ctx context.Context, v *View, st *SVMState, firstSeen m
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, id := range ids {
 		w := st.Requested[id]
-		memo := WithdrawalMemo(id)
-		if live[memo] || v.History.IsPaid(id) || p.Journal.Conflicts("transfer:"+memo, "", v.Now) {
+		if live[id] || v.History.IsPaid(id) || p.Journal.Conflicts(PayoutSubject(id), "", v.Now) {
 			continue
 		}
 		if uint64(st.Height)+p.Cfg.PayoutMarginBlocks > w.CreatedAt+st.Timeout {
@@ -364,9 +354,7 @@ func (p *Policy) Intents(ctx context.Context, v *View, st *SVMState, firstSeen m
 		out = append(out, Intent{
 			Key:   key,
 			Title: fmt.Sprintf("Withdrawal %d: %s to @%s", id, amount, w.Destination),
-			Ops: []steemtx.Operation{{Type: "transfer", Value: steemtx.Transfer{
-				From: p.Cfg.BankAccount, To: w.Destination, Amount: amount, Memo: memo,
-			}}},
+			Ops:   PayoutOps(p.Cfg.BankAccount, w.Destination, amount, w.Memo, id),
 		})
 	}
 

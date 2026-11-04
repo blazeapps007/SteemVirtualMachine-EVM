@@ -21,11 +21,10 @@
 #        signed with your Steem ACTIVE key, then confirm-name. The key is read
 #        from oracle/.env (ORACLE_STEEM_ACTIVE_WIF) or asked for once and saved
 #        there — your oracle's svm.bank signer uses it too;
-#     2. claims faucet coins (FAUCET_URL) and waits until your address holds
-#        STAKE_AMOUNT — it stakes up to that, keeping 1 STEEM liquid for fees.
-#        If the faucet doesn't cover it, bring STEEM over: bridge it (Steem
-#        transfer to svm.bank, memo = your address) or ask an existing
-#        validator to send it;
+#     2. waits until your address holds STAKE_AMOUNT — it stakes up to that,
+#        keeping 1 STEEM liquid for fees. Bring STEEM over by bridging it (Steem
+#        transfer to svm.bank, memo = your address; the bridge keeps 0.25%). On a
+#        testnet, FAUCET_URL claims coins first;
 #     3. create-validator with your Steem public keys (the identity gate).
 #   If funding takes longer than FUND_TIMEOUT, re-run with --rejoin-only.
 #
@@ -89,7 +88,7 @@ COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
 COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
 MIN_SELF_DELEGATION="${MIN_SELF_DELEGATION:-1}"
 NAME_TIMEOUT="${NAME_TIMEOUT:-1800}"
-FAUCET_URL="${FAUCET_URL-https://faucet.steemscanner.com/faucet}"   # empty: skip the faucet
+FAUCET_URL="${FAUCET_URL-}"   # a testnet's faucet; mainnet has none
 FUND_TIMEOUT="${FUND_TIMEOUT:-3600}"
 VALIDATOR_JSON="validator.json"
 
@@ -665,7 +664,7 @@ fi
 if [ "$REJOIN" = "1" ]; then
   log "Then it rejoins $TARGET_CHAIN as validator '$STEEM_USERNAME' ($ADDR):"
   log "  sends 0.001 STEEM from @$STEEM_USERNAME to svm.bank (memo: svm-register $ADDR) if not yet registered,"
-  log "  claims faucet coins, waits for $(steem_atoms "$STAKE_AMOUNT") STEEM, and creates the validator."
+  log "  waits for $(steem_atoms "$STAKE_AMOUNT") STEEM to be bridged in, and creates the validator."
 fi
 [ -z "$ROOT_PINS" ] || printf '%s\n' "$ROOT_PINS" | while IFS= read -r l; do log ".env: comments out $l."; done
 for f in ${ENV_FIXES[@]+"${ENV_FIXES[@]}"}; do
@@ -936,7 +935,7 @@ wait_for_stake() {
     fi
     echo
     warn "$ADDR needs $(steem_atoms "$need") STEEM on $TARGET_CHAIN for the stake (it holds $(steem_atoms "$bal"))."
-    echo "   If the faucet didn't cover it, bridge STEEM from Steem: send it from @$STEEM_USERNAME to"
+    echo "   Bridge STEEM from Steem (the bridge keeps 0.25%): send it from @$STEEM_USERNAME to"
     echo "   svm.bank with memo EXACTLY:  $ADDR"
     echo "   or ask an existing $TARGET_CHAIN validator to send it. (Smaller stake: STAKE_AMOUNT=<n>asteem ./reset.sh --rejoin-only)"
     log "Waiting for the balance (timeout ${FUND_TIMEOUT}s)…"

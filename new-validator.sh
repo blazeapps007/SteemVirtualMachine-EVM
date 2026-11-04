@@ -3,7 +3,7 @@
 # new-validator.sh — interactive validator + oracle setup.
 #
 # Steps: username -> Steem pubkeys -> price source -> fetch genesis -> start node
-# -> new SteemVM key -> Steem name registration -> faucet + stake -> create
+# -> new SteemVM key -> Steem name registration -> bridge in + stake -> create
 # validator -> start oracle.
 #
 # Usage: ./new-validator.sh [--cleanup | --cleanup-full | --fix-config]
@@ -55,7 +55,7 @@ COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
 MIN_SELF_DELEGATION="${MIN_SELF_DELEGATION:-1}"
 GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-go}"     # go|python|js
-FAUCET_URL="${FAUCET_URL:-https://faucet.steemscanner.com/faucet}"
+FAUCET_URL="${FAUCET_URL:-}"   # a testnet's faucet; mainnet has none
 
 VALIDATOR_JSON="${VALIDATOR_JSON:-validator.json}"
 ADDRESS_FILE="${ADDRESS_FILE:-validator-address.txt}"
@@ -715,17 +715,24 @@ else
   fi
 fi
 
-# ── 8. claim faucet + wait for balance ───────────────────────────────────────
+# ── 8. fund the stake + wait for balance ─────────────────────────────────────
 STAKE_NUM="${STAKE_AMOUNT%asteem}"   # awk, not [ -ge ]: these numbers exceed bash's 64-bit arithmetic
 
-log "Claiming faucet…"
-FAUCET_OUT="$(curl -sS -m 60 -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
-if echo "$FAUCET_OUT" | jq -e '.success == true' >/dev/null 2>&1; then
-  ok "Faucet sent $(echo "$FAUCET_OUT" | jq -r '.amount') STEEM (tx $(echo "$FAUCET_OUT" | jq -r '.txHash'))."
-else
-  warn "faucet claim failed: $(printf '%s' "$FAUCET_OUT" | jq -r '.error // empty' 2>/dev/null | grep . || printf '%s' "$FAUCET_OUT" | head -c 300)"
-  echo "  Send STEEM to 'svm.bank', memo EXACTLY your address: $ADDR"
-  read -rp "Press ENTER once funded… " _unused < /dev/tty
+FUNDED=0
+if [ -n "$FAUCET_URL" ]; then
+  log "Claiming faucet…"
+  FAUCET_OUT="$(curl -sS -m 60 -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
+  if echo "$FAUCET_OUT" | jq -e '.success == true' >/dev/null 2>&1; then
+    ok "Faucet sent $(echo "$FAUCET_OUT" | jq -r '.amount') STEEM (tx $(echo "$FAUCET_OUT" | jq -r '.txHash'))."
+    FUNDED=1
+  else
+    warn "faucet claim failed: $(printf '%s' "$FAUCET_OUT" | jq -r '.error // empty' 2>/dev/null | grep . || printf '%s' "$FAUCET_OUT" | head -c 300)"
+  fi
+fi
+if [ "$FUNDED" = "0" ]; then
+  echo "  Bridge in your stake: send STEEM to 'svm.bank', memo EXACTLY your address: $ADDR"
+  echo "  The bridge keeps 0.25%, and 1 STEEM stays liquid for fees."
+  read -rp "Press ENTER once sent… " _unused < /dev/tty
 fi
 
 log "Waiting for balance (timeout ${FUND_TIMEOUT}s)…"

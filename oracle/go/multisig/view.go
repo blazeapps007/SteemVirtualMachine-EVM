@@ -202,6 +202,10 @@ func targetsBank(tx steemtx.Transaction, bank string) bool {
 			acct = o.Account
 		case steemtx.ChangeRecoveryAccount:
 			acct = o.AccountToRecover
+		case steemtx.CustomJSON:
+			if len(o.RequiredAuths) == 1 && len(o.RequiredPostingAuths) == 0 {
+				acct = o.RequiredAuths[0]
+			}
 		}
 		if acct != bank {
 			return false

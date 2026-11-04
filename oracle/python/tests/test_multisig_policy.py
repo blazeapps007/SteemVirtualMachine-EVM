@@ -5,14 +5,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from _ms import BANK, NOW, Fixture, bank_authority, pub, stakes, transfer_op, ts
+from _ms import BANK, NOW, Fixture, bank_authority, pub, stakes, transfer_op, ts, link_op, pay_ops
 from steemvm_oracle.multisig import steemtx
 from steemvm_oracle.multisig.ballot import Vote
 from steemvm_oracle.multisig.journal import ApprovalJournal
 from steemvm_oracle.multisig.policy import ABSTAIN, APPROVE, DENY, Withdrawal
 from steemvm_oracle.multisig.view import REJECTED, EXPIRED
 
-EXACT = transfer_op("rcpt", "12.345 STEEM", "svm-withdrawal 7")
+EXACT = pay_ops(7, "rcpt", "12.345 STEEM")
 
 
 def payout_fixture() -> Fixture:
@@ -28,22 +28,26 @@ def _status(f, status):
 
 
 @pytest.mark.parametrize("name, ops, setup, want", [
-    ("exact payout", [EXACT], None, APPROVE),
-    ("last allowed height", [EXACT], lambda f: setattr(f.svm, "height_", 126000), APPROVE),
-    ("one block late", [EXACT], lambda f: setattr(f.svm, "height_", 126001), DENY),
-    ("leading zero memo", [transfer_op("rcpt", "12.345 STEEM", "svm-withdrawal 07")], None, DENY),
-    ("guide's old memo", [transfer_op("rcpt", "12.345 STEEM", "svm-withdraw 7")], None, DENY),
-    ("memo trailing space", [transfer_op("rcpt", "12.345 STEEM", "svm-withdrawal 7 ")], None, DENY),
-    ("wrong recipient", [transfer_op("rcpt2", "12.345 STEEM", "svm-withdrawal 7")], None, DENY),
-    ("one millisteem more", [transfer_op("rcpt", "12.346 STEEM", "svm-withdrawal 7")], None, DENY),
-    ("one millisteem less", [transfer_op("rcpt", "12.344 STEEM", "svm-withdrawal 7")], None, DENY),
-    ("wrong asset", [transfer_op("rcpt", "12.345 SBD", "svm-withdrawal 7")], None, DENY),
-    ("two operations", [EXACT, transfer_op("rcpt", "0.001 STEEM", "x")], None, DENY),
-    ("already paid", [EXACT], lambda f: f.hist.paid.__setitem__("7", "abc"), DENY),
-    ("processed", [EXACT], lambda f: _status(f, "PROCESSED"), DENY),
-    ("refunded", [EXACT], lambda f: _status(f, "REFUNDED"), DENY),
-    ("not seen yet", [EXACT], lambda f: f.svm.all.pop(7), ABSTAIN),
-    ("read fails", [EXACT], lambda f: (_status(f, "PROCESSED"), setattr(f.svm, "err", RuntimeError("refused"))), ABSTAIN),
+    ("exact payout", EXACT, None, APPROVE),
+    ("last allowed height", EXACT, lambda f: setattr(f.svm, "height_", 126000), APPROVE),
+    ("one block late", EXACT, lambda f: setattr(f.svm, "height_", 126001), DENY),
+    ("wrong recipient", pay_ops(7, "rcpt2", "12.345 STEEM"), None, DENY),
+    ("one millisteem more", pay_ops(7, "rcpt", "12.346 STEEM"), None, DENY),
+    ("one millisteem less", pay_ops(7, "rcpt", "12.344 STEEM"), None, DENY),
+    ("wrong asset", pay_ops(7, "rcpt", "12.345 SBD"), None, DENY),
+    ("three operations", [*EXACT, transfer_op("rcpt", "0.001 STEEM", "x")], None, DENY),
+    ("no link", [transfer_op("rcpt", "12.345 STEEM", "")], None, DENY),
+    ("a memo naming the withdrawal is not a link", [transfer_op("rcpt", "12.345 STEEM", "svm-withdrawal 7")], None, DENY),
+    ("memo differs", pay_ops(7, "rcpt", "12.345 STEEM", "someone else's tag"), None, DENY),
+    ("link before the transfer", [EXACT[1], EXACT[0]], None, DENY),
+    ("link with a leading zero", [EXACT[0], link_op(BANK, body='{"withdrawal_id":"07"}')], None, DENY),
+    ("link with a numeric id", [EXACT[0], link_op(BANK, body='{"withdrawal_id":7}')], None, DENY),
+    ("link with another id", [EXACT[0], link_op(BANK, lid="other-app")], None, DENY),
+    ("already paid", EXACT, lambda f: f.hist.paid.__setitem__("7", "abc"), DENY),
+    ("processed", EXACT, lambda f: _status(f, "PROCESSED"), DENY),
+    ("refunded", EXACT, lambda f: _status(f, "REFUNDED"), DENY),
+    ("not seen yet", EXACT, lambda f: f.svm.all.pop(7), ABSTAIN),
+    ("read fails", EXACT, lambda f: (_status(f, "PROCESSED"), setattr(f.svm, "err", RuntimeError("refused"))), ABSTAIN),
     ("treasury op", [steemtx.Operation("transfer_to_vesting", steemtx.TransferToVesting(BANK, BANK, "1.000 STEEM"))], None, ABSTAIN),
 ])
 def test_review_payout(name, ops, setup, want):
@@ -57,7 +61,7 @@ def test_review_payout(name, ops, setup, want):
 
 def test_payout_cap():
     f = payout_fixture()
-    pid = f.propose("alice", "payout", [EXACT])
+    pid = f.propose("alice", "payout", EXACT)
     pol = f.policy("bob")
     pol.cfg.max_per_tx_milli = {"STEEM": 12344}
     assert f.review(pol, pid)[0] == ABSTAIN
@@ -70,8 +74,8 @@ EARLIER = ts(NOW - timedelta(minutes=1))
 
 def test_only_the_earliest_correct_payout():
     f = payout_fixture()
-    a = f.propose("alice", "A", [EXACT], created=EARLIER)
-    b = f.propose("bob", "B", [EXACT], timedelta(minutes=57))
+    a = f.propose("alice", "A", EXACT, created=EARLIER)
+    b = f.propose("bob", "B", EXACT, timedelta(minutes=57))
     pol = f.policy("carol")
     assert f.review(pol, a)[0] == APPROVE
     assert f.review(pol, b)[0] == ABSTAIN
@@ -79,31 +83,31 @@ def test_only_the_earliest_correct_payout():
 
 def test_an_earlier_wrong_payout_does_not_block():
     f = payout_fixture()
-    f.propose("alice", "wrong", [transfer_op("rcpt", "99.999 STEEM", "svm-withdrawal 7")], created=EARLIER)
-    b = f.propose("bob", "B", [EXACT], timedelta(minutes=57))
+    f.propose("alice", "wrong", pay_ops(7, "rcpt", "99.999 STEEM"), created=EARLIER)
+    b = f.propose("bob", "B", EXACT, timedelta(minutes=57))
     assert f.review(f.policy("carol"), b)[0] == APPROVE
 
 
 def test_my_approval_of_another_blocks():
     f = payout_fixture()
-    a = f.propose("alice", "A", [EXACT], created=EARLIER)
-    b = f.propose("bob", "B", [EXACT], timedelta(minutes=57))
+    a = f.propose("alice", "A", EXACT, created=EARLIER)
+    b = f.propose("bob", "B", EXACT, timedelta(minutes=57))
     assert f.review(f.policy("carol"), a, {b: Vote(1, "", "")})[0] == ABSTAIN
 
 
 def test_approval_of_a_rejected_unexpired_proposal_still_blocks():
     f = payout_fixture()
-    a = f.propose("alice", "A", [EXACT], created=EARLIER)
+    a = f.propose("alice", "A", EXACT, created=EARLIER)
     f.vote("bob", a, False)
-    b = f.propose("bob", "B", [EXACT], timedelta(minutes=57))
+    b = f.propose("bob", "B", EXACT, timedelta(minutes=57))
     assert f.find(f.view(), a).status == REJECTED
     assert f.review(f.policy("carol"), b, {a: Vote(1, "", "")})[0] == ABSTAIN
 
 
 def test_an_expired_approval_no_longer_blocks():
     f = payout_fixture()
-    a = f.propose("alice", "A", [EXACT], timedelta(minutes=1), created=EARLIER)
-    b = f.propose("bob", "B", [EXACT], timedelta(minutes=57))
+    a = f.propose("alice", "A", EXACT, timedelta(minutes=1), created=EARLIER)
+    b = f.propose("bob", "B", EXACT, timedelta(minutes=57))
     f.now = NOW + timedelta(minutes=1)
     assert f.find(f.view(), a).status == EXPIRED
     assert f.review(f.policy("carol"), b, {a: Vote(1, "", "")})[0] == APPROVE
@@ -111,9 +115,9 @@ def test_an_expired_approval_no_longer_blocks():
 
 def test_the_journal_blocks_even_when_the_view_lags():
     f = payout_fixture()
-    b = f.propose("bob", "B", [EXACT], timedelta(minutes=57))
+    b = f.propose("bob", "B", EXACT, timedelta(minutes=57))
     pol = f.policy("carol")
-    pol.journal = ApprovalJournal({"unseen": {"subject": "transfer:svm-withdrawal 7", "expiration": ts(NOW + timedelta(minutes=1))}})
+    pol.journal = ApprovalJournal({"unseen": {"subject": "withdrawal:7", "expiration": ts(NOW + timedelta(minutes=1))}})
     assert f.review(pol, b)[0] == ABSTAIN
     pol.journal.approvals["unseen"]["expiration"] = ts(NOW)
     assert f.review(pol, b)[0] == APPROVE
@@ -179,7 +183,7 @@ def test_payout_proposer_rotation():
         assert err is None and len(got) == want, (me, after, keys_of(got))
     seen = {}
     got, _ = f.policy("carol").intents(f.view(), f.state(), seen, t0)
-    assert len(got[0].ops) == 1 and got[0].ops[0].value == steemtx.Transfer(BANK, "rcpt", "1.000 STEEM", "svm-withdrawal 6")
+    assert len(got[0].ops) == 2 and got[0].ops[0].value == steemtx.Transfer(BANK, "rcpt", "1.000 STEEM", "")
     pid = f.propose("carol", got[0].title, got[0].ops)
     assert f.review(f.policy("alice"), pid)[0] == APPROVE
     seen["w:6"] = t0 - timedelta(hours=1)
@@ -202,7 +206,7 @@ def test_payout_intent_skips(name):
     elif name == "cap":
         pol.cfg.max_per_tx_milli = {"STEEM": 999}
     else:
-        pol.journal = ApprovalJournal({"x": {"subject": "transfer:svm-withdrawal 6", "expiration": ts(NOW + timedelta(minutes=1))}})
+        pol.journal = ApprovalJournal({"x": {"subject": "withdrawal:6", "expiration": ts(NOW + timedelta(minutes=1))}})
     got, err = pol.intents(f.view(), f.state(), {}, datetime.now(timezone.utc))
     assert err is None and got == []
 
@@ -234,3 +238,14 @@ def test_validator_set_intent():
     del f.svm.stakes_at[99000]
     got, err = f.policy("bob").intents(f.view(), f.state(), {}, now)
     assert keys_of(got) == ["w:5"] and err
+
+
+@pytest.mark.parametrize("memo", ["exchange-tag-42", "svm-withdrawal 5", "svm-deposit steem1anything", "#encrypted-looking", "日本語"])
+def test_payout_carries_the_users_memo(memo):
+    f = payout_fixture()
+    w = f.svm.all[7]
+    f.svm.all[7] = Withdrawal(w.id, w.destination, w.amount_milli, w.symbol, w.created_at, w.status, memo)
+    f.withdrawal(5, "other", 1000, "STEEM", 90000)  # a memo naming it must not touch it
+    pid = f.propose("alice", "payout", pay_ops(7, "rcpt", "12.345 STEEM", memo))
+    d, reason = f.review(f.policy("bob"), pid)
+    assert d == APPROVE, reason

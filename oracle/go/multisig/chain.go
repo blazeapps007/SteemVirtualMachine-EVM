@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -53,36 +54,63 @@ func Broadcast(ctx context.Context, rpc *steemtx.RPC, tx steemtx.Transaction) (a
 	return false, err
 }
 
-// WithdrawalMemo is the exact memo a withdrawal payout must carry. It is the
-// format the bridge relays parse (ParseWithdrawalMemo in
-// oracle/go/relayer/steem.go and its Python/JS twins), so the payout gets
-// attested on SVM and the withdrawal becomes PROCESSED.
-func WithdrawalMemo(id uint64) string { return "svm-withdrawal " + strconv.FormatUint(id, 10) }
+// A withdrawal payout is one Steem transaction with two operations, in this
+// order: the transfer, carrying the memo the user gave when bridging out, and a
+// custom_json naming the withdrawal. Only svm.bank's active authority can sign
+// that custom_json, so it can't be forged, and the memo means nothing to the
+// bridge: a user can put anything there, including "svm-withdrawal 5", without
+// affecting any withdrawal.
 
-// paidMemoID mirrors the bridge relays' lenient parse (whitespace-split, two
-// fields): anything the relay would attest as a payout of <id> must also count
-// as "already paid" here, or a non-canonical manual payout could be paid twice.
-func paidMemoID(memo string) (uint64, bool) {
-	f := strings.Fields(strings.TrimSpace(memo))
-	if len(f) != 2 || f[0] != "svm-withdrawal" {
+// PayoutLinkID is the custom_json id of a payout's link.
+const PayoutLinkID = "svm-withdrawal"
+
+var payoutLinkRe = regexp.MustCompile(`^\{"withdrawal_id":"(0|[1-9][0-9]*)"\}$`)
+
+// PayoutLinkJSON is the exact custom_json body naming a withdrawal.
+func PayoutLinkJSON(id uint64) string {
+	return `{"withdrawal_id":"` + strconv.FormatUint(id, 10) + `"}`
+}
+
+// ParsePayoutLink returns the withdrawal a custom_json names, if it is exactly a
+// payout link signed by the bank's active authority alone.
+func ParsePayoutLink(c steemtx.CustomJSON, bank string) (uint64, bool) {
+	if c.ID != PayoutLinkID || len(c.RequiredAuths) != 1 || c.RequiredAuths[0] != bank || len(c.RequiredPostingAuths) != 0 {
 		return 0, false
 	}
-	id, err := strconv.ParseUint(f[1], 10, 64)
+	m := payoutLinkRe.FindStringSubmatch(c.JSON)
+	if m == nil {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(m[1], 10, 64)
 	return id, err == nil
 }
 
-// ParseWithdrawalMemo accepts only the canonical "svm-withdrawal <id>" form.
-// Proposals the signer approves must use exactly this form.
-func ParseWithdrawalMemo(memo string) (uint64, bool) {
-	rest, ok := strings.CutPrefix(memo, "svm-withdrawal ")
-	if !ok || rest == "" || strings.HasPrefix(rest, "0") && rest != "0" || strings.HasPrefix(rest, "+") {
-		return 0, false
+// PayoutOps builds the two operations of a withdrawal payout.
+func PayoutOps(bank, to, amount, memo string, id uint64) []steemtx.Operation {
+	return []steemtx.Operation{
+		{Type: "transfer", Value: steemtx.Transfer{From: bank, To: to, Amount: amount, Memo: memo}},
+		{Type: "custom_json", Value: steemtx.CustomJSON{
+			RequiredAuths: []string{bank}, RequiredPostingAuths: []string{}, ID: PayoutLinkID, JSON: PayoutLinkJSON(id),
+		}},
 	}
-	id, err := strconv.ParseUint(rest, 10, 64)
-	if err != nil || WithdrawalMemo(id) != memo {
-		return 0, false
+}
+
+// PayoutOf returns a transaction's transfer and the withdrawal it pays, if the
+// transaction has exactly the shape of a payout.
+func PayoutOf(tx steemtx.Transaction, bank string) (steemtx.Transfer, uint64, bool) {
+	if len(tx.Operations) != 2 {
+		return steemtx.Transfer{}, 0, false
 	}
-	return id, true
+	t, ok := tx.Operations[0].Value.(steemtx.Transfer)
+	if !ok {
+		return steemtx.Transfer{}, 0, false
+	}
+	c, ok := tx.Operations[1].Value.(steemtx.CustomJSON)
+	if !ok {
+		return steemtx.Transfer{}, 0, false
+	}
+	id, ok := ParsePayoutLink(c, bank)
+	return t, id, ok
 }
 
 // ---- svm.bank history index ----
@@ -148,8 +176,8 @@ func (h *HistoryIndex) IsPaid(id uint64) bool {
 }
 
 type historyEntry struct {
-	TrxID     string            `json:"trx_id"`
-	Timestamp string            `json:"timestamp"`
+	TrxID     string             `json:"trx_id"`
+	Timestamp string             `json:"timestamp"`
 	Op        [2]json.RawMessage `json:"op"`
 }
 
@@ -235,10 +263,10 @@ func (h *HistoryIndex) apply(account string, e historyEntry) {
 		return
 	}
 	switch opType {
-	case "transfer":
-		var t steemtx.Transfer
-		if json.Unmarshal(e.Op[1], &t) == nil && t.From == account {
-			if id, ok := paidMemoID(t.Memo); ok {
+	case "custom_json":
+		var c steemtx.CustomJSON
+		if json.Unmarshal(e.Op[1], &c) == nil {
+			if id, ok := ParsePayoutLink(c, account); ok {
 				h.Paid[strconv.FormatUint(id, 10)] = e.TrxID
 			}
 		}

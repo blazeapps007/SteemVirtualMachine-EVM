@@ -59,7 +59,7 @@ func TestRefundExpiredWithdrawals_AutoRefundsAfterTimeout(t *testing.T) {
 
 	totals, err := f.keeper.Totals.Get(f.ctx)
 	require.NoError(t, err)
-	require.True(t, types.MillisteemToAsteem(1000).Equal(totals.TotalMintedAsteem), "a refund is tracked as a mint")
+	require.True(t, types.MillisteemToAsteem(2000).Equal(totals.TotalMintedAsteem), "the deposit, plus the refund tracked as a mint")
 
 	// A late payout attestation after refund must be a benign no-op: no
 	// error, no re-processing, no second payout, status stays REFUNDED.

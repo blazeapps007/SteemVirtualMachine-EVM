@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -69,34 +70,51 @@ def broadcast(rpc: Any, tx: steemtx.Transaction) -> bool:
     return False
 
 
-def withdrawal_memo(wid: int) -> str:
-    """The exact memo a payout must carry: the format the bridge relays parse
-    (parse_withdrawal_memo in steem_client.py and its Go/JS twins), so the
-    payout is attested on SVM and the withdrawal becomes PROCESSED."""
-    return f"svm-withdrawal {wid}"
+# A withdrawal payout is one Steem transaction with two operations, in this
+# order: the transfer, carrying the memo the user gave when bridging out, and a
+# custom_json naming the withdrawal. Only svm.bank's active authority can sign
+# that custom_json, so it can't be forged, and the memo means nothing to the
+# bridge: a user can put anything there, including "svm-withdrawal 5", without
+# affecting any withdrawal.
+PAYOUT_LINK_ID = "svm-withdrawal"
+_PAYOUT_LINK_RE = re.compile(r'\{"withdrawal_id":"(0|[1-9][0-9]*)"\}')
 
 
-def paid_memo_id(memo: str) -> Optional[int]:
-    """Mirrors the bridge relays' lenient parse: anything the relay would attest
-    as a payout of <id> also counts as "already paid" here."""
-    f = memo.strip().split()
-    if len(f) != 2 or f[0] != "svm-withdrawal" or not f[1].isascii() or not f[1].isdigit():
+def payout_link_json(wid: int) -> str:
+    """The exact custom_json body naming a withdrawal."""
+    return '{"withdrawal_id":"' + str(wid) + '"}'
+
+
+def parse_payout_link(c: steemtx.CustomJSON, bank: str) -> Optional[int]:
+    """The withdrawal a custom_json names, if it is exactly a payout link signed
+    by the bank's active authority alone."""
+    if c.id != PAYOUT_LINK_ID or tuple(c.required_auths) != (bank,) or c.required_posting_auths:
         return None
-    wid = int(f[1])
+    m = _PAYOUT_LINK_RE.fullmatch(c.json)
+    if m is None:
+        return None
+    wid = int(m.group(1))
     return wid if wid < 1 << 64 else None
 
 
-def parse_withdrawal_memo(memo: str) -> Optional[int]:
-    """Only the canonical "svm-withdrawal <id>" form (what the signer approves)."""
-    if not memo.startswith("svm-withdrawal "):
+def payout_ops(bank: str, to: str, amount: str, memo: str, wid: int) -> list[steemtx.Operation]:
+    """The two operations of a withdrawal payout."""
+    return [
+        steemtx.Operation("transfer", steemtx.Transfer(bank, to, amount, memo)),
+        steemtx.Operation("custom_json", steemtx.CustomJSON((bank,), (), PAYOUT_LINK_ID, payout_link_json(wid))),
+    ]
+
+
+def payout_of(tx: steemtx.Transaction, bank: str) -> Optional[tuple[steemtx.Transfer, int]]:
+    """A transaction's transfer and the withdrawal it pays, if the transaction
+    has exactly the shape of a payout."""
+    if len(tx.operations) != 2:
         return None
-    rest = memo[len("svm-withdrawal ") :]
-    if not rest or not rest.isascii() or not rest.isdigit() or (rest.startswith("0") and rest != "0"):
+    t, c = tx.operations[0].value, tx.operations[1].value
+    if not isinstance(t, steemtx.Transfer) or not isinstance(c, steemtx.CustomJSON):
         return None
-    wid = int(rest)
-    if wid >= 1 << 64 or withdrawal_memo(wid) != memo:
-        return None
-    return wid
+    wid = parse_payout_link(c, bank)
+    return None if wid is None else (t, wid)
 
 
 @dataclass
@@ -169,11 +187,14 @@ class HistoryIndex:
         if len(op) != 2 or not isinstance(op[1], dict):
             return
         op_type, body = op
-        if op_type == "transfer":
-            if body.get("from") == account and isinstance(body.get("memo"), str):
-                wid = paid_memo_id(body["memo"])
-                if wid is not None:
-                    self.paid[str(wid)] = trx
+        if op_type == "custom_json":
+            try:
+                value = steemtx.Operation.from_json(op).value
+            except steemtx.SteemTxError:
+                return
+            wid = parse_payout_link(value, account)
+            if wid is not None:
+                self.paid[str(wid)] = trx
         elif op_type in ("account_update", "account_update2"):
             if body.get("account") == account and body.get("owner") is not None:
                 self.last_owner_change = e.get("timestamp", "")

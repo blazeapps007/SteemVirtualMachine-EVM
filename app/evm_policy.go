@@ -29,7 +29,7 @@ import (
 var EVMGasFloor = math.LegacyNewDec(1_000_000_000)
 
 // StakingPrecompileAddress is cosmos/evm's staking precompile. It is active on
-// this chain ONLY in its identity-gated form (stakingIdentityPrecompile, wired
+// this chain ONLY in its identity-gated form (stakinggate.NewPrecompile, wired
 // in app/evm.go): upstream's createValidator/editValidator call x/staking's msg
 // server directly and EVM txs skip the Cosmos ante chain, so unwrapped it let
 // any EVM account register an anonymous validator or strip an identity. Before

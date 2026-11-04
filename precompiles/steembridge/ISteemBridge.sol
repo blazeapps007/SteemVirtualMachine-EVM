@@ -29,7 +29,7 @@ interface ISteemBridge {
     /// @param sender The address whose asteem was burned
     /// @param destinationSteemAccount The Steem account to receive the STEEM
     /// @param amountAsteem The burned amount in asteem (18 decimals)
-    /// @param memo The memo to attach to the Steem-side transfer
+    /// @param memo The memo the Steem-side transfer carries, unchanged (at most 256 bytes, no control characters)
     /// @param withdrawalId The id of the recorded withdrawal, for tracking
     event BridgeOutRequested(
         address indexed sender,
@@ -54,7 +54,7 @@ interface ISteemBridge {
     /// Steem account "null" is the provable-burn path.
     /// @param destinationSteemAccount The Steem account to receive the STEEM
     /// @param amountAsteem The amount to burn, in asteem (18 decimals)
-    /// @param memo The memo to attach to the Steem-side transfer
+    /// @param memo The memo the Steem-side transfer carries, unchanged (at most 256 bytes, no control characters)
     /// @return success true on success
     function bridgeOut(
         string calldata destinationSteemAccount,

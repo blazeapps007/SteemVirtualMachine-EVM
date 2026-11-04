@@ -10,21 +10,21 @@ import (
 
 func TestBuildViewStatus(t *testing.T) {
 	f := newFixture(t)
-	pay := transferOp("rcpt", "1.000 STEEM", "svm-withdrawal 1")
+	pay := payoutOps(1, "rcpt", "1.000 STEEM", "")
 
-	open := f.propose("alice", "open", "", 58*time.Minute, pay)
+	open := f.propose("alice", "open", "", 58*time.Minute, pay...)
 	for _, m := range []string{"alice", "carol", "dave"} { // 7000 < 7500
 		f.vote(m, open, true)
 	}
-	ready := f.propose("alice", "ready", "", 57*time.Minute, pay)
+	ready := f.propose("alice", "ready", "", 57*time.Minute, pay...)
 	f.vote("alice", ready, true) // 4500 + 3000 = exactly the threshold
 	f.vote("bob", ready, true)
-	notRejected := f.propose("bob", "deny at the margin", "", 56*time.Minute, pay)
+	notRejected := f.propose("bob", "deny at the margin", "", 56*time.Minute, pay...)
 	f.vote("carol", notRejected, false) // 2500 denied: approvals can still reach 7500
 	f.vote("dave", notRejected, false)
-	rejected := f.propose("bob", "rejected", "", 55*time.Minute, pay)
+	rejected := f.propose("bob", "rejected", "", 55*time.Minute, pay...)
 	f.vote("bob", rejected, false) // 3000 denied: at most 7000 can approve
-	executed := f.propose("carol", "executed", "", 54*time.Minute, pay)
+	executed := f.propose("carol", "executed", "", 54*time.Minute, pay...)
 	f.hist.Executed[executed] = f.props.Time
 
 	v := f.view()
@@ -52,17 +52,17 @@ func TestBuildViewStatus(t *testing.T) {
 
 func TestBuildViewVerification(t *testing.T) {
 	f := newFixture(t)
-	pay := transferOp("rcpt", "1.000 STEEM", "svm-withdrawal 1")
-	id := f.propose("alice", "good", "", 58*time.Minute, pay)
+	pay := payoutOps(1, "rcpt", "1.000 STEEM", "")
+	id := f.propose("alice", "good", "", 58*time.Minute, pay...)
 	f.vote("alice", id, true)
 	f.vote("bob", id, true, "dave") // signed with someone else's key
 
 	// Stored under an ID that doesn't match the transaction: dropped.
-	forged := f.propose("alice", "forged", "", 50*time.Minute, pay)
+	forged := f.propose("alice", "forged", "", 50*time.Minute, pay...)
 	f.ballots["alice"].Props[strings.Repeat("0", 40)] = f.stored(forged)
 	delete(f.ballots["alice"].Props, forged)
 	// From a non-member: dropped.
-	outsider := f.propose("mallory", "outsider", "", 49*time.Minute, pay)
+	outsider := f.propose("mallory", "outsider", "", 49*time.Minute, pay...)
 	// Not acting on svm.bank: dropped.
 	other := f.propose("alice", "other account", "", 48*time.Minute,
 		steemtx.Operation{Type: "transfer", Value: steemtx.Transfer{From: "alice", To: "rcpt", Amount: "1.000 STEEM", Memo: "x"}})
@@ -94,7 +94,7 @@ func TestBuildViewOwnerAuthority(t *testing.T) {
 	if !p.Owner || p.Approve != 7500 || p.Status != Ready {
 		t.Fatalf("owner %v approve %d status %v, want owner tally 7500 ready", p.Owner, p.Approve, p.Status)
 	}
-	pay := f.propose("alice", "payout", "", 57*time.Minute, transferOp("rcpt", "1.000 STEEM", "svm-withdrawal 1"))
+	pay := f.propose("alice", "payout", "", 57*time.Minute, payoutOps(1, "rcpt", "1.000 STEEM", "")...)
 	f.vote("alice", pay, true)
 	if p := find(t, f.view(), pay); p.Owner || p.Approve != 1000 {
 		t.Fatalf("payout owner %v approve %d, want active tally 1000", p.Owner, p.Approve)
@@ -102,7 +102,7 @@ func TestBuildViewOwnerAuthority(t *testing.T) {
 }
 
 func TestMinimalSignatures(t *testing.T) {
-	pay := transferOp("rcpt", "1.000 STEEM", "svm-withdrawal 1")
+	pay := payoutOps(1, "rcpt", "1.000 STEEM", "")
 	cases := []struct {
 		name     string
 		approve  []string
@@ -117,7 +117,7 @@ func TestMinimalSignatures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
-			id := f.propose("alice", "p", "", 58*time.Minute, pay)
+			id := f.propose("alice", "p", "", 58*time.Minute, pay...)
 			for _, m := range tc.approve {
 				f.vote(m, id, true)
 			}
@@ -140,5 +140,19 @@ func TestMinimalSignatures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A link svm.bank's active authority alone doesn't sign doesn't act on svm.bank,
+// so it never reaches a signer's review.
+func TestBuildViewDropsLinksNotSignedByTheBankAlone(t *testing.T) {
+	transfer := payoutOps(7, "rcpt", "1.000 STEEM", "")[0]
+	f := newFixture(t)
+	byMember := f.propose("alice", "signed by a member", "", 58*time.Minute, withLink(transfer, "alice", nil, PayoutLinkID, PayoutLinkJSON(7))...)
+	withPosting := f.propose("alice", "posting too", "", 57*time.Minute, withLink(transfer, testBank, []string{"alice"}, PayoutLinkID, PayoutLinkJSON(7))...)
+	for _, p := range f.view().Proposal {
+		if p.ID == byMember || p.ID == withPosting {
+			t.Fatalf("%q is in the view", p.ID)
+		}
 	}
 }

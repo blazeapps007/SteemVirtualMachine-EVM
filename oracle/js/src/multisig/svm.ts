@@ -24,6 +24,7 @@ function toWithdrawal(w: any): Withdrawal {
     symbol: w.asset === "BRIDGE_ASSET_SBD" || w.asset === 1 ? "SBD" : "STEEM",
     createdAt: BigInt(w.created_at ?? 0),
     status: String(w.status || "WITHDRAWAL_STATUS_REQUESTED").replace(/^WITHDRAWAL_STATUS_/, ""),
+    memo: String(w.memo ?? ""),
   };
 }
 

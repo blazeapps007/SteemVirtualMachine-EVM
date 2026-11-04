@@ -37,7 +37,7 @@ type svmData struct {
 	err     error // returned by Withdrawal lookups when set
 }
 
-func (f *fakeSVM) Height(context.Context) (int64, error)                 { return f.height, nil }
+func (f *fakeSVM) Height(context.Context) (int64, error)                   { return f.height, nil }
 func (f *fakeSVM) WithdrawalTimeoutBlocks(context.Context) (uint64, error) { return f.timeout, nil }
 func (f *fakeSVM) RequestedWithdrawals(context.Context) ([]Withdrawal, error) {
 	var out []Withdrawal
@@ -142,6 +142,10 @@ func newFixture(t *testing.T) *fixture {
 
 func transferOp(to, amount, memo string) steemtx.Operation {
 	return steemtx.Operation{Type: "transfer", Value: steemtx.Transfer{From: testBank, To: to, Amount: amount, Memo: memo}}
+}
+
+func payoutOps(id uint64, to, amount, memo string) []steemtx.Operation {
+	return PayoutOps(testBank, to, amount, memo, id)
 }
 
 func (f *fixture) withdrawal(id uint64, dest string, milli uint64, sym string, createdAt uint64) {

@@ -156,7 +156,7 @@ var (
 					//
 					// steembridgemoduletypes/oracledatamoduletypes/oraclemoduletypes
 					// deliberately stay AFTER genutiltypes, unlike evm/feemarket/erc20: the
-					// steembridge validator-identity ante gate (ValidateValidatorCreationEligibility)
+					// steembridge validator-identity gate (ValidateValidatorCreationEligibility)
 					// relies on steembridge's own Params not being set yet when genesis
 					// gentxs are delivered — that ErrNotFound is its documented signal to
 					// trust genesis validators unconditionally (see

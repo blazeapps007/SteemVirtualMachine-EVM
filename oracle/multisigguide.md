@@ -211,12 +211,24 @@ These are the operations a signer builds or reviews. JSON is the form used in st
   "from": "svm.bank",
   "to": "recipient-account",
   "amount": "12.500 SBD",
-  "memo": "svm-withdrawal 42"
+  "memo": "the user's own memo"
+}]
+```
+
+An SVM withdrawal payout is this transfer followed, in the same transaction, by the link that names the withdrawal:
+
+```json
+["custom_json", {
+  "required_auths": ["svm.bank"],
+  "required_posting_auths": [],
+  "id": "svm-withdrawal",
+  "json": "{\"withdrawal_id\":\"42\"}"
 }]
 ```
 
 - `amount` always has exactly 3 decimals and the symbol `STEEM` or `SBD`.
-- The memo is public and at most 2,048 bytes. For an SVM withdrawal payout it must be **exactly** `svm-withdrawal <id>`: the SVM withdrawal ID in decimal, with no leading zeros and no other text. That is the format the bridge relays parse. They attest the payout on SVM (`MsgAttestWithdrawalPayout`), which marks the withdrawal PROCESSED. A payout with any other memo is never attested, so SVM automatically refunds the withdrawal after `withdrawal_timeout_blocks` and the user is paid twice. The memo is also how every validator checks the payout and how nobody pays the same withdrawal twice (section 5.3).
+- The memo is public and at most 2,048 bytes. For an SVM withdrawal payout it must be **exactly** the memo the user gave when bridging out, so an exchange deposit tag arrives intact. It means nothing to the bridge: a user can write `svm-withdrawal 5` there without affecting withdrawal 5.
+- The link is what the bridge relays read. Its `json` is exactly `{"withdrawal_id":"<id>"}`: the SVM withdrawal ID in decimal, in a string, with no leading zeros, whitespace or other keys. Only svm.bank's active authority can sign it, so it can't be forged. The relays attest the payout on SVM (`MsgAttestWithdrawalPayout`), which marks the withdrawal PROCESSED. A payout without the link is never attested, so SVM automatically refunds the withdrawal after `withdrawal_timeout_blocks` and the user is paid twice. The link is also how every validator checks the payout and how nobody pays the same withdrawal twice (section 5.3).
 - A **burn** is a transfer to `null`.
 
 ### 3.2 Add, remove or reweight signatories
@@ -397,6 +409,7 @@ Steem signs a compact little-endian binary encoding of the transaction:
 | `transfer` | 2 | from string, to string, amount asset, memo string |
 | `transfer_to_vesting` | 3 | from string, to string, amount asset |
 | `withdraw_vesting` | 4 | account string, vesting_shares asset |
+| `custom_json` | 18 | required_auths array(string), required_posting_auths array(string), id string, json string |
 | `account_update` | 10 | account string, owner opt authority, active opt authority, posting opt authority, memo_key pubkey, json_metadata string |
 | `change_recovery_account` | 26 | account_to_recover string, new_recovery_account string, extensions varint(0) |
 | `account_update2` | 43 | account string, owner opt authority, active opt authority, posting opt authority, memo_key opt pubkey, json_metadata string, posting_json_metadata string, extensions varint(0) |
@@ -1193,7 +1206,7 @@ A sensible baseline for a bridge:
 
 | Operation | Approve when | Otherwise |
 |---|---|---|
-| `transfer` (payout) | The memo is exactly `svm-withdrawal <id>` for a withdrawal that is REQUESTED on SVM. Recipient and **net** amount match it exactly. It has not been paid yet: no svm.bank transfer with that memo exists. It is far enough from SVM's automatic refund (`oracle/PROTOCOL.md` §11.4) | Deny |
+| `transfer` + link (payout) | The link names a withdrawal that is REQUESTED on SVM. Recipient, **net** amount and memo match it exactly. It has not been paid yet: no svm.bank link for that withdrawal exists. It is far enough from SVM's automatic refund (`oracle/PROTOCOL.md` §11.4) | Deny |
 | `transfer` to `null` (burn) | The amount matches a burn your rules expect | Deny |
 | `account_update` (signatories) | The new authority equals the set your own computation produces (section 5.6), byte for byte | Deny |
 | `withdraw_vesting`, `transfer_to_vesting` | Only if your treasury rules call for it | Abstain or deny |
@@ -1437,7 +1450,7 @@ There are no separate commands. Each pass votes, proposes and executes on its ow
 - [ ] Proposal ID recomputed and checked on every proposal read.
 - [ ] Only proposals from svm.bank's current owner authority are considered.
 - [ ] Unknown operations and multi-operation proposals are denied.
-- [ ] Payouts are checked against the SVM chain independently, never inside the refund margin, with the exact `svm-withdrawal <id>` memo.
+- [ ] Payouts are checked against the SVM chain independently, never inside the refund margin, with the exact link and the user's exact memo.
 - [ ] Double payouts are impossible: at most one approved unexpired or executed transfer per SVM withdrawal, backed by a local write-ahead approval record.
 - [ ] Validator changes are approved only when they equal the locally computed authority.
 - [ ] `account_auths` are sorted before serializing, storing or signing.

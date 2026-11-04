@@ -113,13 +113,19 @@ From the reference relayer (`oracle/go/relayer/router.go`):
   claimability via memo-derived destination parsing.
 - **SBD transfers always route as deposits**, regardless of memo content (no name-registration path
   for SBD).
-- Outbound transfer FROM the gateway account with memo `svm-withdrawal <id>` → withdrawal payout
-  attestation (`MsgAttestWithdrawalPayout`), where `<id>` is the withdrawal record ID.
-  `amount_millisteem`/`asset` on this message MUST be parsed from the ACTUAL Steem transfer operation
-  being attested (same amount/symbol parsing as an inbound deposit transfer — see the amount-parsing
-  rules in this section), never copied from the on-chain `Withdrawal` record's expected value. The
-  keeper independently compares the two and rejects (benign no-op, no confirmation recorded) any
-  attestation whose reported amount/asset doesn't match what the withdrawal actually expects — a
+- A transfer FROM the gateway to the gateway is never a deposit: a payout's memo is chosen by the user
+  who bridged out.
+- Outbound payout → withdrawal payout attestation (`MsgAttestWithdrawalPayout`). A payout is one Steem
+  transaction with **exactly two operations**: a `transfer` FROM the gateway, then the `custom_json`
+  link naming the withdrawal (§11.4). **The memo never identifies a withdrawal**: it is the user's own
+  text and may say anything, including `svm-withdrawal 5`.
+  `destination_steem_account`, `memo`, `amount_millisteem` and `asset` on this message MUST be parsed
+  from the ACTUAL Steem transfer operation being attested (same amount/symbol parsing as an inbound
+  deposit transfer — see the amount-parsing rules in this section), never copied from the on-chain
+  `Withdrawal` record's expected value. `op_index` is 0, the transfer. Before attesting, a relay
+  compares them with the record and skips (and logs) a payout that differs. The keeper independently
+  compares them too and rejects (benign no-op, no confirmation recorded) any attestation that doesn't
+  match what the withdrawal actually expects — a
   client that echoes the expected value back instead of reporting what it observed defeats this
   check entirely and must not do so.
 
@@ -428,28 +434,41 @@ change, which is a Steem rule.
 
 ### 11.4 Payouts
 
-A payout is a single `transfer` from svm.bank whose memo is **exactly** `svm-withdrawal <id>`
-(decimal, no leading zeros). That is what the relays' `ParseWithdrawalMemo` reads, so the payout is
-then attested by `MsgAttestWithdrawalPayout` and the withdrawal becomes PROCESSED.
+A payout is one Steem transaction with exactly two operations, in this order:
+
+```json
+["transfer", { "from": "svm.bank", "to": "<destination>", "amount": "12.345 STEEM", "memo": "<the user's memo>" }]
+["custom_json", { "required_auths": ["svm.bank"], "required_posting_auths": [], "id": "svm-withdrawal", "json": "{\"withdrawal_id\":\"7\"}" }]
+```
+
+The `custom_json` is the **link**. Only svm.bank's active authority can sign it, so it can't be forged,
+and it needs nothing beyond the active authority the transfer already needs. Its `json` is exactly
+`{"withdrawal_id":"<id>"}`: decimal in a string, no leading zeros, no whitespace, no other keys.
+`required_auths` is exactly `["svm.bank"]` and `required_posting_auths` is empty. The relays read this
+link and then attest the payout with `MsgAttestWithdrawalPayout`, and the withdrawal becomes PROCESSED.
+
+The memo is the one the user gave when bridging out, byte for byte, so an exchange deposit tag arrives
+intact. It carries no meaning for the bridge. The chain limits it to 256 bytes of UTF-8 with no control
+characters, because every signer copies it into a proposal in its account metadata.
 
 It is approved only if all of these hold:
 
 - withdrawal `<id>` is REQUESTED on SVM;
 - `to` is its `destination_steem_account`;
 - `amount` is its **net** `amount_millisteem`, formatted with 3 decimals, STEEM or SBD per its asset;
+- `memo` is exactly its `memo`;
 - the refund margin holds: `created_at + withdrawal_timeout_blocks − height ≥
   ORACLE_MULTISIG_PAYOUT_MARGIN_BLOCKS` (default 14400). A payout never races the automatic refund.
-- svm.bank's history has no transfer for `<id>`. The history check is whitespace-lenient, as the
-  relay is.
-- it is the **earliest correct live** proposal for that memo, ordered by (created, id);
-- this signer has not approved another unexpired proposal for that memo. This is checked against
+- svm.bank's history has no link for `<id>`. A memo in the history never counts as a payment.
+- it is the **earliest correct live** proposal for that withdrawal, ordered by (created, id);
+- this signer has not approved another unexpired proposal for that withdrawal. This is checked against
   its published votes *and* its local approval journal (§11.6).
 
 Deny is final, so the policy only denies content that can never become correct. Anything that may
 clear later is an **abstain**, re-reviewed every pass: a failed read, a withdrawal the node has not
 seen yet, an earlier live duplicate, or an unexpired own approval of another proposal. Treasury and
-recovery operations always abstain, so a human decides. Multi-operation and unknown proposals are
-denied.
+recovery operations always abstain, so a human decides. A transfer without its link, any other
+multi-operation proposal, and unknown proposals are denied.
 
 The optional `ORACLE_MULTISIG_MAX_PER_TX_STEEM` / `_SBD` caps are unset by default. A payout over a
 cap is abstained.
@@ -495,7 +514,7 @@ of request:
 signature is published. A corrupt journal stops the signer; delete it only after the signer has been
 stopped for over an hour.
 ```json
-{ "approvals": { "<proposal id>": { "subject": "transfer:svm-withdrawal 6", "expiration": "2026-10-14T12:58:00" } } }
+{ "approvals": { "<proposal id>": { "subject": "withdrawal:6", "expiration": "2026-10-14T12:58:00" } } }
 ```
 
 **One signer per validator.** The signer holds an exclusive `flock` on `svm_bank_signer.lock`.
@@ -529,7 +548,7 @@ with the block number in 8 hex digits, and the chain's param validation checks t
 whose `steem_block` is below `relayer_start_block` is rejected with `ErrSteemBlockBeforeAnchor`.
 This applies in both the msg servers and the ante fee-exemption pre-checks. Steem history from
 before the chain existed can therefore never be attested. That covers a previous chain's deposits to
-the same gateway, and its `svm-withdrawal <id>` payouts, whose IDs collide with this chain's.
+the same gateway, and its payouts, whose withdrawal IDs collide with this chain's.
 
 **Every oracle**, before attesting anything:
 

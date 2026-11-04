@@ -56,14 +56,16 @@ def net(tmp_path):
 
 
 def test_signers_pay_withdrawals_exactly_once(net):
-    net.svm.all[6] = Withdrawal(6, "rcpt", 12345, "STEEM", 90000, "REQUESTED")
+    # Withdrawal 6 asks for a memo that looks like a link to 9: it must reach
+    # Steem unchanged and do nothing to 9.
+    net.svm.all[6] = Withdrawal(6, "rcpt", 12345, "STEEM", 90000, "REQUESTED", "svm-withdrawal 9")
     net.svm.all[9] = Withdrawal(9, "rcpt", 2500, "SBD", 95000, "REQUESTED")
     net.svm.all[3] = Withdrawal(3, "rcpt", 1000, "STEEM", 100000 + 14400 - 50400 - 1, "REQUESTED")  # inside the margin
     net.rounds(3)
     node = net.node
     assert node.rejected == []
     assert sorted((t.memo, t.to, t.amount) for t in node.transfers) == [
-        ("svm-withdrawal 6", "rcpt", "12.345 STEEM"), ("svm-withdrawal 9", "rcpt", "2.500 SBD")]
+        ("", "rcpt", "2.500 SBD"), ("svm-withdrawal 9", "rcpt", "12.345 STEEM")]
     assert (node.accounts[BANK].balance, node.accounts[BANK].sbd_balance) == ("987.655 STEEM", "47.500 SBD")
 
     net.rounds(2)

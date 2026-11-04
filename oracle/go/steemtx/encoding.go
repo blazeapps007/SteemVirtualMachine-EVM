@@ -273,6 +273,13 @@ type AccountUpdate struct {
 	JSONMetadata string     `json:"json_metadata"`
 }
 
+type CustomJSON struct {
+	RequiredAuths        []string `json:"required_auths"`
+	RequiredPostingAuths []string `json:"required_posting_auths"`
+	ID                   string   `json:"id"`
+	JSON                 string   `json:"json"`
+}
+
 type ChangeRecoveryAccount struct {
 	AccountToRecover   string `json:"account_to_recover"`
 	NewRecoveryAccount string `json:"new_recovery_account"`
@@ -330,6 +337,17 @@ func (op *Operation) UnmarshalJSON(b []byte) error {
 	case "account_update":
 		var v AccountUpdate
 		err := json.Unmarshal(raw[1], &v)
+		op.Value = v
+		return err
+	case "custom_json":
+		var v CustomJSON
+		err := json.Unmarshal(raw[1], &v)
+		if v.RequiredAuths == nil {
+			v.RequiredAuths = []string{}
+		}
+		if v.RequiredPostingAuths == nil {
+			v.RequiredPostingAuths = []string{}
+		}
 		op.Value = v
 		return err
 	case "change_recovery_account":
@@ -394,6 +412,16 @@ func (w *Writer) Operation(op Operation) error {
 		}
 		w.Write(pk)
 		w.Str(v.JSONMetadata)
+	case CustomJSON:
+		w.Varint(18)
+		for _, names := range [][]string{v.RequiredAuths, v.RequiredPostingAuths} {
+			w.Varint(uint32(len(names))) //nolint:gosec // a transaction's signer lists are tiny
+			for _, name := range names {
+				w.Str(name)
+			}
+		}
+		w.Str(v.ID)
+		w.Str(v.JSON)
 	case ChangeRecoveryAccount:
 		w.Varint(26)
 		w.Str(v.AccountToRecover)

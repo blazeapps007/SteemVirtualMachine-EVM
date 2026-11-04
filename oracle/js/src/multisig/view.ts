@@ -89,6 +89,8 @@ export function targetsBank(t: tx.Transaction, bank: string): boolean {
         return op.account === bank;
       case "change_recovery_account":
         return op.accountToRecover === bank;
+      case "custom_json":
+        return op.requiredAuths.length === 1 && op.requiredAuths[0] === bank && op.requiredPostingAuths.length === 0;
     }
   });
 }

@@ -1,26 +1,16 @@
 package app
 
 import (
-	"context"
-	"encoding/base64"
-	"errors"
-	"math/big"
 	"testing"
 
 	"cosmossdk.io/math"
-	"github.com/cosmos/cosmos-sdk/baseapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/x/authz"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	cosmosante "github.com/cosmos/evm/ante/cosmos"
-	evmaddress "github.com/cosmos/evm/encoding/address"
-	stakingprecompile "github.com/cosmos/evm/precompiles/staking"
 	feemarkettypes "github.com/cosmos/evm/x/feemarket/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 	protov2 "google.golang.org/protobuf/proto"
 )
@@ -91,103 +81,6 @@ func TestAuthzLimiterStillAllowsLegitimateTraffic(t *testing.T) {
 	next, err = runAuthzLimiter(t, execOf(&banktypes.MsgSend{}))
 	require.NoError(t, err)
 	require.True(t, next)
-}
-
-// ---------------------------------------------------------------------------
-// ICA route: the host's router must apply the identity gate to create/edit.
-// ---------------------------------------------------------------------------
-
-type fakeIdentity struct {
-	createErr, editErr     error
-	createCalls, editCalls int
-	// what the last check was asked about
-	valBytes         []byte
-	moniker, details string
-}
-
-func (f *fakeIdentity) ValidateValidatorCreationEligibility(_ context.Context, v []byte, moniker, details string) error {
-	f.createCalls++
-	f.valBytes, f.moniker, f.details = v, moniker, details
-	return f.createErr
-}
-
-func (f *fakeIdentity) ValidateValidatorEdit(_ context.Context, v []byte, moniker, details string) error {
-	f.editCalls++
-	f.valBytes, f.moniker, f.details = v, moniker, details
-	return f.editErr
-}
-
-type fakeRouter struct {
-	noHandler bool
-	calls     int
-}
-
-func (r *fakeRouter) Handler(sdk.Msg) baseapp.MsgServiceHandler {
-	if r.noHandler {
-		return nil
-	}
-	return func(sdk.Context, sdk.Msg) (*sdk.Result, error) {
-		r.calls++
-		return &sdk.Result{}, nil
-	}
-}
-
-func testValoper() string { return sdk.ValAddress(testAddr(7)).String() }
-
-func TestICAIdentityRouterRejectsIneligibleValidatorMsgs(t *testing.T) {
-	denied := errors.New("no active name-service registration")
-	cases := map[string]struct {
-		msg      sdk.Msg
-		identity *fakeIdentity
-	}{
-		"create": {&stakingtypes.MsgCreateValidator{ValidatorAddress: testValoper()}, &fakeIdentity{createErr: denied}},
-		"edit":   {&stakingtypes.MsgEditValidator{ValidatorAddress: testValoper()}, &fakeIdentity{editErr: denied}},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			inner := &fakeRouter{}
-			h := newICAIdentityRouter(inner, tc.identity).Handler(tc.msg)
-			require.NotNil(t, h)
-			_, err := h(sdk.Context{}, tc.msg)
-			require.ErrorContains(t, err, denied.Error())
-			require.Zero(t, inner.calls, "x/staking must not be reached")
-		})
-	}
-}
-
-func TestICAIdentityRouterDispatchesEligibleValidatorMsgs(t *testing.T) {
-	identity := &fakeIdentity{}
-	inner := &fakeRouter{}
-	r := newICAIdentityRouter(inner, identity)
-
-	create := &stakingtypes.MsgCreateValidator{ValidatorAddress: testValoper()}
-	_, err := r.Handler(create)(sdk.Context{}, create)
-	require.NoError(t, err)
-
-	edit := &stakingtypes.MsgEditValidator{ValidatorAddress: testValoper()}
-	_, err = r.Handler(edit)(sdk.Context{}, edit)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, identity.createCalls)
-	require.Equal(t, 1, identity.editCalls)
-	require.Equal(t, 2, inner.calls)
-}
-
-func TestICAIdentityRouterPassesOtherMsgsThrough(t *testing.T) {
-	identity := &fakeIdentity{createErr: errors.New("must not be consulted")}
-	inner := &fakeRouter{}
-	r := newICAIdentityRouter(inner, identity)
-
-	send := &banktypes.MsgSend{}
-	_, err := r.Handler(send)(sdk.Context{}, send)
-	require.NoError(t, err)
-	require.Equal(t, 1, inner.calls)
-	require.Zero(t, identity.createCalls+identity.editCalls)
-
-	// An unroutable message stays unroutable (the host reports it), rather
-	// than being turned into a non-nil handler.
-	require.Nil(t, newICAIdentityRouter(&fakeRouter{noHandler: true}, identity).
-		Handler(&stakingtypes.MsgCreateValidator{}))
 }
 
 // ---------------------------------------------------------------------------
@@ -269,95 +162,4 @@ func TestEVMGasFloorIsOneGwei(t *testing.T) {
 	// Must equal the 1000000000asteem minimum-gas-prices the nodes and all
 	// three oracle clients pay; anything higher breaks the price feed.
 	require.Equal(t, "1000000000.000000000000000000", EVMGasFloor.String())
-}
-
-// ---------------------------------------------------------------------------
-// EVM route: the staking precompile runs the same identity check.
-// ---------------------------------------------------------------------------
-
-var testValidatorHex = common.HexToAddress("0x0000000000000000000000000000000000000007")
-
-func gatedStaking(identity validatorIdentityChecker) stakingIdentityPrecompile {
-	return newStakingIdentityPrecompile(nil, identity,
-		func(context.Context) (string, error) { return "asteem", nil },
-		evmaddress.NewEvmCodec("steem"))
-}
-
-// decodeCall ABI-encodes a real call to the staking precompile with cosmos/evm's
-// own ABI, then decodes it back the way cmn.SetupABI does — so the wrapper sees
-// exactly the argument values and types a real EVM tx would produce.
-func decodeCall(t *testing.T, name string, args ...interface{}) (*abi.Method, []interface{}) {
-	t.Helper()
-	input, err := stakingprecompile.ABI.Pack(name, args...)
-	require.NoError(t, err)
-	method, err := stakingprecompile.ABI.MethodById(input[:4])
-	require.NoError(t, err)
-	decoded, err := method.Inputs.Unpack(input[4:])
-	require.NoError(t, err)
-	return method, decoded
-}
-
-func createValidatorCall(t *testing.T, moniker, details string) (*abi.Method, []interface{}) {
-	return decodeCall(t, stakingprecompile.CreateValidatorMethod,
-		stakingprecompile.Description{Moniker: moniker, Details: details},
-		stakingprecompile.Commission{Rate: big.NewInt(1e17), MaxRate: big.NewInt(2e17), MaxChangeRate: big.NewInt(1e16)},
-		big.NewInt(1),
-		testValidatorHex,
-		base64.StdEncoding.EncodeToString(make([]byte, 32)),
-		big.NewInt(1e18),
-	)
-}
-
-const testSteemKeys = "owner=STM1;active=STM2;posting=STM3"
-
-func TestStakingPrecompileRejectsAnonymousCreateValidator(t *testing.T) {
-	identity := &fakeIdentity{createErr: errors.New("no active name-service registration")}
-	method, args := createValidatorCall(t, "anon", "")
-
-	err := gatedStaking(identity).checkValidatorIdentity(sdk.Context{}, method, args)
-
-	require.ErrorIs(t, err, sdkerrors.ErrUnauthorized)
-	require.Equal(t, 1, identity.createCalls)
-}
-
-func TestStakingPrecompileChecksTheCallersOwnIdentity(t *testing.T) {
-	identity := &fakeIdentity{}
-	method, args := createValidatorCall(t, "blazed007", testSteemKeys)
-
-	require.NoError(t, gatedStaking(identity).checkValidatorIdentity(sdk.Context{}, method, args))
-
-	// The check is asked about exactly what x/staking will receive: this
-	// validator's own address, moniker and Steem keys.
-	require.Equal(t, 1, identity.createCalls)
-	require.Equal(t, testValidatorHex.Bytes(), identity.valBytes)
-	require.Equal(t, "blazed007", identity.moniker)
-	require.Equal(t, testSteemKeys, identity.details)
-}
-
-func TestStakingPrecompileGatesEditValidator(t *testing.T) {
-	identity := &fakeIdentity{editErr: errors.New("registered to a different account")}
-	method, args := decodeCall(t, stakingprecompile.EditValidatorMethod,
-		stakingprecompile.Description{Moniker: "someone-else", Details: testSteemKeys},
-		testValidatorHex,
-		big.NewInt(-1), // commission rate: leave unchanged
-		big.NewInt(-1), // min self delegation: leave unchanged
-	)
-
-	err := gatedStaking(identity).checkValidatorIdentity(sdk.Context{}, method, args)
-
-	require.ErrorIs(t, err, sdkerrors.ErrUnauthorized)
-	require.Equal(t, 1, identity.editCalls)
-	require.Equal(t, "someone-else", identity.moniker)
-}
-
-func TestStakingPrecompileLeavesOrdinaryStakingAlone(t *testing.T) {
-	// delegate/undelegate/redelegate/queries never consult the identity check —
-	// a check that would fail proves it isn't even called.
-	identity := &fakeIdentity{createErr: errors.New("must not be consulted"), editErr: errors.New("must not be consulted")}
-	for _, name := range []string{"delegate", "undelegate", "redelegate", "cancelUnbondingDelegation", "validator", "delegation"} {
-		method, ok := stakingprecompile.ABI.Methods[name]
-		require.True(t, ok, "cosmos/evm staking ABI has no %q", name)
-		require.NoError(t, gatedStaking(identity).checkValidatorIdentity(sdk.Context{}, &method, nil), name)
-	}
-	require.Zero(t, identity.createCalls+identity.editCalls)
 }

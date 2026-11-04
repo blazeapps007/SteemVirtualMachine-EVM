@@ -230,6 +230,41 @@
       "digest": "b3dadf83c8a4c9cb1d8360569a793201b75b9478c847be17d66a2cba54e4c797",
       "id": "63ea81848ebc17e01d58ca41329c0dc9b48ea90a",
       "signatures": []
+    },
+    {
+      "name": "withdrawal payout: transfer with the user's memo, then its link (bytes from steem-js)",
+      "tx": {
+        "ref_block_num": 28270,
+        "ref_block_prefix": 2711898870,
+        "expiration": "2026-11-04T02:18:06",
+        "operations": [
+          [
+            "transfer",
+            {
+              "from": "svm.bank",
+              "to": "exchange-hot",
+              "amount": "12.345 STEEM",
+              "memo": "exchange-tag-42 日本語"
+            }
+          ],
+          [
+            "custom_json",
+            {
+              "required_auths": [
+                "svm.bank"
+              ],
+              "required_posting_auths": [],
+              "id": "svm-withdrawal",
+              "json": "{\"withdrawal_id\":\"7\"}"
+            }
+          ]
+        ],
+        "extensions": []
+      },
+      "serialized": "6e6ef64aa4a1de95ea6a02020873766d2e62616e6b0c65786368616e67652d686f74393000000000000003535445454d00001965786368616e67652d7461672d343220e697a5e69cace8aa9e12010873766d2e62616e6b000e73766d2d7769746864726177616c157b227769746864726177616c5f6964223a2237227d00",
+      "digest": "41a562fd364aa21f8361d8b987f90895a64e81ec6cf92faacb0d3d28d4117294",
+      "id": "828a899b8a9f9abe8fb856d5e93045651a792f49",
+      "signatures": []
     }
   ],
   "keys": [

@@ -49,19 +49,19 @@ func TestAttestWithdrawalPayout_MinorityCannotBlockRealPayout(t *testing.T) {
 	// Attacker (3%) pins a bogus payout txid first.
 	_, err = ms.AttestWithdrawalPayout(ctx, &types.MsgAttestWithdrawalPayout{
 		Validator: attacker.AccAddr, WithdrawalId: 0, SteemTxid: bogus,
-		AmountMillisteem: 1000, SteemBlock: 1, SteemTimestamp: "2026-01-01T00:00:00",
+		DestinationSteemAccount: "alice", AmountMillisteem: 1000, SteemBlock: 1, SteemTimestamp: "2026-01-01T00:00:00",
 	})
 	require.NoError(t, err)
 
 	// The honest majority (97%) attests the REAL payout.
 	_, err = ms.AttestWithdrawalPayout(ctx, &types.MsgAttestWithdrawalPayout{
 		Validator: honestA.AccAddr, WithdrawalId: 0, SteemTxid: real,
-		AmountMillisteem: 1000, SteemBlock: 2, SteemTimestamp: "2026-01-01T00:00:03",
+		DestinationSteemAccount: "alice", AmountMillisteem: 1000, SteemBlock: 2, SteemTimestamp: "2026-01-01T00:00:03",
 	})
 	require.NoError(t, err)
 	_, err = ms.AttestWithdrawalPayout(ctx, &types.MsgAttestWithdrawalPayout{
 		Validator: honestB.AccAddr, WithdrawalId: 0, SteemTxid: real,
-		AmountMillisteem: 1000, SteemBlock: 2, SteemTimestamp: "2026-01-01T00:00:03",
+		DestinationSteemAccount: "alice", AmountMillisteem: 1000, SteemBlock: 2, SteemTimestamp: "2026-01-01T00:00:03",
 	})
 	require.NoError(t, err)
 
@@ -104,13 +104,13 @@ func TestAttestWithdrawalPayout_OneVotePerValidator(t *testing.T) {
 	ctx := sdkContextAt(t, f, 2)
 	_, err = ms.AttestWithdrawalPayout(ctx, &types.MsgAttestWithdrawalPayout{
 		Validator: v.AccAddr, WithdrawalId: 0, SteemTxid: strings.Repeat("a", 40),
-		AmountMillisteem: 1000, SteemBlock: 1, SteemTimestamp: "2026-01-01T00:00:00",
+		DestinationSteemAccount: "alice", AmountMillisteem: 1000, SteemBlock: 1, SteemTimestamp: "2026-01-01T00:00:00",
 	})
 	require.NoError(t, err)
 	// Same validator tries a second, different candidate: benign no-op, no second vote.
 	_, err = ms.AttestWithdrawalPayout(ctx, &types.MsgAttestWithdrawalPayout{
 		Validator: v.AccAddr, WithdrawalId: 0, SteemTxid: strings.Repeat("c", 40),
-		AmountMillisteem: 1000, SteemBlock: 1, SteemTimestamp: "2026-01-01T00:00:00",
+		DestinationSteemAccount: "alice", AmountMillisteem: 1000, SteemBlock: 1, SteemTimestamp: "2026-01-01T00:00:00",
 	})
 	require.NoError(t, err)
 
@@ -118,4 +118,56 @@ func TestAttestWithdrawalPayout_OneVotePerValidator(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, w.ValidatorConfirmations, 1, "a validator records at most one payout attestation per withdrawal")
 	require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED, w.Status, "50% is under threshold")
+}
+
+// A payout that reached the wrong account, or carried the wrong memo, must not
+// mark the withdrawal paid: that would cancel the refund of a user who never got
+// their funds. Each case differs from the withdrawal in exactly one fact.
+func TestAttestWithdrawalPayout_WrongRecipientOrMemoIsNotAPayout(t *testing.T) {
+	tests := map[string]func(m *types.MsgAttestWithdrawalPayout){
+		"recipient": func(m *types.MsgAttestWithdrawalPayout) { m.DestinationSteemAccount = "mallory" },
+		"memo":      func(m *types.MsgAttestWithdrawalPayout) { m.Memo = "someone else's memo" },
+		"no memo":   func(m *types.MsgAttestWithdrawalPayout) { m.Memo = "" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := initFixtureWithFakes(t)
+			enableBridgeOut(t, f)
+			ms := keeper.NewMsgServerImpl(f.keeper)
+			v := newTestValidator(t, 1)
+			f.stakingKeeper.setValidator(v.ValAddr, 100, true)
+
+			user := sdk.AccAddress(make([]byte, 20))
+			fundSender(t, f, user, types.MillisteemToAsteem(1000))
+			_, err := ms.BridgeOut(f.ctx, &types.MsgBridgeOut{
+				Sender: user.String(), DestinationSteemAccount: "alice",
+				AmountAsteem: types.MillisteemToAsteem(1000), Memo: "exchange-tag-42",
+			})
+			require.NoError(t, err)
+
+			correct := types.MsgAttestWithdrawalPayout{
+				Validator: v.AccAddr, WithdrawalId: 0, SteemTxid: strings.Repeat("a", 40),
+				DestinationSteemAccount: "alice", Memo: "exchange-tag-42",
+				AmountMillisteem: 1000, SteemBlock: 1, SteemTimestamp: "2026-01-01T00:00:00",
+			}
+			wrong := correct
+			mutate(&wrong)
+
+			require.ErrorIs(t, f.keeper.ValidateWithdrawalProcessedAcceptance(f.ctx, &wrong), types.ErrWithdrawalPayoutMismatch)
+			_, err = ms.AttestWithdrawalPayout(f.ctx, &wrong)
+			require.NoError(t, err, "a mismatch is a benign no-op for the tx, not a hard failure")
+
+			w, err := f.keeper.Withdrawal.Get(f.ctx, 0)
+			require.NoError(t, err)
+			require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_REQUESTED, w.Status)
+			require.Empty(t, w.ValidatorConfirmations, "a mismatch doesn't count toward confirmation")
+
+			// The validator can still attest the real payout afterwards.
+			_, err = ms.AttestWithdrawalPayout(f.ctx, &correct)
+			require.NoError(t, err)
+			w, err = f.keeper.Withdrawal.Get(f.ctx, 0)
+			require.NoError(t, err)
+			require.Equal(t, types.WithdrawalStatus_WITHDRAWAL_STATUS_PROCESSED, w.Status)
+		})
+	}
 }

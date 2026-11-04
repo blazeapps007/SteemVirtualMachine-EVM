@@ -56,9 +56,10 @@ account has gas to confirm with.
 **Validator identity** — whenever the name service is enabled, a validator's
 `moniker` must be a registered, ACTIVE Steem username **owned by that
 validator's own account**, and its `details` field must carry the account's
-`owner`/`active`/`posting` public keys. This is enforced in the ante handler:
-`create-validator` and `edit-validator` are rejected otherwise, and the identity
-cannot be stripped after the fact.
+`owner`/`active`/`posting` public keys. This is enforced in the staking message
+server (`app/stakinggate`), so it holds on every route: `create-validator` and
+`edit-validator` are rejected otherwise, and the identity cannot be stripped after
+the fact.
 
 **Choice of oracle client** — a separate container (never the chain binary
 itself) watches Steem and feeds both the bridge and the price feed. Point it at
@@ -129,7 +130,7 @@ the automated `new-validator.sh` script (recommended for most people), a
 manual Docker Compose walkthrough for anyone who wants control over each
 step, and building/running `steemvmd` from source without Docker. All three
 converge on the same validator-onboarding steps: creating a key, linking and
-confirming your Steem name, getting faucet coins, building `validator.json`,
+confirming your Steem name, bridging in your stake, building `validator.json`,
 staking, and attesting transfers. The `Instructions/` directory also holds
 the canonical node configuration (`app.toml`, `config.toml`, `client.toml`,
 `genesis.json`) that the Docker setup copies into the node home on every

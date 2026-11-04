@@ -69,27 +69,45 @@ export async function broadcast(rpc: tx.SteemRpc, t: tx.Transaction): Promise<bo
   }
 }
 
-/** The exact memo a payout must carry: the format the bridge relays parse
- * (parseWithdrawalMemo in steemClient.ts and its Go/Python twins). */
-export function withdrawalMemo(id: bigint): string {
-  return `svm-withdrawal ${id}`;
+// A withdrawal payout is one Steem transaction with two operations, in this
+// order: the transfer, carrying the memo the user gave when bridging out, and a
+// custom_json naming the withdrawal. Only svm.bank's active authority can sign
+// that custom_json, so it can't be forged, and the memo means nothing to the
+// bridge: a user can put anything there, including "svm-withdrawal 5", without
+// affecting any withdrawal.
+export const PAYOUT_LINK_ID = "svm-withdrawal";
+
+/** The exact custom_json body naming a withdrawal. */
+export function payoutLinkJson(id: bigint): string {
+  return `{"withdrawal_id":"${id}"}`;
 }
 
-/** Mirrors the bridge relays' lenient parse: anything the relay would attest
- * as a payout of <id> also counts as "already paid" here. */
-export function paidMemoId(memo: string): bigint | undefined {
-  const f = memo.trim().split(/\s+/);
-  if (f.length !== 2 || f[0] !== "svm-withdrawal" || !/^[0-9]+$/.test(f[1])) return undefined;
-  const id = BigInt(f[1]);
-  return id <= U64_MAX ? id : undefined;
-}
-
-/** Only the canonical "svm-withdrawal <id>" form (what the signer approves). */
-export function parseWithdrawalMemo(memo: string): bigint | undefined {
-  const m = /^svm-withdrawal (0|[1-9][0-9]*)$/.exec(memo);
+/** The withdrawal a custom_json names, if it is exactly a payout link signed by
+ * the bank's active authority alone. */
+export function parsePayoutLink(c: tx.CustomJSON, bank: string): bigint | undefined {
+  if (c.id !== PAYOUT_LINK_ID || c.requiredAuths.length !== 1 || c.requiredAuths[0] !== bank || c.requiredPostingAuths.length !== 0) return undefined;
+  const m = /^\{"withdrawal_id":"(0|[1-9][0-9]*)"\}$/.exec(c.json);
   if (!m) return undefined;
   const id = BigInt(m[1]);
   return id <= U64_MAX ? id : undefined;
+}
+
+/** The two operations of a withdrawal payout. */
+export function payoutOps(bank: string, to: string, amount: string, memo: string, id: bigint): tx.Operation[] {
+  return [
+    { kind: "transfer", from: bank, to, amount, memo },
+    { kind: "custom_json", requiredAuths: [bank], requiredPostingAuths: [], id: PAYOUT_LINK_ID, json: payoutLinkJson(id) },
+  ];
+}
+
+/** A transaction's transfer and the withdrawal it pays, if the transaction has
+ * exactly the shape of a payout. */
+export function payoutOf(t: tx.Transaction, bank: string): [tx.Transfer, bigint] | undefined {
+  if (t.operations.length !== 2) return undefined;
+  const [first, second] = t.operations;
+  if (first.kind !== "transfer" || second.kind !== "custom_json") return undefined;
+  const id = parsePayoutLink(second, bank);
+  return id === undefined ? undefined : [first, id];
 }
 
 export function atomicWrite(file: string, obj: unknown): void {
@@ -177,9 +195,15 @@ export class HistoryIndex {
     const op = e?.op;
     if (!Array.isArray(op) || op.length !== 2 || op[1] === null || typeof op[1] !== "object") return;
     const [type, body] = op;
-    if (type === "transfer") {
-      if (body.from === account && typeof body.memo === "string") {
-        const id = paidMemoId(body.memo);
+    if (type === "custom_json") {
+      let value: tx.Operation;
+      try {
+        value = tx.opFromJSON(op);
+      } catch {
+        return;
+      }
+      if (value.kind === "custom_json") {
+        const id = parsePayoutLink(value, account);
         if (id !== undefined) this.paid[id.toString()] = trx;
       }
     } else if (type === "account_update" || type === "account_update2") {

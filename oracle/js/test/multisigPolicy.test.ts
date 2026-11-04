@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 
 import { ApprovalJournal } from "../src/multisig/journal";
 import * as tx from "../src/multisig/steemTx";
-import { BANK, bankAuthority, Fixture, MIN, NOW, pub, stakes, transferOp, ts, withdrawal } from "./msFixtures";
+import { BANK, bankAuthority, Fixture, linkOp, MIN, NOW, payOps, pub, stakes, transferOp, ts, withdrawal } from "./msFixtures";
 
-const EXACT = transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7");
+const EXACT = payOps(7, "rcpt", "12.345 STEEM");
 const EARLIER = ts(NOW - MIN);
 
 // Withdrawal 7: refund at 90000 + 50400 = 140400, so payable up to 126000.
@@ -20,22 +20,26 @@ function payoutFixture(): Fixture {
 const setStatus = (f: Fixture, status: string) => f.svm.all.set(7n, { ...f.svm.all.get(7n)!, status });
 
 const payoutCases: Array<[string, tx.Operation[], ((f: Fixture) => void) | undefined, string]> = [
-  ["exact payout", [EXACT], undefined, "approve"],
-  ["last allowed height", [EXACT], (f) => { f.svm.height_ = 126000n; }, "approve"],
-  ["one block late", [EXACT], (f) => { f.svm.height_ = 126001n; }, "deny"],
-  ["leading zero memo", [transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 07")], undefined, "deny"],
-  ["guide's old memo", [transferOp("rcpt", "12.345 STEEM", "svm-withdraw 7")], undefined, "deny"],
-  ["memo trailing space", [transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7 ")], undefined, "deny"],
-  ["wrong recipient", [transferOp("rcpt2", "12.345 STEEM", "svm-withdrawal 7")], undefined, "deny"],
-  ["one millisteem more", [transferOp("rcpt", "12.346 STEEM", "svm-withdrawal 7")], undefined, "deny"],
-  ["one millisteem less", [transferOp("rcpt", "12.344 STEEM", "svm-withdrawal 7")], undefined, "deny"],
-  ["wrong asset", [transferOp("rcpt", "12.345 SBD", "svm-withdrawal 7")], undefined, "deny"],
-  ["two operations", [EXACT, transferOp("rcpt", "0.001 STEEM", "x")], undefined, "deny"],
-  ["already paid", [EXACT], (f) => { f.hist.paid["7"] = "abc"; }, "deny"],
-  ["processed", [EXACT], (f) => setStatus(f, "PROCESSED"), "deny"],
-  ["refunded", [EXACT], (f) => setStatus(f, "REFUNDED"), "deny"],
-  ["not seen yet", [EXACT], (f) => { f.svm.all.delete(7n); }, "abstain"],
-  ["read fails", [EXACT], (f) => { setStatus(f, "PROCESSED"); f.svm.err = new Error("refused"); }, "abstain"],
+  ["exact payout", EXACT, undefined, "approve"],
+  ["last allowed height", EXACT, (f) => { f.svm.height_ = 126000n; }, "approve"],
+  ["one block late", EXACT, (f) => { f.svm.height_ = 126001n; }, "deny"],
+  ["wrong recipient", payOps(7, "rcpt2", "12.345 STEEM"), undefined, "deny"],
+  ["one millisteem more", payOps(7, "rcpt", "12.346 STEEM"), undefined, "deny"],
+  ["one millisteem less", payOps(7, "rcpt", "12.344 STEEM"), undefined, "deny"],
+  ["wrong asset", payOps(7, "rcpt", "12.345 SBD"), undefined, "deny"],
+  ["three operations", [...EXACT, transferOp("rcpt", "0.001 STEEM", "x")], undefined, "deny"],
+  ["no link", [transferOp("rcpt", "12.345 STEEM", "")], undefined, "deny"],
+  ["a memo naming the withdrawal is not a link", [transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7")], undefined, "deny"],
+  ["memo differs", payOps(7, "rcpt", "12.345 STEEM", "someone else's tag"), undefined, "deny"],
+  ["link before the transfer", [EXACT[1], EXACT[0]], undefined, "deny"],
+  ["link with a leading zero", [EXACT[0], linkOp(BANK, '{"withdrawal_id":"07"}')], undefined, "deny"],
+  ["link with a numeric id", [EXACT[0], linkOp(BANK, '{"withdrawal_id":7}')], undefined, "deny"],
+  ["link with another id", [EXACT[0], linkOp(BANK, '{"withdrawal_id":"7"}', "other-app")], undefined, "deny"],
+  ["already paid", EXACT, (f) => { f.hist.paid["7"] = "abc"; }, "deny"],
+  ["processed", EXACT, (f) => setStatus(f, "PROCESSED"), "deny"],
+  ["refunded", EXACT, (f) => setStatus(f, "REFUNDED"), "deny"],
+  ["not seen yet", EXACT, (f) => { f.svm.all.delete(7n); }, "abstain"],
+  ["read fails", EXACT, (f) => { setStatus(f, "PROCESSED"); f.svm.err = new Error("refused"); }, "abstain"],
   ["treasury op", [{ kind: "transfer_to_vesting", from: BANK, to: BANK, amount: "1.000 STEEM" }], undefined, "abstain"],
 ];
 
@@ -51,7 +55,7 @@ for (const [name, ops, setup, want] of payoutCases) {
 
 test("payout cap", async () => {
   const f = payoutFixture();
-  const id = f.propose("alice", "payout", [EXACT]);
+  const id = f.propose("alice", "payout", EXACT);
   const pol = f.policy("bob");
   pol.cfg.maxPerTxMilli = { STEEM: 12344n };
   assert.equal((await f.review(pol, id))[0], "abstain");
@@ -61,8 +65,8 @@ test("payout cap", async () => {
 
 test("only the earliest correct payout", async () => {
   const f = payoutFixture();
-  const a = f.propose("alice", "A", [EXACT], 58 * MIN, EARLIER);
-  const b = f.propose("bob", "B", [EXACT], 57 * MIN);
+  const a = f.propose("alice", "A", EXACT, 58 * MIN, EARLIER);
+  const b = f.propose("bob", "B", EXACT, 57 * MIN);
   const pol = f.policy("carol");
   assert.equal((await f.review(pol, a))[0], "approve");
   assert.equal((await f.review(pol, b))[0], "abstain");
@@ -70,31 +74,31 @@ test("only the earliest correct payout", async () => {
 
 test("an earlier wrong payout does not block", async () => {
   const f = payoutFixture();
-  f.propose("alice", "wrong", [transferOp("rcpt", "99.999 STEEM", "svm-withdrawal 7")], 58 * MIN, EARLIER);
-  const b = f.propose("bob", "B", [EXACT], 57 * MIN);
+  f.propose("alice", "wrong", payOps(7, "rcpt", "99.999 STEEM"), 58 * MIN, EARLIER);
+  const b = f.propose("bob", "B", EXACT, 57 * MIN);
   assert.equal((await f.review(f.policy("carol"), b))[0], "approve");
 });
 
 test("my approval of another blocks", async () => {
   const f = payoutFixture();
-  const a = f.propose("alice", "A", [EXACT], 58 * MIN, EARLIER);
-  const b = f.propose("bob", "B", [EXACT], 57 * MIN);
+  const a = f.propose("alice", "A", EXACT, 58 * MIN, EARLIER);
+  const b = f.propose("bob", "B", EXACT, 57 * MIN);
   assert.equal((await f.review(f.policy("carol"), a, new Map([[b, { a: 1, s: "", x: "" }]])))[0], "abstain");
 });
 
 test("an approval of a rejected unexpired proposal still blocks", async () => {
   const f = payoutFixture();
-  const a = f.propose("alice", "A", [EXACT], 58 * MIN, EARLIER);
+  const a = f.propose("alice", "A", EXACT, 58 * MIN, EARLIER);
   f.vote("bob", a, false);
-  const b = f.propose("bob", "B", [EXACT], 57 * MIN);
+  const b = f.propose("bob", "B", EXACT, 57 * MIN);
   assert.equal(f.find(f.view(), a).status, "rejected");
   assert.equal((await f.review(f.policy("carol"), b, new Map([[a, { a: 1, s: "", x: "" }]])))[0], "abstain");
 });
 
 test("an expired approval no longer blocks", async () => {
   const f = payoutFixture();
-  const a = f.propose("alice", "A", [EXACT], MIN, EARLIER);
-  const b = f.propose("bob", "B", [EXACT], 57 * MIN);
+  const a = f.propose("alice", "A", EXACT, MIN, EARLIER);
+  const b = f.propose("bob", "B", EXACT, 57 * MIN);
   f.nowMs = NOW + MIN;
   assert.equal(f.find(f.view(), a).status, "expired");
   assert.equal((await f.review(f.policy("carol"), b, new Map([[a, { a: 1, s: "", x: "" }]])))[0], "approve");
@@ -102,9 +106,9 @@ test("an expired approval no longer blocks", async () => {
 
 test("the journal blocks even when the view lags", async () => {
   const f = payoutFixture();
-  const b = f.propose("bob", "B", [EXACT], 57 * MIN);
+  const b = f.propose("bob", "B", EXACT, 57 * MIN);
   const pol = f.policy("carol");
-  pol.journal = new ApprovalJournal({ unseen: { subject: "transfer:svm-withdrawal 7", expiration: ts(NOW + MIN) } });
+  pol.journal = new ApprovalJournal({ unseen: { subject: "withdrawal:7", expiration: ts(NOW + MIN) } });
   assert.equal((await f.review(pol, b))[0], "abstain");
   pol.journal.approvals.unseen.expiration = ts(NOW);
   assert.equal((await f.review(pol, b))[0], "approve");
@@ -168,7 +172,7 @@ test("payout proposer rotation", async () => {
   }
   const seen = new Map<string, number>();
   const [got] = await f.policy("carol").intents(f.view(), await f.state(), seen, t0);
-  assert.deepEqual(got[0].ops, [{ kind: "transfer", from: BANK, to: "rcpt", amount: "1.000 STEEM", memo: "svm-withdrawal 6" }]);
+  assert.deepEqual(got[0].ops, payOps(6, "rcpt", "1.000 STEEM"));
   const id = f.propose("carol", got[0].title, got[0].ops);
   assert.equal((await f.review(f.policy("alice"), id))[0], "approve");
   seen.set("w:6", t0 - 3600_000);
@@ -187,7 +191,7 @@ for (const name of ["balance", "margin", "paid", "cap", "journal"]) {
     else if (name === "margin") f.svm.height_ = 126001n;
     else if (name === "paid") f.hist.paid["6"] = "abc";
     else if (name === "cap") pol.cfg.maxPerTxMilli = { STEEM: 999n };
-    else pol.journal = new ApprovalJournal({ x: { subject: "transfer:svm-withdrawal 6", expiration: ts(NOW + MIN) } });
+    else pol.journal = new ApprovalJournal({ x: { subject: "withdrawal:6", expiration: ts(NOW + MIN) } });
     const [got, err] = await pol.intents(f.view(), await f.state(), new Map(), Date.now());
     assert.equal(err, undefined);
     assert.equal(got.length, 0);
@@ -225,3 +229,14 @@ test("validator set intent", async () => {
   assert.deepEqual(kept.map((i) => i.key), ["w:5"]);
   assert.ok(e2);
 });
+
+for (const memo of ["exchange-tag-42", "svm-withdrawal 5", "svm-deposit steem1anything", "#encrypted-looking", "日本語"]) {
+  test(`the payout carries the user's memo: ${memo}`, async () => {
+    const f = payoutFixture();
+    f.svm.all.get(7n)!.memo = memo;
+    f.withdrawal(5, "other", 1000, "STEEM", 90000); // a memo naming it must not touch it
+    const id = f.propose("alice", "payout", payOps(7, "rcpt", "12.345 STEEM", memo));
+    const [d, reason] = await f.review(f.policy("bob"), id);
+    assert.equal(d, "approve", reason);
+  });
+}

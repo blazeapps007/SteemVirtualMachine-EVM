@@ -15,19 +15,26 @@ from typing import Optional
 
 from . import steemtx
 from .ballot import PRUNE_AFTER
-from .chain import _atomic_write
+from .chain import _atomic_write, payout_of
 
 JOURNAL_FILE = "svm_bank_approvals.json"
 
 
+def payout_subject(wid: int) -> str:
+    """The journal subject of a withdrawal's payouts."""
+    return f"withdrawal:{wid}"
+
+
 def subject_of(tx: steemtx.Transaction) -> str:
-    """What a single-operation proposal acts on: two proposals with the same
-    subject must never both be approved while either can still execute."""
+    """What a proposal acts on: two proposals with the same subject must never
+    both be approved while either can still execute."""
+    if len(tx.operations) == 2:
+        t = tx.operations[0].value
+        pay = payout_of(tx, t.from_) if isinstance(t, steemtx.Transfer) else None
+        return payout_subject(pay[1]) if pay is not None else ""
     if len(tx.operations) != 1:
         return ""
     v = tx.operations[0].value
-    if isinstance(v, steemtx.Transfer):
-        return "transfer:" + v.memo
     if isinstance(v, steemtx.AccountUpdate):
         return "account_update:" + v.account
     return ""

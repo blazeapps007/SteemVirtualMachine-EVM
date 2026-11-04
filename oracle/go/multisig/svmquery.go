@@ -54,7 +54,7 @@ func toWithdrawal(w bridgetypes.Withdrawal) Withdrawal {
 	}
 	status := strings.TrimPrefix(w.Status.String(), "WITHDRAWAL_STATUS_")
 	return Withdrawal{ID: w.Id, Destination: w.DestinationSteemAccount, AmountMilli: w.AmountMillisteem,
-		Symbol: sym, CreatedAt: w.CreatedAt, Status: status}
+		Symbol: sym, Memo: w.Memo, CreatedAt: w.CreatedAt, Status: status}
 }
 
 func (q QuerySVM) RequestedWithdrawals(ctx context.Context) ([]Withdrawal, error) {

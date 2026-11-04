@@ -14,7 +14,7 @@ import (
 
 func TestMetadataRoundTrip(t *testing.T) {
 	f := newFixture(t)
-	id := f.propose("alice", "Withdrawal 1: 1.000 STEEM to @rcpt", "", 58*time.Minute, transferOp("rcpt", "1.000 STEEM", "svm-withdrawal 1"))
+	id := f.propose("alice", "Withdrawal 1: 1.000 STEEM to @rcpt", "", 58*time.Minute, payoutOps(1, "rcpt", "1.000 STEEM", "")...)
 	f.vote("alice", id, true)
 
 	// Other keys must survive byte for byte: no reordering inside them, no
@@ -86,7 +86,7 @@ func TestBallotPrune(t *testing.T) {
 	now := testNow
 	ts := func(d time.Duration) string { return now.Add(d).Format(steemtx.TimeLayout) }
 	b := Ballot{Props: map[string]StoredProposal{
-		"oldp":   {Tx: steemtx.Transaction{Expiration: ts(-73 * time.Hour)}},
+		"oldp":    {Tx: steemtx.Transaction{Expiration: ts(-73 * time.Hour)}},
 		"recentp": {Tx: steemtx.Transaction{Expiration: ts(-71 * time.Hour)}},
 	}, Votes: map[string]Vote{
 		"oldv":    {A: 0, X: ts(-73 * time.Hour)},
@@ -142,28 +142,28 @@ func TestJournal(t *testing.T) {
 		t.Fatalf("empty load: %v", err)
 	}
 	f := newFixture(t)
-	a := f.propose("alice", "A", "", 58*time.Minute, transferOp("rcpt", "1.000 STEEM", "svm-withdrawal 1"))
+	a := f.propose("alice", "A", "", 58*time.Minute, payoutOps(1, "rcpt", "1.000 STEEM", "")...)
 	j.Record(a, f.stored(a).Tx)
 	if err := j.Save(dir); err != nil {
 		t.Fatal(err)
 	}
 	j2, err := LoadJournal(dir)
-	if err != nil || j2.Approvals[a].Subject != "transfer:svm-withdrawal 1" {
+	if err != nil || j2.Approvals[a].Subject != "withdrawal:1" {
 		t.Fatalf("reload: %v %+v", err, j2.Approvals)
 	}
-	if !j2.Conflicts("transfer:svm-withdrawal 1", "other", testNow) {
+	if !j2.Conflicts("withdrawal:1", "other", testNow) {
 		t.Error("no conflict with a different proposal for the same withdrawal")
 	}
-	if j2.Conflicts("transfer:svm-withdrawal 1", a, testNow) {
+	if j2.Conflicts("withdrawal:1", a, testNow) {
 		t.Error("a proposal conflicts with itself")
 	}
-	if j2.Conflicts("transfer:svm-withdrawal 2", "other", testNow) {
+	if j2.Conflicts("withdrawal:2", "other", testNow) {
 		t.Error("conflict across withdrawals")
 	}
-	if j2.Conflicts("transfer:svm-withdrawal 1", "other", testNow.Add(58*time.Minute)) {
+	if j2.Conflicts("withdrawal:1", "other", testNow.Add(58*time.Minute)) {
 		t.Error("conflict after the approved proposal expired")
 	}
-	if (*ApprovalJournal)(nil).Conflicts("transfer:svm-withdrawal 1", "x", testNow) {
+	if (*ApprovalJournal)(nil).Conflicts("withdrawal:1", "x", testNow) {
 		t.Error("nil journal conflicts")
 	}
 	j2.Prune(testNow.Add(58*time.Minute + PruneAfter + time.Second))

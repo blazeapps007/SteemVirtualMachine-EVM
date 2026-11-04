@@ -66,14 +66,16 @@ test("signers pay withdrawals exactly once", async () => {
   const net = new Network();
   await net.start();
   try {
-    net.svm.all.set(6n, withdrawal(6, "rcpt", 12345, "STEEM", 90000));
+    // Withdrawal 6 asks for a memo that looks like a link to 9: it must reach
+    // Steem unchanged and do nothing to 9.
+    net.svm.all.set(6n, withdrawal(6, "rcpt", 12345, "STEEM", 90000, "REQUESTED", "svm-withdrawal 9"));
     net.svm.all.set(9n, withdrawal(9, "rcpt", 2500, "SBD", 95000));
     net.svm.all.set(3n, withdrawal(3, "rcpt", 1000, "STEEM", 100000 + 14400 - 50400 - 1)); // inside the margin
     await net.rounds(3);
     const node = net.node;
     assert.deepEqual(node.rejected, []);
     assert.deepEqual(node.transfers.map((t) => [t.memo, t.to, t.amount]).sort(),
-      [["svm-withdrawal 6", "rcpt", "12.345 STEEM"], ["svm-withdrawal 9", "rcpt", "2.500 SBD"]]);
+      [["", "rcpt", "2.500 SBD"], ["svm-withdrawal 9", "rcpt", "12.345 STEEM"]]);
     const bank = node.accounts.get(BANK)!;
     assert.deepEqual([bank.balance, bank.sbdBalance], ["987.655 STEEM", "47.500 SBD"]);
 

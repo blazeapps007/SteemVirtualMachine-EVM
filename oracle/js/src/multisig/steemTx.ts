@@ -333,12 +333,13 @@ export interface AccountUpdate {
   kind: "account_update"; account: string; owner?: Authority; active?: Authority; posting?: Authority;
   memoKey: string; jsonMetadata: string;
 }
+export interface CustomJSON { kind: "custom_json"; requiredAuths: string[]; requiredPostingAuths: string[]; id: string; json: string }
 export interface ChangeRecoveryAccount { kind: "change_recovery_account"; accountToRecover: string; newRecoveryAccount: string }
 export interface AccountUpdate2 {
   kind: "account_update2"; account: string; owner?: Authority; active?: Authority; posting?: Authority;
   memoKey: string; jsonMetadata: string; postingJsonMetadata: string;
 }
-export type Operation = Transfer | TransferToVesting | WithdrawVesting | AccountUpdate | ChangeRecoveryAccount | AccountUpdate2;
+export type Operation = Transfer | TransferToVesting | WithdrawVesting | AccountUpdate | CustomJSON | ChangeRecoveryAccount | AccountUpdate2;
 
 export function opToJSON(op: Operation): [string, Record<string, unknown>] {
   const auths = (o: { owner?: Authority; active?: Authority; posting?: Authority }) => {
@@ -357,6 +358,8 @@ export function opToJSON(op: Operation): [string, Record<string, unknown>] {
       return [op.kind, { account: op.account, vesting_shares: op.vestingShares }];
     case "account_update":
       return [op.kind, { account: op.account, ...auths(op), memo_key: op.memoKey, json_metadata: op.jsonMetadata }];
+    case "custom_json":
+      return [op.kind, { required_auths: op.requiredAuths, required_posting_auths: op.requiredPostingAuths, id: op.id, json: op.json }];
     case "change_recovery_account":
       return [op.kind, { account_to_recover: op.accountToRecover, new_recovery_account: op.newRecoveryAccount, extensions: [] }];
     case "account_update2":
@@ -365,6 +368,13 @@ export function opToJSON(op: Operation): [string, Record<string, unknown>] {
         json_metadata: op.jsonMetadata, posting_json_metadata: op.postingJsonMetadata, extensions: [],
       }];
   }
+}
+
+function strList(b: any, key: string): string[] {
+  const v = b[key];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) throw new SteemTxError(`${key} must be a list of strings`);
+  return v;
 }
 
 export function opFromJSON(raw: any): Operation {
@@ -383,6 +393,11 @@ export function opFromJSON(raw: any): Operation {
       return {
         kind: t, account: str(b, "account"), owner: optAuth(b, "owner"), active: optAuth(b, "active"),
         posting: optAuth(b, "posting"), memoKey: str(b, "memo_key"), jsonMetadata: str(b, "json_metadata"),
+      };
+    case "custom_json":
+      return {
+        kind: t, requiredAuths: strList(b, "required_auths"), requiredPostingAuths: strList(b, "required_posting_auths"),
+        id: str(b, "id"), json: str(b, "json"),
       };
     case "change_recovery_account":
       return { kind: t, accountToRecover: str(b, "account_to_recover"), newRecoveryAccount: str(b, "new_recovery_account") };
@@ -412,6 +427,14 @@ function writeOp(w: Writer, op: Operation): void {
       w.varint(10); w.string(op.account);
       w.optAuthority(op.owner); w.optAuthority(op.active); w.optAuthority(op.posting);
       w.raw(decodePublicKey(op.memoKey)); w.string(op.jsonMetadata);
+      return;
+    case "custom_json":
+      w.varint(18);
+      for (const names of [op.requiredAuths, op.requiredPostingAuths]) {
+        w.varint(names.length);
+        for (const name of names) w.string(name);
+      }
+      w.string(op.id); w.string(op.json);
       return;
     case "change_recovery_account":
       w.varint(26); w.string(op.accountToRecover); w.string(op.newRecoveryAccount); w.varint(0);

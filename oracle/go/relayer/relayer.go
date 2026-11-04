@@ -12,8 +12,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	oracledatatypes "steemvm/x/oracle/data/types"
 	"steemvm/x/oracle/bridge/types"
+	oracledatatypes "steemvm/x/oracle/data/types"
 )
 
 // Run drives the Steem relayer loop until ctx is canceled. It is a pure
@@ -351,22 +351,35 @@ func runCycle(
 				"intent", intentLabel, "txid", transfer.Txid, "op_index", transfer.OpIndex,
 				"from", transfer.From, "amount_millisteem", transfer.AmountMillisteem, "memo", transfer.Memo)
 		}
-		// Withdrawal payouts: gateway→user transfers memoed "svm-withdrawal <id>".
-		// Optimistic — every payout seen is attested once (the cursor scans each
-		// block exactly once); the chain benign-no-ops duplicates and finalizes the
-		// withdrawal REQUESTED→PROCESSED at 2/3, so no per-validator dedup query is
-		// needed here. Gated on bridge-out being enabled (the v0.0.3 payout path).
+		// Withdrawal payouts: gateway→user transfers linked to their withdrawal by
+		// a custom_json in the same transaction. Every payout seen is attested once
+		// (the cursor scans each block exactly once); the chain benign-no-ops
+		// duplicates and finalizes the withdrawal REQUESTED→PROCESSED at 2/3, so no
+		// per-validator dedup query is needed here. A payout that doesn't match the
+		// withdrawal is logged and skipped: the chain would refuse it anyway.
+		// Gated on bridge-out being enabled (the v0.0.3 payout path).
 		if params.Params.BridgeOutEnabled {
 			for _, payout := range ExtractGatewayPayouts(nb.Num, nb.Block, gateway, cfg.SteemSymbol, cfg.SbdSymbol) {
+				matches, why, err := payoutMatchesWithdrawal(ctx, bridgeQuery, payout)
+				if err != nil {
+					return err // cursor untouched; the same blocks are rescanned next cycle
+				}
+				if !matches {
+					logger.Error("not attesting a payout that doesn't match its withdrawal",
+						"withdrawal_id", payout.WithdrawalID, "steem_txid", payout.Txid, "reason", why)
+					continue
+				}
 				blockMsgs = append(blockMsgs, &types.MsgAttestWithdrawalPayout{
-					Validator:        signerAddr.String(),
-					WithdrawalId:     payout.WithdrawalID,
-					SteemTxid:        payout.Txid,
-					OpIndex:          payout.OpIndex,
-					SteemBlock:       payout.SteemBlock,
-					SteemTimestamp:   payout.SteemTimestamp,
-					AmountMillisteem: payout.AmountMillisteem,
-					Asset:            payout.Asset,
+					Validator:               signerAddr.String(),
+					WithdrawalId:            payout.WithdrawalID,
+					SteemTxid:               payout.Txid,
+					OpIndex:                 payout.OpIndex,
+					SteemBlock:              payout.SteemBlock,
+					SteemTimestamp:          payout.SteemTimestamp,
+					AmountMillisteem:        payout.AmountMillisteem,
+					Asset:                   payout.Asset,
+					DestinationSteemAccount: payout.Destination,
+					Memo:                    payout.Memo,
 				})
 				logger.Info("attesting withdrawal payout",
 					"withdrawal_id", payout.WithdrawalID, "steem_txid", payout.Txid, "op_index", payout.OpIndex)
@@ -419,6 +432,37 @@ func cursorSource(localStart, chainStart uint64) string {
 	default:
 		return "current steem last irreversible block"
 	}
+}
+
+// payoutMatchesWithdrawal compares an observed payout with the withdrawal it
+// names, the same comparison the chain makes. A withdrawal this chain has never
+// heard of doesn't match; only a failed query is an error.
+func payoutMatchesWithdrawal(ctx context.Context, q types.QueryClient, p Payout) (bool, string, error) {
+	res, err := q.GetWithdrawal(ctx, &types.QueryGetWithdrawalRequest{Id: p.WithdrawalID})
+	if err != nil {
+		// The bridge queries' sdkerrors.ErrKeyNotFound, as it arrives over ABCI
+		// query, and nothing broader: a transport error must stay an error.
+		if strings.Contains(err.Error(), "key not found") {
+			return false, "no such withdrawal", nil
+		}
+		return false, "", err
+	}
+	matches, why := comparePayout(p, res.Withdrawal)
+	return matches, why, nil
+}
+
+func comparePayout(p Payout, w types.Withdrawal) (bool, string) {
+	switch {
+	case p.Destination != w.DestinationSteemAccount:
+		return false, "recipient differs"
+	case p.Memo != w.Memo:
+		return false, "memo differs"
+	case p.AmountMillisteem != w.AmountMillisteem:
+		return false, "amount differs"
+	case p.Asset != w.Asset:
+		return false, "asset differs"
+	}
+	return true, ""
 }
 
 // alreadyAttested reports whether this validator has already confirmed the

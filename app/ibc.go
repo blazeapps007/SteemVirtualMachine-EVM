@@ -84,14 +84,14 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 	// the legacy subspace + duplicate ICS4Wrapper/channelKeeper params, same
 	// shape as the transfer keeper above.
 	// The host executes interchain-account messages via this router, bypassing
-	// the ante handler — icaIdentityRouter re-applies the validator identity
-	// gate there (see app/ica_identity_router.go).
+	// the ante handler. The router's x/staking server enforces the validator
+	// identity rule itself (see app/stakinggate).
 	app.ICAHostKeeper = icahostkeeper.NewKeeper(
 		app.appCodec,
 		runtime.NewKVStoreService(app.GetKey(icahosttypes.StoreKey)),
 		app.IBCKeeper.ChannelKeeper,
 		app.AuthKeeper,
-		newICAIdentityRouter(app.MsgServiceRouter(), app.SteembridgeKeeper),
+		app.MsgServiceRouter(),
 		app.GRPCQueryRouter(),
 		govModuleAddr,
 	)

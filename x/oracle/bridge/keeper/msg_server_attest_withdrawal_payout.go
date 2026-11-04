@@ -69,15 +69,14 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
 	}
 
-	// The chain already knows the correct payout amount/asset from the
-	// Withdrawal record itself (it was fixed at bridge-out time, not
-	// externally observed like a deposit) — so unlike txid/op_index, this
-	// isn't "first attestation wins," it's a hard check against ground truth.
-	// A validator reporting a payout with the wrong observed amount/asset
-	// doesn't get to fix the record or count toward confirmation: this is
-	// exactly what stops a wrong-asset/wrong-amount manual relay on Steem
+	// The chain already knows the correct payout from the Withdrawal record
+	// itself (it was fixed at bridge-out time, not externally observed like a
+	// deposit) — so unlike txid/op_index, this isn't "first attestation wins,"
+	// it's a hard check against ground truth. A validator reporting any other
+	// payout doesn't get to fix the record or count toward confirmation: this
+	// is exactly what stops a wrong amount, asset, recipient or memo on Steem
 	// from ever being confirmed as a valid payout.
-	if withdrawal.AmountMillisteem != msg.AmountMillisteem || withdrawal.Asset != msg.Asset {
+	if !payoutMatches(withdrawal, msg) {
 		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
 			types.EventTypeWithdrawalPayoutAssetMismatch,
 			sdk.NewAttribute(types.AttributeKeyWithdrawalID, strconv.FormatUint(msg.WithdrawalId, 10)),
@@ -86,6 +85,10 @@ func (k msgServer) AttestWithdrawalPayout(ctx context.Context, msg *types.MsgAtt
 			sdk.NewAttribute(types.AttributeKeySubmittedAmount, strconv.FormatUint(msg.AmountMillisteem, 10)),
 			sdk.NewAttribute(types.AttributeKeyStoredAsset, types.DenomForAsset(withdrawal.Asset)),
 			sdk.NewAttribute(types.AttributeKeySubmittedAsset, types.DenomForAsset(msg.Asset)),
+			sdk.NewAttribute(types.AttributeKeyStoredDestination, withdrawal.DestinationSteemAccount),
+			sdk.NewAttribute(types.AttributeKeySubmittedDestination, msg.DestinationSteemAccount),
+			sdk.NewAttribute(types.AttributeKeyStoredMemo, withdrawal.Memo),
+			sdk.NewAttribute(types.AttributeKeySubmittedMemo, msg.Memo),
 		))
 		return &types.MsgAttestWithdrawalPayoutResponse{}, nil
 	}
@@ -209,10 +212,21 @@ func (k Keeper) ValidateWithdrawalProcessedAcceptance(ctx context.Context, msg *
 	// Payout txid/op-index are tallied per candidate, so a value differing from
 	// one another validator already recorded is NOT a rejection — it is a valid
 	// attestation for a different candidate and stays fee-exempt. Only a
-	// mismatch against the withdrawal's own ground-truth amount/asset is
-	// rejected (and so falls back to the fee-paying path).
-	if withdrawal.AmountMillisteem != msg.AmountMillisteem || withdrawal.Asset != msg.Asset {
+	// mismatch against the withdrawal's own record is rejected (and so falls
+	// back to the fee-paying path).
+	if !payoutMatches(withdrawal, msg) {
 		return types.ErrWithdrawalPayoutMismatch
 	}
 	return nil
+}
+
+// payoutMatches reports whether an attested Steem transfer is the payout the
+// withdrawal asked for: the same amount and asset, to the same account, with
+// the same memo. Anything else must not mark the withdrawal paid, or it would
+// cancel the refund of a user who never got their funds.
+func payoutMatches(withdrawal types.Withdrawal, msg *types.MsgAttestWithdrawalPayout) bool {
+	return withdrawal.AmountMillisteem == msg.AmountMillisteem &&
+		withdrawal.Asset == msg.Asset &&
+		withdrawal.DestinationSteemAccount == msg.DestinationSteemAccount &&
+		withdrawal.Memo == msg.Memo
 }

@@ -28,7 +28,6 @@ import (
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	"github.com/cosmos/evm/ethereum/eip712"
 	evmmempool "github.com/cosmos/evm/mempool"
-	stakingprecompile "github.com/cosmos/evm/precompiles/staking"
 	precompiletypes "github.com/cosmos/evm/precompiles/types"
 	evmserver "github.com/cosmos/evm/server"
 	srvflags "github.com/cosmos/evm/server/flags"
@@ -49,6 +48,7 @@ import (
 
 	oracledataprecompile "steemvm/precompiles/oracledata"
 	steembridgeprecompile "steemvm/precompiles/steembridge"
+	"steemvm/app/stakinggate"
 	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
 )
 
@@ -141,22 +141,20 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		app.appCodec,
 	)
 
-	// Replace upstream's staking precompile (0x...0800) with the same instance
-	// wrapped in the Steem validator-identity gate — see
-	// staking_identity_precompile.go. Unwrapped, its createValidator/
-	// editValidator would bypass the gate entirely. Fail loudly rather than
-	// ever run it unwrapped if a cosmos/evm bump changes its type.
+	// Replace upstream's staking precompile (0x...0800) with one built on the
+	// identity-gated MsgServer (see app/stakinggate). It calls its
+	// MsgServer directly rather than through the router, so unwrapped its
+	// createValidator/editValidator would bypass the gate entirely.
 	stakingAddr := common.HexToAddress(evmtypes.StakingPrecompileAddress)
-	upstreamStaking, ok := staticPrecompiles[stakingAddr].(*stakingprecompile.Precompile)
-	if !ok {
-		return fmt.Errorf("cannot wrap the staking precompile with the identity gate: got %T", staticPrecompiles[stakingAddr])
+	if _, ok := staticPrecompiles[stakingAddr]; !ok {
+		return fmt.Errorf("no staking precompile to replace at %s", stakingAddr)
 	}
-	staticPrecompiles[stakingAddr] = newStakingIdentityPrecompile(
-		upstreamStaking,
-		app.SteembridgeKeeper,
-		app.StakingKeeper.BondDenom,
+	staticPrecompiles[stakingAddr] = stakinggate.NewPrecompile(
+		app.StakingKeeper,
+		app.BankKeeper,
 		// Same codec cosmos/evm's defaults construct the precompile with.
 		evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
+		app.StakingIdentityGate,
 	)
 
 	app.EVMKeeper = evmkeeper.NewKeeper(

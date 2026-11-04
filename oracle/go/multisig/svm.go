@@ -8,6 +8,7 @@ type Withdrawal struct {
 	Destination string // Steem account
 	AmountMilli uint64 // NET payout (gross minus the bridge fee), millisteem/millisbd
 	Symbol      string // "STEEM" or "SBD"
+	Memo        string // what the user asked the payout to carry
 	CreatedAt   uint64 // SVM height
 	Status      string // "REQUESTED", "PROCESSED", "REFUNDED"
 }

@@ -24,7 +24,7 @@ from .pricefeeder import CompositePriceSource, Feeder
 from .validator_gate import validator_can_submit
 from .router import GATEWAY_ACCOUNT, Intent, build_payout_any, build_transfer_any, derive_destination, route_memo
 from .state import FeederState, State, load_feeder_state, load_state, save_feeder_state, save_state
-from .steem_client import SteemClient, extract_gateway_payouts, extract_gateway_transfers
+from .steem_client import ASSET_SBD, ASSET_STEEM, Payout, SteemClient, extract_gateway_payouts, extract_gateway_transfers
 
 logger = logging.getLogger("steemvm_oracle.relayer")
 
@@ -105,6 +105,36 @@ def _initial_cursor(local_start: int, chain_start: int, lib: int) -> int:
 
 def _has_confirmation(confirmations: list[dict], valoper_address: str) -> bool:
     return any(c.get("validator_address") == valoper_address for c in confirmations)
+
+
+def compare_payout(payout: Payout, withdrawal: dict) -> Optional[str]:
+    """What differs between an observed payout and its withdrawal, the same
+    comparison the chain makes; None when they match."""
+    if payout.destination != withdrawal.get("destination_steem_account"):
+        return "recipient differs"
+    if payout.memo != withdrawal.get("memo", ""):
+        return "memo differs"
+    if payout.amount_millisteem != int(withdrawal.get("amount_millisteem", 0)):
+        return "amount differs"
+    asset = ASSET_SBD if withdrawal.get("asset") in ("BRIDGE_ASSET_SBD", 1) else ASSET_STEEM
+    if payout.asset != asset:
+        return "asset differs"
+    return None
+
+
+def _payout_mismatch(rest: RestClient, payout: Payout) -> Optional[str]:
+    """Why a payout must not be attested, if any. A withdrawal this chain has
+    never heard of doesn't match; any other failed query raises, so the same
+    blocks are rescanned next cycle."""
+    try:
+        withdrawal = rest.get_json(f"/steemvm/steembridge/v1/withdrawal/{payout.withdrawal_id}")["withdrawal"]
+    except NotFoundError:
+        return "no such withdrawal"
+    except Exception as exc:  # noqa: BLE001 - only the bridge queries' "key not found" means absent
+        if "key not found" in str(exc).lower():
+            return "no such withdrawal"
+        raise
+    return compare_payout(payout, withdrawal)
 
 
 def _already_attested(rest: RestClient, transfer, intent: Intent, valoper_address: str) -> bool:
@@ -261,10 +291,18 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
                 transfer.amount_millisteem, transfer.memo,
             )
 
-        # Withdrawal payouts: optimistic, no per-validator dedup query
-        # needed (chain benign-no-ops duplicates at 2/3 threshold).
+        # Withdrawal payouts: no per-validator dedup query needed (chain
+        # benign-no-ops duplicates at 2/3 threshold). A payout that doesn't match
+        # its withdrawal is logged and skipped: the chain would refuse it anyway.
         if bridge_out_enabled:
             for payout in extract_gateway_payouts(block_num, block, gateway, cycle.cfg.steem_symbol, cycle.cfg.sbd_symbol):
+                why = _payout_mismatch(cycle.rest, payout)
+                if why is not None:
+                    logger.error(
+                        "not attesting a payout that doesn't match its withdrawal: withdrawal_id=%d steem_txid=%s reason=%s",
+                        payout.withdrawal_id, payout.txid, why,
+                    )
+                    continue
                 block_msgs.append(build_payout_any(payout, cycle.keypair.address))
                 logger.info(
                     "attesting withdrawal payout: withdrawal_id=%d steem_txid=%s op_index=%d",

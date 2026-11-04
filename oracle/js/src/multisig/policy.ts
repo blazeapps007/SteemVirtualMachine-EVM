@@ -6,8 +6,8 @@
 
 import { apportion, exceedsTolerance, type StakeEntry } from "./apportion";
 import type { Vote } from "./ballot";
-import { parseWithdrawalMemo, withdrawalMemo } from "./chain";
-import { ApprovalJournal, journalConflicts, subjectOf } from "./journal";
+import { payoutOf, payoutOps } from "./chain";
+import { ApprovalJournal, journalConflicts, subjectOf, payoutSubject } from "./journal";
 import * as tx from "./steemTx";
 import { isLive, type Proposal, type View } from "./view";
 
@@ -21,6 +21,7 @@ export interface Withdrawal {
   symbol: string; // "STEEM" or "SBD"
   createdAt: bigint; // SVM height
   status: string; // "REQUESTED", "PROCESSED", "REFUNDED"
+  memo: string; // what the user asked the payout to carry
 }
 
 export interface SVM {
@@ -70,12 +71,6 @@ export interface Intent {
 // ASCII digits only, like Go's RE2 \d.
 const SNAPSHOT_RE = /@svm:([0-9]+)/;
 
-function singleTransfer(p: Proposal): tx.Transfer | undefined {
-  if (p.tx.operations.length !== 1) return undefined;
-  const op = p.tx.operations[0];
-  return op.kind === "transfer" ? op : undefined;
-}
-
 function symbolOf(amount: string): string {
   try {
     return tx.parseAsset(amount).symbol;
@@ -115,11 +110,13 @@ export class Policy {
   }
 
   async review(p: Proposal, v: View, st: SVMState, myVotes: Map<string, Vote>): Promise<[Decision, string]> {
-    if (p.tx.operations.length !== 1) return ["deny", "more than one operation"];
+    const pay = payoutOf(p.tx, this.cfg.bankAccount);
+    if (pay) return this.reviewTransfer(p, pay[0], pay[1], v, st, myVotes);
+    if (p.tx.operations.length !== 1) return ["deny", "more than one operation, and not a withdrawal payout"];
     const op = p.tx.operations[0];
     switch (op.kind) {
       case "transfer":
-        return this.reviewTransfer(p, op, v, st, myVotes);
+        return ["deny", "a transfer must come with its withdrawal link"];
       case "account_update":
         return this.reviewAccountUpdate(p, op, v, st, myVotes);
       case "transfer_to_vesting":
@@ -131,33 +128,32 @@ export class Policy {
     }
   }
 
-  /** [withdrawal id, "approve" if a correct payout / "deny" if wrong forever /
-   * "abstain" if it can't be judged yet, reason]. */
-  async payoutFacts(t: tx.Transfer, v: View, st: SVMState): Promise<[bigint | undefined, Decision, string]> {
-    if (t.from !== this.cfg.bankAccount) return [undefined, "deny", "not from " + this.cfg.bankAccount];
-    const id = parseWithdrawalMemo(t.memo);
-    if (id === undefined) return [undefined, "deny", 'memo is not exactly "svm-withdrawal <id>"'];
-    if (v.history.isPaid(id)) return [id, "deny", "withdrawal already paid on Steem"];
+  /** ["approve" if a correct payout / "deny" if wrong forever / "abstain" if it
+   * can't be judged yet, reason]. */
+  async payoutFacts(t: tx.Transfer, id: bigint, v: View, st: SVMState): Promise<[Decision, string]> {
+    if (t.from !== this.cfg.bankAccount) return ["deny", "not from " + this.cfg.bankAccount];
+    if (v.history.isPaid(id)) return ["deny", "withdrawal already paid on Steem"];
     let w = st.requested.get(id);
     if (!w) {
       let got: Withdrawal | undefined;
       try {
         got = await this.svm.withdrawal(id);
       } catch (err) {
-        return [id, "abstain", `cannot read withdrawal: ${err instanceof Error ? err.message : String(err)}`];
+        return ["abstain", `cannot read withdrawal: ${err instanceof Error ? err.message : String(err)}`];
       }
-      if (!got) return [id, "abstain", "SVM withdrawal not found (yet)"];
-      if (got.status !== "REQUESTED") return [id, "deny", "SVM withdrawal is " + got.status];
+      if (!got) return ["abstain", "SVM withdrawal not found (yet)"];
+      if (got.status !== "REQUESTED") return ["deny", "SVM withdrawal is " + got.status];
       w = got;
     }
-    if (t.to !== w.destination) return [id, "deny", "recipient differs from the SVM withdrawal destination"];
-    if (t.amount !== tx.formatMilli(w.amountMilli, w.symbol)) return [id, "deny", "amount differs from the SVM withdrawal net amount"];
-    if (st.height + this.cfg.payoutMarginBlocks > w.createdAt + st.timeout) return [id, "deny", "too close to the automatic SVM refund"];
-    return [id, "approve", ""];
+    if (t.to !== w.destination) return ["deny", "recipient differs from the SVM withdrawal destination"];
+    if (t.amount !== tx.formatMilli(w.amountMilli, w.symbol)) return ["deny", "amount differs from the SVM withdrawal net amount"];
+    if (t.memo !== w.memo) return ["deny", "memo differs from the SVM withdrawal memo"];
+    if (st.height + this.cfg.payoutMarginBlocks > w.createdAt + st.timeout) return ["deny", "too close to the automatic SVM refund"];
+    return ["approve", ""];
   }
 
-  private async reviewTransfer(p: Proposal, t: tx.Transfer, v: View, st: SVMState, myVotes: Map<string, Vote>): Promise<[Decision, string]> {
-    const [id, d, reason] = await this.payoutFacts(t, v, st);
+  private async reviewTransfer(p: Proposal, t: tx.Transfer, id: bigint, v: View, st: SVMState, myVotes: Map<string, Vote>): Promise<[Decision, string]> {
+    const [d, reason] = await this.payoutFacts(t, id, v, st);
     if (d !== "approve") return [d, reason];
     const cap = capOf(this.cfg, symbolOf(t.amount));
     if (cap > 0n && tx.parseAsset(t.amount).amount > cap) return ["abstain", "over the configured per-transaction cap"];
@@ -169,15 +165,15 @@ export class Policy {
     }
     let earliest = "";
     for (const q of v.proposals) { // sorted by (created, id)
-      const qt = singleTransfer(q);
-      if (!qt || qt.memo !== t.memo) continue;
+      const qPay = payoutOf(q.tx, this.cfg.bankAccount);
+      if (!qPay || qPay[1] !== id) continue;
       // Not just live ones: a "rejected" proposal can still execute if a
       // member flips a deny to an approval before it expires.
       if (q.id !== p.id && q.status !== "expired") {
         const mv = myVotes.get(q.id);
         if (mv && mv.a === 1) return ["abstain", "already approved another unexpired proposal for this withdrawal"];
       }
-      if (!earliest && isLive(q) && (await this.payoutFacts(qt, v, st))[1] === "approve") earliest = q.id;
+      if (!earliest && isLive(q) && (await this.payoutFacts(qPay[0], id, v, st))[0] === "approve") earliest = q.id;
     }
     if (earliest !== p.id) return ["abstain", `an earlier correct proposal exists for withdrawal ${id}`];
     return ["approve", `pays SVM withdrawal ${id} exactly`];
@@ -232,15 +228,14 @@ export class Policy {
       return rank === 0 || nowMs - firstSeen.get(key)! >= rank * this.cfg.fallbackDelayMs;
     };
 
-    const live = new Set<string>();
+    const live = new Set<bigint>();
     let liveUpdate = false;
     for (const q of v.proposals) {
       if (!isLive(q)) continue;
-      const qt = singleTransfer(q);
-      if (qt) {
-        live.add(qt.memo);
-        const id = parseWithdrawalMemo(qt.memo);
-        if (id !== undefined) firstSeen.delete(`w:${id}`); // restart the fallback clock while live
+      const qPay = payoutOf(q.tx, this.cfg.bankAccount);
+      if (qPay) {
+        live.add(qPay[1]);
+        firstSeen.delete(`w:${qPay[1]}`); // restart the fallback clock while live
       }
       if (q.tx.operations.length === 1 && q.tx.operations[0].kind === "account_update") liveUpdate = true;
     }
@@ -258,8 +253,7 @@ export class Policy {
     const out: Intent[] = [];
     for (const id of [...st.requested.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
       const w = st.requested.get(id)!;
-      const memo = withdrawalMemo(id);
-      if (live.has(memo) || v.history.isPaid(id) || journalConflicts(this.journal, "transfer:" + memo, "", v.nowMs)) continue;
+      if (live.has(id) || v.history.isPaid(id) || journalConflicts(this.journal, payoutSubject(id), "", v.nowMs)) continue;
       if (st.height + this.cfg.payoutMarginBlocks > w.createdAt + st.timeout) continue; // the automatic SVM refund will handle it
       const cap = capOf(this.cfg, w.symbol);
       if (cap > 0n && w.amountMilli > cap) continue;
@@ -271,7 +265,7 @@ export class Policy {
       out.push({
         key,
         title: `Withdrawal ${id}: ${amount} to @${w.destination}`,
-        ops: [{ kind: "transfer", from: this.cfg.bankAccount, to: w.destination, amount, memo }],
+        ops: payoutOps(this.cfg.bankAccount, w.destination, amount, w.memo, id),
       });
     }
 

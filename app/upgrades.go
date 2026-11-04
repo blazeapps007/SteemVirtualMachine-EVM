@@ -77,6 +77,21 @@ const UpgradeNameV006 = "v0.0.6"
 // and the Plan.Name of the governance MsgSoftwareUpgrade.
 const UpgradeNameV007 = "v0.0.7"
 
+// UpgradeNameV008 closes the last route around the validator identity rule and
+// changes how withdrawal payouts are paid and verified:
+//   - identity: the rule now lives in x/staking's MsgServer, and the ante handler
+//     no longer sends dynamic-fee Cosmos txs to upstream's unguarded chain;
+//   - payouts: MsgAttestWithdrawalPayout carries the observed recipient and
+//     memo, both checked against the withdrawal, and a bridge-out to the gateway
+//     or with a memo over 256 bytes is refused.
+//
+// Oracle clients must move with the chain: the Steem payout format changes too
+// (oracle/PROTOCOL.md §11.4), and the attestation has new fields.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV008 = "v0.0.8"
+
 // RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On
 // the IN-PLACE upgrade path this: runs module migrations, registers the native
 // SBD coin (bank metadata + ERC20 precompile, via the same registerSBD helper the
@@ -159,6 +174,15 @@ func (app *App) RegisterUpgradeHandlers() {
 	// No new store keys and no parameter changes.
 	app.UpgradeKeeper.SetUpgradeHandler(
 		UpgradeNameV007,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+		},
+	)
+
+	// v0.0.8: identity gate and payout checks (see UpgradeNameV008). No new store
+	// keys and no parameter changes.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV008,
 		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 		},

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"steemvm/oracle/go/steemtx"
@@ -26,21 +27,29 @@ type JournalEntry struct {
 
 const journalFile = "svm_bank_approvals.json"
 
-// SubjectOf names what a single-operation proposal acts on: two proposals with
-// the same subject must never both be approved while either can still execute.
-// It is "" for anything the policy never approves.
+// SubjectOf names what a proposal acts on: two proposals with the same subject
+// must never both be approved while either can still execute. It is "" for
+// anything the policy never approves.
 func SubjectOf(tx steemtx.Transaction) string {
+	if len(tx.Operations) == 2 {
+		if t, ok := tx.Operations[0].Value.(steemtx.Transfer); ok {
+			if _, id, ok := PayoutOf(tx, t.From); ok {
+				return PayoutSubject(id)
+			}
+		}
+		return ""
+	}
 	if len(tx.Operations) != 1 {
 		return ""
 	}
-	switch o := tx.Operations[0].Value.(type) {
-	case steemtx.Transfer:
-		return "transfer:" + o.Memo
-	case steemtx.AccountUpdate:
+	if o, ok := tx.Operations[0].Value.(steemtx.AccountUpdate); ok {
 		return "account_update:" + o.Account
 	}
 	return ""
 }
+
+// PayoutSubject is the journal subject of a withdrawal's payouts.
+func PayoutSubject(id uint64) string { return "withdrawal:" + strconv.FormatUint(id, 10) }
 
 // LoadJournal reads the journal from dir (empty if absent). Unlike the history
 // index it is not rebuildable from the chain, so a corrupt file is an error.

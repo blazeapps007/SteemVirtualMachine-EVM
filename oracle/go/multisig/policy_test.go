@@ -28,7 +28,7 @@ func review(t *testing.T, f *fixture, pol *Policy, id string, myVotes map[string
 }
 
 func TestReviewPayout(t *testing.T) {
-	exact := transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7")
+	exact := payoutOps(7, "rcpt", "12.345 STEEM", "")
 	cases := []struct {
 		name   string
 		ops    []steemtx.Operation
@@ -36,30 +36,34 @@ func TestReviewPayout(t *testing.T) {
 		want   Decision
 		reason string
 	}{
-		{name: "exact payout", ops: []steemtx.Operation{exact}, want: Approve},
-		{name: "margin boundary: last allowed height", ops: []steemtx.Operation{exact}, setup: func(f *fixture) { f.svm.height = 126000 }, want: Approve},
-		{name: "margin boundary: one block late", ops: []steemtx.Operation{exact}, setup: func(f *fixture) { f.svm.height = 126001 }, want: Deny},
-		{name: "relay memo with leading zero", ops: []steemtx.Operation{transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 07")}, want: Deny},
-		{name: "guide's old memo format", ops: []steemtx.Operation{transferOp("rcpt", "12.345 STEEM", "svm-withdraw 7")}, want: Deny},
-		{name: "memo trailing space", ops: []steemtx.Operation{transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7 ")}, want: Deny},
-		{name: "wrong recipient", ops: []steemtx.Operation{transferOp("rcpt2", "12.345 STEEM", "svm-withdrawal 7")}, want: Deny},
-		{name: "one millisteem more", ops: []steemtx.Operation{transferOp("rcpt", "12.346 STEEM", "svm-withdrawal 7")}, want: Deny},
-		{name: "one millisteem less", ops: []steemtx.Operation{transferOp("rcpt", "12.344 STEEM", "svm-withdrawal 7")}, want: Deny},
-		{name: "wrong asset", ops: []steemtx.Operation{transferOp("rcpt", "12.345 SBD", "svm-withdrawal 7")}, want: Deny},
-		{name: "two operations", ops: []steemtx.Operation{exact, transferOp("rcpt", "0.001 STEEM", "x")}, want: Deny},
-		{name: "already paid on Steem", ops: []steemtx.Operation{exact}, setup: func(f *fixture) { f.hist.Paid["7"] = "abc" }, want: Deny},
-		{name: "SVM withdrawal processed", ops: []steemtx.Operation{exact}, setup: func(f *fixture) {
+		{name: "exact payout", ops: exact, want: Approve},
+		{name: "margin boundary: last allowed height", ops: exact, setup: func(f *fixture) { f.svm.height = 126000 }, want: Approve},
+		{name: "margin boundary: one block late", ops: exact, setup: func(f *fixture) { f.svm.height = 126001 }, want: Deny},
+		{name: "wrong recipient", ops: payoutOps(7, "rcpt2", "12.345 STEEM", ""), want: Deny},
+		{name: "one millisteem more", ops: payoutOps(7, "rcpt", "12.346 STEEM", ""), want: Deny},
+		{name: "one millisteem less", ops: payoutOps(7, "rcpt", "12.344 STEEM", ""), want: Deny},
+		{name: "wrong asset", ops: payoutOps(7, "rcpt", "12.345 SBD", ""), want: Deny},
+		{name: "three operations", ops: append(append([]steemtx.Operation{}, exact...), transferOp("rcpt", "0.001 STEEM", "x")), want: Deny},
+		{name: "no link", ops: []steemtx.Operation{transferOp("rcpt", "12.345 STEEM", "")}, want: Deny},
+		{name: "a memo naming the withdrawal is not a link", ops: []steemtx.Operation{transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7")}, want: Deny},
+		{name: "memo differs", ops: payoutOps(7, "rcpt", "12.345 STEEM", "someone else's tag"), want: Deny},
+		{name: "link before the transfer", ops: []steemtx.Operation{exact[1], exact[0]}, want: Deny},
+		{name: "link with a leading zero", ops: withLink(exact[0], testBank, nil, PayoutLinkID, `{"withdrawal_id":"07"}`), want: Deny},
+		{name: "link with a numeric id", ops: withLink(exact[0], testBank, nil, PayoutLinkID, `{"withdrawal_id":7}`), want: Deny},
+		{name: "link with another id", ops: withLink(exact[0], testBank, nil, "other-app", PayoutLinkJSON(7)), want: Deny},
+		{name: "already paid on Steem", ops: exact, setup: func(f *fixture) { f.hist.Paid["7"] = "abc" }, want: Deny},
+		{name: "SVM withdrawal processed", ops: exact, setup: func(f *fixture) {
 			w := f.svm.all[7]
 			w.Status = "PROCESSED"
 			f.svm.all[7] = w
 		}, want: Deny},
-		{name: "SVM withdrawal refunded", ops: []steemtx.Operation{exact}, setup: func(f *fixture) {
+		{name: "SVM withdrawal refunded", ops: exact, setup: func(f *fixture) {
 			w := f.svm.all[7]
 			w.Status = "REFUNDED"
 			f.svm.all[7] = w
 		}, want: Deny},
-		{name: "SVM node hasn't seen it yet", ops: []steemtx.Operation{exact}, setup: func(f *fixture) { delete(f.svm.all, 7) }, want: Abstain},
-		{name: "SVM read fails", ops: []steemtx.Operation{exact}, setup: func(f *fixture) {
+		{name: "SVM node hasn't seen it yet", ops: exact, setup: func(f *fixture) { delete(f.svm.all, 7) }, want: Abstain},
+		{name: "SVM read fails", ops: exact, setup: func(f *fixture) {
 			w := f.svm.all[7]
 			w.Status = "PROCESSED" // not in the requested list, so it is looked up
 			f.svm.all[7] = w
@@ -81,11 +85,45 @@ func TestReviewPayout(t *testing.T) {
 	}
 }
 
+func withLink(transfer steemtx.Operation, auth string, posting []string, id, body string) []steemtx.Operation {
+	if posting == nil {
+		posting = []string{}
+	}
+	return []steemtx.Operation{transfer, {Type: "custom_json", Value: steemtx.CustomJSON{
+		RequiredAuths: []string{auth}, RequiredPostingAuths: posting, ID: id, JSON: body,
+	}}}
+}
+
+// The payout carries the user's own memo, whatever it says.
+func TestReviewPayoutCarriesTheUsersMemo(t *testing.T) {
+	for _, memo := range []string{"exchange-tag-42", "svm-withdrawal 5", "svm-deposit steem1anything", "#encrypted-looking", "日本語"} {
+		f := payoutFixture(t)
+		w := f.svm.all[7]
+		w.Memo = memo
+		f.svm.all[7] = w
+		// Withdrawal 5 exists too: a memo naming it must not touch it.
+		f.withdrawal(5, "other", 1000, "STEEM", 90000)
+		id := f.propose("alice", "payout", "", 58*time.Minute, payoutOps(7, "rcpt", "12.345 STEEM", memo)...)
+		if d, r := review(t, f, f.policy("bob"), id, nil); d != Approve {
+			t.Fatalf("%q: %v (%s), want approve", memo, d, r)
+		}
+		got, err := f.policy("carol").Intents(context.Background(), f.view(), f.state(), map[string]time.Time{}, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, in := range got {
+			if _, pays, _ := PayoutOf(steemtx.Transaction{Operations: in.Ops}, testBank); pays == 7 {
+				t.Fatalf("%q: withdrawal 7 proposed again while one is live", memo)
+			}
+		}
+	}
+}
+
 func TestReviewPayoutNotFromBank(t *testing.T) {
 	f := payoutFixture(t)
-	p := &Proposal{ID: "x", Status: Open, Tx: steemtx.Transaction{Operations: []steemtx.Operation{
-		{Type: "transfer", Value: steemtx.Transfer{From: "alice", To: "rcpt", Amount: "12.345 STEEM", Memo: "svm-withdrawal 7"}},
-	}}}
+	ops := PayoutOps(testBank, "rcpt", "12.345 STEEM", "", 7)
+	ops[0] = steemtx.Operation{Type: "transfer", Value: steemtx.Transfer{From: "alice", To: "rcpt", Amount: "12.345 STEEM"}}
+	p := &Proposal{ID: "x", Status: Open, Tx: steemtx.Transaction{Operations: ops}}
 	if d, _ := f.policy("bob").Review(context.Background(), p, f.view(), f.state(), map[string]Vote{}); d != Deny {
 		t.Fatalf("decision %v, want deny", d)
 	}
@@ -93,7 +131,7 @@ func TestReviewPayoutNotFromBank(t *testing.T) {
 
 func TestReviewPayoutCap(t *testing.T) {
 	f := payoutFixture(t)
-	id := f.propose("alice", "payout", "", 58*time.Minute, transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7"))
+	id := f.propose("alice", "payout", "", 58*time.Minute, payoutOps(7, "rcpt", "12.345 STEEM", "")...)
 	pol := f.policy("bob")
 	pol.Cfg.MaxPerTxMilli = map[string]uint64{"STEEM": 12344}
 	if d, _ := review(t, f, pol, id, nil); d != Abstain {
@@ -107,13 +145,13 @@ func TestReviewPayoutCap(t *testing.T) {
 
 // Two proposals for one withdrawal must never both be approved by one signer.
 func TestReviewDuplicatePayouts(t *testing.T) {
-	exact := transferOp("rcpt", "12.345 STEEM", "svm-withdrawal 7")
+	exact := payoutOps(7, "rcpt", "12.345 STEEM", "")
 	earlier := testNow.Add(-time.Minute).Format(steemtx.TimeLayout)
 
 	t.Run("only the earliest correct one", func(t *testing.T) {
 		f := payoutFixture(t)
-		a := f.propose("alice", "A", earlier, 58*time.Minute, exact)
-		b := f.propose("bob", "B", "", 57*time.Minute, exact)
+		a := f.propose("alice", "A", earlier, 58*time.Minute, exact...)
+		b := f.propose("bob", "B", "", 57*time.Minute, exact...)
 		pol := f.policy("carol")
 		if d, r := review(t, f, pol, a, nil); d != Approve {
 			t.Fatalf("A: %v (%s), want approve", d, r)
@@ -125,8 +163,8 @@ func TestReviewDuplicatePayouts(t *testing.T) {
 
 	t.Run("an earlier wrong one doesn't block a correct one", func(t *testing.T) {
 		f := payoutFixture(t)
-		f.propose("alice", "wrong amount", earlier, 58*time.Minute, transferOp("rcpt", "99.999 STEEM", "svm-withdrawal 7"))
-		b := f.propose("bob", "B", "", 57*time.Minute, exact)
+		f.propose("alice", "wrong amount", earlier, 58*time.Minute, payoutOps(7, "rcpt", "99.999 STEEM", "")...)
+		b := f.propose("bob", "B", "", 57*time.Minute, exact...)
 		if d, r := review(t, f, f.policy("carol"), b, nil); d != Approve {
 			t.Fatalf("B: %v (%s), want approve", d, r)
 		}
@@ -134,8 +172,8 @@ func TestReviewDuplicatePayouts(t *testing.T) {
 
 	t.Run("my published approval of a later one blocks the earlier", func(t *testing.T) {
 		f := payoutFixture(t)
-		a := f.propose("alice", "A", earlier, 58*time.Minute, exact)
-		b := f.propose("bob", "B", "", 57*time.Minute, exact)
+		a := f.propose("alice", "A", earlier, 58*time.Minute, exact...)
+		b := f.propose("bob", "B", "", 57*time.Minute, exact...)
 		mine := map[string]Vote{b: {A: 1}}
 		if d, _ := review(t, f, f.policy("carol"), a, mine); d != Abstain {
 			t.Fatalf("A: %v, want abstain", d)
@@ -144,9 +182,9 @@ func TestReviewDuplicatePayouts(t *testing.T) {
 
 	t.Run("an approval on a rejected but unexpired proposal still blocks", func(t *testing.T) {
 		f := payoutFixture(t)
-		a := f.propose("alice", "A", earlier, 58*time.Minute, exact)
+		a := f.propose("alice", "A", earlier, 58*time.Minute, exact...)
 		f.vote("bob", a, false) // 3000 denied: rejected in the view, yet still executable if bob flips
-		b := f.propose("bob", "B", "", 57*time.Minute, exact)
+		b := f.propose("bob", "B", "", 57*time.Minute, exact...)
 		if find(t, f.view(), a).Status != Rejected {
 			t.Fatal("A should be rejected")
 		}
@@ -157,8 +195,8 @@ func TestReviewDuplicatePayouts(t *testing.T) {
 
 	t.Run("an expired approval no longer blocks", func(t *testing.T) {
 		f := payoutFixture(t)
-		a := f.propose("alice", "A", earlier, time.Minute, exact)
-		b := f.propose("bob", "B", "", 57*time.Minute, exact)
+		a := f.propose("alice", "A", earlier, time.Minute, exact...)
+		b := f.propose("bob", "B", "", 57*time.Minute, exact...)
 		f.now = testNow.Add(time.Minute)
 		if find(t, f.view(), a).Status != Expired {
 			t.Fatal("A should be expired")
@@ -170,16 +208,16 @@ func TestReviewDuplicatePayouts(t *testing.T) {
 
 	t.Run("the local journal blocks even when the view lags", func(t *testing.T) {
 		f := payoutFixture(t)
-		b := f.propose("bob", "B", "", 57*time.Minute, exact)
+		b := f.propose("bob", "B", "", 57*time.Minute, exact...)
 		pol := f.policy("carol")
 		// An approval of a proposal this (stale) view doesn't show at all.
 		pol.Journal = &ApprovalJournal{Approvals: map[string]JournalEntry{
-			"unseen": {Subject: "transfer:svm-withdrawal 7", Expiration: testNow.Add(time.Minute).Format(steemtx.TimeLayout)},
+			"unseen": {Subject: "withdrawal:7", Expiration: testNow.Add(time.Minute).Format(steemtx.TimeLayout)},
 		}}
 		if d, _ := review(t, f, pol, b, nil); d != Abstain {
 			t.Fatalf("B with a live journal entry: %v, want abstain", d)
 		}
-		pol.Journal.Approvals["unseen"] = JournalEntry{Subject: "transfer:svm-withdrawal 7", Expiration: f.props.Time}
+		pol.Journal.Approvals["unseen"] = JournalEntry{Subject: "withdrawal:7", Expiration: f.props.Time}
 		if d, r := review(t, f, pol, b, nil); d != Approve {
 			t.Fatalf("B once the journal entry expired: %v (%s), want approve", d, r)
 		}
@@ -285,7 +323,7 @@ func TestIntentsPayoutProposer(t *testing.T) {
 	seen := map[string]time.Time{}
 	got, _ := f.policy("carol").Intents(ctx, f.view(), f.state(), seen, t0)
 	op := got[0].Ops[0].Value.(steemtx.Transfer)
-	if len(got[0].Ops) != 1 || op != (steemtx.Transfer{From: testBank, To: "rcpt", Amount: "1.000 STEEM", Memo: "svm-withdrawal 6"}) {
+	if len(got[0].Ops) != 2 || op != (steemtx.Transfer{From: testBank, To: "rcpt", Amount: "1.000 STEEM"}) {
 		t.Fatalf("intent op %+v", got[0].Ops)
 	}
 	// What a proposer builds, every other member approves.
@@ -315,7 +353,7 @@ func TestIntentsPayoutSkips(t *testing.T) {
 		{"over the cap", func(_ *fixture, p *Policy) { p.Cfg.MaxPerTxMilli = map[string]uint64{"STEEM": 999} }},
 		{"journal holds an unexpired approval", func(f *fixture, p *Policy) {
 			p.Journal = &ApprovalJournal{Approvals: map[string]JournalEntry{
-				"x": {Subject: "transfer:svm-withdrawal 6", Expiration: testNow.Add(time.Minute).Format(steemtx.TimeLayout)}}}
+				"x": {Subject: "withdrawal:6", Expiration: testNow.Add(time.Minute).Format(steemtx.TimeLayout)}}}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

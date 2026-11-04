@@ -13,7 +13,7 @@ from typing import Any, Optional
 from steemvm_oracle.multisig import steemtx
 from steemvm_oracle.multisig.apportion import StakeEntry
 from steemvm_oracle.multisig.ballot import Ballot, StoredProposal, Vote
-from steemvm_oracle.multisig.chain import Account, HistoryIndex
+from steemvm_oracle.multisig.chain import Account, HistoryIndex, PAYOUT_LINK_ID, payout_ops
 from steemvm_oracle.multisig.policy import Config, Policy, SVMState, Withdrawal
 from steemvm_oracle.multisig.view import Proposal, View, build_view
 
@@ -49,6 +49,14 @@ def stakes(**kv: int) -> list[StakeEntry]:
 
 def ts(t: datetime) -> str:
     return steemtx.format_time(t)
+
+
+def pay_ops(wid: int, to: str, amount: str, memo: str = "") -> list[steemtx.Operation]:
+    return payout_ops(BANK, to, amount, memo, wid)
+
+
+def link_op(auth: str, posting: tuple = (), lid: str = PAYOUT_LINK_ID, body: str = '{"withdrawal_id":"7"}') -> steemtx.Operation:
+    return steemtx.Operation("custom_json", steemtx.CustomJSON((auth,), posting, lid, body))
 
 
 def transfer_op(to: str, amount: str, memo: str, frm: str = BANK) -> steemtx.Operation:
@@ -238,8 +246,15 @@ class FakeSteem:
         exp = steemtx.parse_time(tx.expiration)
         if not self.now < exp or exp - self.now > timedelta(hours=1):
             raise steemtx.ChainError("transaction expiration out of range")
-        if len(tx.operations) != 1:
-            raise steemtx.ChainError("test node applies single-operation transactions only")
+        # One operation, or a transfer followed by a custom_json the same account
+        # signs, which is all the signers ever send.
+        if len(tx.operations) == 2:
+            t, c = tx.operations[0].value, tx.operations[1].value
+            if not (isinstance(t, steemtx.Transfer) and isinstance(c, steemtx.CustomJSON)
+                    and tuple(c.required_auths) == (t.from_,) and not c.required_posting_auths):
+                raise steemtx.ChainError("test node: unsupported two-operation transaction")
+        elif len(tx.operations) != 1:
+            raise steemtx.ChainError("test node applies one- or two-operation transactions only")
         digest = tx.digest()
         keys: set[str] = set()
         for s in tx.signatures:
@@ -285,7 +300,8 @@ class FakeSteem:
                 acc.posting = op.posting.sorted()
             acc.memo_key = op.memo_key
         self.seen.add(tid)
-        self.add_history(account, tid, ts(self.now), tx.operations[0].type, tx.operations[0].to_json()[1])
+        for o in tx.operations:
+            self.add_history(account, tid, ts(self.now), o.type, o.to_json()[1])
         return {"id": tid, "block_num": self.head + 1}
 
     def _move(self, frm: str, to: str, amt: steemtx.Asset) -> None:

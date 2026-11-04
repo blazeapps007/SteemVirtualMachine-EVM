@@ -247,7 +247,7 @@ The `asteem`/`asbd` balances live here. **Query** (13 methods, all REST GET)
 
 ### staking — `cosmos.staking.v1beta1`
 
-The validator-identity ante gate (`app/ante_steembridge.go`) sits in front of `MsgCreateValidator`/
+The validator-identity gate (`app/stakinggate`) wraps `MsgCreateValidator`/
 `MsgEditValidator` here — see the steembridge section above. **Query** (14 methods, all REST GET)
 
 | RPC | REST path | Description |
@@ -271,7 +271,7 @@ The validator-identity ante gate (`app/ante_steembridge.go`) sits in front of `M
 
 | RPC | Description |
 |---|---|
-| `CreateValidator` | Create a new validator — gated by the steembridge validator-identity ante check (moniker must be an ACTIVE name link, `Description.details` must embed `owner/active/posting=STM...` keys). |
+| `CreateValidator` | Create a new validator — gated by the steembridge validator-identity check (moniker must be an ACTIVE name link, `Description.details` must embed `owner/active/posting=STM...` keys). |
 | `EditValidator` | Edit an existing validator — same identity gate. |
 | `Delegate` | Delegate `asteem` to a validator. |
 | `BeginRedelegate` | Move a delegation from one validator to another. |

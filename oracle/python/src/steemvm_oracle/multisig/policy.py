@@ -16,8 +16,8 @@ from typing import Any, Optional, Protocol
 from . import steemtx
 from .apportion import StakeEntry, apportion, exceeds_tolerance
 from .ballot import Vote
-from .chain import parse_withdrawal_memo, withdrawal_memo
-from .journal import ApprovalJournal, journal_conflicts, subject_of
+from .chain import payout_of, payout_ops
+from .journal import ApprovalJournal, journal_conflicts, subject_of, payout_subject
 from .view import EXECUTED, EXPIRED, Proposal, View
 
 ABSTAIN, APPROVE, DENY = "abstain", "approve", "deny"
@@ -36,6 +36,7 @@ class Withdrawal:
     symbol: str  # "STEEM" or "SBD"
     created_at: int  # SVM height
     status: str  # "REQUESTED", "PROCESSED", "REFUNDED"
+    memo: str = ""  # what the user asked the payout to carry
 
 
 class SVM(Protocol):
@@ -78,13 +79,6 @@ class Intent:
     ops: list[steemtx.Operation]
 
 
-def _single_transfer(p: Proposal) -> Optional[steemtx.Transfer]:
-    if len(p.tx.operations) != 1:
-        return None
-    v = p.tx.operations[0].value
-    return v if isinstance(v, steemtx.Transfer) else None
-
-
 def _symbol_of(amount: str) -> str:
     try:
         return steemtx.parse_asset(amount).symbol
@@ -120,49 +114,51 @@ class Policy:
         return 0 if s <= 0 else s - s % self.cfg.snapshot_every
 
     def review(self, p: Proposal, v: View, st: SVMState, my_votes: dict[str, Vote]) -> tuple[str, str]:
+        pay = payout_of(p.tx, self.cfg.bank_account)
+        if pay is not None:
+            return self._review_transfer(p, pay[0], pay[1], v, st, my_votes)
         if len(p.tx.operations) != 1:
-            return DENY, "more than one operation"
+            return DENY, "more than one operation, and not a withdrawal payout"
         op = p.tx.operations[0].value
         if isinstance(op, steemtx.Transfer):
-            return self._review_transfer(p, op, v, st, my_votes)
+            return DENY, "a transfer must come with its withdrawal link"
         if isinstance(op, steemtx.AccountUpdate):
             return self._review_account_update(p, op, v, st, my_votes)
         if isinstance(op, (steemtx.TransferToVesting, steemtx.WithdrawVesting, steemtx.ChangeRecoveryAccount)):
             return ABSTAIN, "treasury/recovery operation: needs a human"
         return DENY, "operation type not allowed: " + p.tx.operations[0].type
 
-    def payout_facts(self, t: steemtx.Transfer, v: View, st: SVMState) -> tuple[Optional[int], str, str]:
-        """(withdrawal id, APPROVE if a correct payout / DENY if wrong forever /
-        ABSTAIN if it can't be judged yet, reason)."""
+    def payout_facts(self, t: steemtx.Transfer, wid: int, v: View, st: SVMState) -> tuple[str, str]:
+        """(APPROVE if a correct payout / DENY if wrong forever / ABSTAIN if it
+        can't be judged yet, reason)."""
         if t.from_ != self.cfg.bank_account:
-            return None, DENY, "not from " + self.cfg.bank_account
-        wid = parse_withdrawal_memo(t.memo)
-        if wid is None:
-            return None, DENY, 'memo is not exactly "svm-withdrawal <id>"'
+            return DENY, "not from " + self.cfg.bank_account
         if v.history.is_paid(wid):
-            return wid, DENY, "withdrawal already paid on Steem"
+            return DENY, "withdrawal already paid on Steem"
         w = st.requested.get(wid)
         if w is None:
             try:
                 got = self.svm.withdrawal(wid)
             except Exception as exc:  # noqa: BLE001 - transient: look again next pass
-                return wid, ABSTAIN, f"cannot read withdrawal: {exc}"
+                return ABSTAIN, f"cannot read withdrawal: {exc}"
             if got is None:
-                return wid, ABSTAIN, "SVM withdrawal not found (yet)"
+                return ABSTAIN, "SVM withdrawal not found (yet)"
             if got.status != "REQUESTED":
-                return wid, DENY, "SVM withdrawal is " + got.status
+                return DENY, "SVM withdrawal is " + got.status
             w = got
         if t.to != w.destination:
-            return wid, DENY, "recipient differs from the SVM withdrawal destination"
+            return DENY, "recipient differs from the SVM withdrawal destination"
         if t.amount != steemtx.format_milli(w.amount_milli, w.symbol):
-            return wid, DENY, "amount differs from the SVM withdrawal net amount"
+            return DENY, "amount differs from the SVM withdrawal net amount"
+        if t.memo != w.memo:
+            return DENY, "memo differs from the SVM withdrawal memo"
         if st.height + self.cfg.payout_margin_blocks > w.created_at + st.timeout:
-            return wid, DENY, "too close to the automatic SVM refund"
-        return wid, APPROVE, ""
+            return DENY, "too close to the automatic SVM refund"
+        return APPROVE, ""
 
-    def _review_transfer(self, p: Proposal, t: steemtx.Transfer, v: View, st: SVMState,
+    def _review_transfer(self, p: Proposal, t: steemtx.Transfer, wid: int, v: View, st: SVMState,
                          my_votes: dict[str, Vote]) -> tuple[str, str]:
-        wid, d, reason = self.payout_facts(t, v, st)
+        d, reason = self.payout_facts(t, wid, v, st)
         if d != APPROVE:
             return d, reason
         cap = self.cfg.max_per_tx_milli.get(_symbol_of(t.amount), 0)
@@ -175,8 +171,8 @@ class Policy:
             return ABSTAIN, "already approved another unexpired proposal for this withdrawal"
         earliest = ""
         for q in v.proposals:  # sorted by (created, id)
-            qt = _single_transfer(q)
-            if qt is None or qt.memo != t.memo:
+            q_pay = payout_of(q.tx, self.cfg.bank_account)
+            if q_pay is None or q_pay[1] != wid:
                 continue
             # Not just live ones: a "rejected" proposal can still execute if a
             # member flips a deny to an approval before it expires.
@@ -184,7 +180,7 @@ class Policy:
                 mv = my_votes.get(q.id)
                 if mv is not None and mv.a == 1:
                     return ABSTAIN, "already approved another unexpired proposal for this withdrawal"
-            if not earliest and q.live() and self.payout_facts(qt, v, st)[1] == APPROVE:
+            if not earliest and q.live() and self.payout_facts(q_pay[0], wid, v, st)[0] == APPROVE:
                 earliest = q.id
         if earliest != p.id:
             return ABSTAIN, f"an earlier correct proposal exists for withdrawal {wid}"
@@ -243,18 +239,16 @@ class Policy:
             rank = rank_of(members, self.me, designated)
             return rank == 0 or now - first_seen[key] >= rank * self.cfg.fallback_delay
 
-        live: set[str] = set()
+        live: set[int] = set()
         live_update = False
         for q in v.proposals:
             if not q.live():
                 continue
-            qt = _single_transfer(q)
-            if qt is not None:
-                live.add(qt.memo)
+            q_pay = payout_of(q.tx, self.cfg.bank_account)
+            if q_pay is not None:
+                live.add(q_pay[1])
                 # Restart the fallback clock while a proposal is live.
-                wid = parse_withdrawal_memo(qt.memo)
-                if wid is not None:
-                    first_seen.pop(f"w:{wid}", None)
+                first_seen.pop(f"w:{q_pay[1]}", None)
             if len(q.tx.operations) == 1 and isinstance(q.tx.operations[0].value, steemtx.AccountUpdate):
                 live_update = True
 
@@ -269,8 +263,7 @@ class Policy:
         out: list[Intent] = []
         for wid in sorted(st.requested):
             w = st.requested[wid]
-            memo = withdrawal_memo(wid)
-            if memo in live or v.history.is_paid(wid) or journal_conflicts(self.journal, "transfer:" + memo, "", v.now):
+            if wid in live or v.history.is_paid(wid) or journal_conflicts(self.journal, payout_subject(wid), "", v.now):
                 continue
             if st.height + self.cfg.payout_margin_blocks > w.created_at + st.timeout:
                 continue  # the automatic SVM refund will handle it
@@ -284,8 +277,8 @@ class Policy:
                 continue
             balance[w.symbol] -= w.amount_milli
             amount = steemtx.format_milli(w.amount_milli, w.symbol)
-            out.append(Intent(key, f"Withdrawal {wid}: {amount} to @{w.destination}", [steemtx.Operation(
-                "transfer", steemtx.Transfer(self.cfg.bank_account, w.destination, amount, memo))]))
+            out.append(Intent(key, f"Withdrawal {wid}: {amount} to @{w.destination}",
+                              payout_ops(self.cfg.bank_account, w.destination, amount, w.memo, wid)))
 
         if not live_update and not journal_conflicts(self.journal, "account_update:" + self.cfg.bank_account, "", v.now):
             cooled = True

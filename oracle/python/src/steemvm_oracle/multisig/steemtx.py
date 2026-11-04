@@ -303,6 +303,15 @@ def _opt_auth(obj: dict, key: str) -> Optional[Authority]:
     return None if v is None else Authority.from_json(v)
 
 
+def _str_list(obj: dict, key: str) -> tuple[str, ...]:
+    v = obj.get(key)
+    if v is None:
+        return ()
+    if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+        raise SteemTxError(f"{key} must be a list of strings")
+    return tuple(v)
+
+
 # --------------------------------------------------------------------------
 # Operations
 # --------------------------------------------------------------------------
@@ -339,6 +348,14 @@ class AccountUpdate:
     json_metadata: str
 
 
+@dataclass(frozen=True)
+class CustomJSON:
+    required_auths: tuple[str, ...]
+    required_posting_auths: tuple[str, ...]
+    id: str
+    json: str
+
+
 @dataclass
 class ChangeRecoveryAccount:
     account_to_recover: str
@@ -356,7 +373,7 @@ class AccountUpdate2:
     memo_key: str = ""
 
 
-OpValue = Union[Transfer, TransferToVesting, WithdrawVesting, AccountUpdate, ChangeRecoveryAccount, AccountUpdate2]
+OpValue = Union[Transfer, TransferToVesting, WithdrawVesting, AccountUpdate, CustomJSON, ChangeRecoveryAccount, AccountUpdate2]
 
 
 @dataclass
@@ -380,6 +397,9 @@ class Operation:
                     body[k] = a.to_json()
             body["memo_key"] = v.memo_key
             body["json_metadata"] = v.json_metadata
+        elif isinstance(v, CustomJSON):
+            body = {"required_auths": list(v.required_auths), "required_posting_auths": list(v.required_posting_auths),
+                    "id": v.id, "json": v.json}
         elif isinstance(v, ChangeRecoveryAccount):
             body = {"account_to_recover": v.account_to_recover, "new_recovery_account": v.new_recovery_account, "extensions": []}
         elif isinstance(v, AccountUpdate2):
@@ -415,6 +435,9 @@ class Operation:
         if t == "account_update":
             return Operation(t, AccountUpdate(_str(b, "account"), _opt_auth(b, "owner"), _opt_auth(b, "active"),
                                               _opt_auth(b, "posting"), _str(b, "memo_key"), _str(b, "json_metadata")))
+        if t == "custom_json":
+            return Operation(t, CustomJSON(_str_list(b, "required_auths"), _str_list(b, "required_posting_auths"),
+                                           _str(b, "id"), _str(b, "json")))
         if t == "change_recovery_account":
             return Operation(t, ChangeRecoveryAccount(_str(b, "account_to_recover"), _str(b, "new_recovery_account")))
         if t == "account_update2":
@@ -447,6 +470,14 @@ class Operation:
                 w.opt_authority(a)
             w.buf += decode_public_key(v.memo_key)
             w.string(v.json_metadata)
+        elif isinstance(v, CustomJSON):
+            w.varint(18)
+            for names in (v.required_auths, v.required_posting_auths):
+                w.varint(len(names))
+                for name in names:
+                    w.string(name)
+            w.string(v.id)
+            w.string(v.json)
         elif isinstance(v, ChangeRecoveryAccount):
             w.varint(26)
             w.string(v.account_to_recover)

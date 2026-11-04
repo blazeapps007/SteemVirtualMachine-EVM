@@ -97,6 +97,8 @@ def targets_bank(tx: steemtx.Transaction, bank: str) -> bool:
             acct = v.account
         elif isinstance(v, steemtx.ChangeRecoveryAccount):
             acct = v.account_to_recover
+        elif isinstance(v, steemtx.CustomJSON) and len(v.required_auths) == 1 and not v.required_posting_auths:
+            acct = v.required_auths[0]
         else:
             acct = ""
         if acct != bank:

@@ -7,14 +7,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { Ballot, encodeMetadata, InvalidMetadata, MalformedBallot, MAX_BALLOT_BYTES, parseMetadata } from "../src/multisig/ballot";
-import { HistoryIndex, newAccount, paidMemoId, parseWithdrawalMemo, withdrawalMemo } from "../src/multisig/chain";
+import { HistoryIndex, newAccount, parsePayoutLink, payoutLinkJson, PAYOUT_LINK_ID } from "../src/multisig/chain";
 import { ApprovalJournal } from "../src/multisig/journal";
 import * as tx from "../src/multisig/steemTx";
 import { loadVectors } from "../src/multisig/vectors";
 import { buildView } from "../src/multisig/view";
-import { BANK, bankAuthority, FakeSteem, Fixture, keyAuthority, MIN, NOW, pub, transferOp, ts } from "./msFixtures";
+import { BANK, bankAuthority, FakeSteem, Fixture, keyAuthority, MIN, NOW, pub, transferOp, ts, payOps } from "./msFixtures";
 
-const PAY = transferOp("rcpt", "1.000 STEEM", "svm-withdrawal 1");
+const PAY = payOps(1, "rcpt", "1.000 STEEM");
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "svm-ms-"));
 
 test("ballot vectors from mainnet", () => {
@@ -39,7 +39,7 @@ test("ballot vectors from mainnet", () => {
 
 test("metadata round trip preserves other keys", () => {
   const f = new Fixture();
-  const id = f.propose("alice", "Withdrawal 1: 1.000 STEEM to @rcpt", [PAY]);
+  const id = f.propose("alice", "Withdrawal 1: 1.000 STEEM to @rcpt", PAY);
   f.vote("alice", id, true);
   const profile = '{"profile":{"name":"Alice <3","about":"a & b","z":1,"a":[1, 2]}}';
   const { raw, ballot } = parseMetadata(profile);
@@ -93,17 +93,17 @@ test("ballot prune", () => {
 
 test("view statuses and tallies", () => {
   const f = new Fixture();
-  const open = f.propose("alice", "open", [PAY]);
+  const open = f.propose("alice", "open", PAY);
   for (const m of ["alice", "carol", "dave"]) f.vote(m, open, true);
-  const ready = f.propose("alice", "ready", [PAY], 57 * MIN);
+  const ready = f.propose("alice", "ready", PAY, 57 * MIN);
   f.vote("alice", ready, true);
   f.vote("bob", ready, true);
-  const margin = f.propose("bob", "deny at the margin", [PAY], 56 * MIN);
+  const margin = f.propose("bob", "deny at the margin", PAY, 56 * MIN);
   f.vote("carol", margin, false);
   f.vote("dave", margin, false);
-  const rejected = f.propose("bob", "rejected", [PAY], 55 * MIN);
+  const rejected = f.propose("bob", "rejected", PAY, 55 * MIN);
   f.vote("bob", rejected, false);
-  const executed = f.propose("carol", "executed", [PAY], 54 * MIN);
+  const executed = f.propose("carol", "executed", PAY, 54 * MIN);
   f.hist.executed[executed] = f.props.time;
   let v = f.view();
   assert.deepEqual(Object.fromEntries(v.proposals.map((p) => [p.id, p.status])),
@@ -117,13 +117,13 @@ test("view statuses and tallies", () => {
 
 test("view verification", () => {
   const f = new Fixture();
-  const good = f.propose("alice", "good", [PAY]);
+  const good = f.propose("alice", "good", PAY);
   f.vote("alice", good, true);
   f.vote("bob", good, true, "dave");
-  const forged = f.propose("alice", "forged", [PAY], 50 * MIN);
+  const forged = f.propose("alice", "forged", PAY, 50 * MIN);
   f.ballots.get("alice")!.props.set("0".repeat(40), f.stored(forged));
   f.ballots.get("alice")!.props.delete(forged);
-  f.propose("mallory", "outsider", [PAY], 49 * MIN);
+  f.propose("mallory", "outsider", PAY, 49 * MIN);
   f.propose("alice", "other account", [transferOp("rcpt", "1.000 STEEM", "x", "alice")], 48 * MIN);
   const v = f.view();
   assert.deepEqual(v.proposals.map((p) => p.id), [good]);
@@ -142,7 +142,7 @@ test("minimal signatures", () => {
   ];
   for (const [approve, want] of cases) {
     const f = new Fixture();
-    const id = f.propose("alice", "p", [PAY]);
+    const id = f.propose("alice", "p", PAY);
     for (const m of approve) f.vote(m, id, true);
     const v = f.view();
     const p = f.find(v, id);
@@ -156,45 +156,51 @@ test("journal", () => {
   const dir = tmp();
   const j = ApprovalJournal.load(dir);
   const f = new Fixture();
-  const a = f.propose("alice", "A", [PAY]);
+  const a = f.propose("alice", "A", PAY);
   j.record(a, f.stored(a).tx);
   j.save(dir);
   const j2 = ApprovalJournal.load(dir);
-  assert.equal(j2.approvals[a].subject, "transfer:svm-withdrawal 1");
-  assert.ok(j2.conflicts("transfer:svm-withdrawal 1", "other", NOW));
-  assert.ok(!j2.conflicts("transfer:svm-withdrawal 1", a, NOW));
-  assert.ok(!j2.conflicts("transfer:svm-withdrawal 2", "other", NOW));
-  assert.ok(!j2.conflicts("transfer:svm-withdrawal 1", "other", NOW + 58 * MIN));
+  assert.equal(j2.approvals[a].subject, "withdrawal:1");
+  assert.ok(j2.conflicts("withdrawal:1", "other", NOW));
+  assert.ok(!j2.conflicts("withdrawal:1", a, NOW));
+  assert.ok(!j2.conflicts("withdrawal:2", "other", NOW));
+  assert.ok(!j2.conflicts("withdrawal:1", "other", NOW + 58 * MIN));
   j2.prune(NOW + 58 * MIN + 72 * 3600_000 + 1000);
   assert.deepEqual(j2.approvals, {});
   fs.writeFileSync(path.join(dir, "svm_bank_approvals.json"), "{corrupt");
   assert.throws(() => ApprovalJournal.load(dir));
   // The file the Go and Python clients write.
   fs.writeFileSync(path.join(dir, "svm_bank_approvals.json"),
-    `{"approvals":{"abc":{"subject":"transfer:svm-withdrawal 3","expiration":"${ts(NOW + 5 * MIN)}"}}}`);
-  assert.ok(ApprovalJournal.load(dir).conflicts("transfer:svm-withdrawal 3", "x", NOW));
+    `{"approvals":{"abc":{"subject":"withdrawal:3","expiration":"${ts(NOW + 5 * MIN)}"}}}`);
+  assert.ok(ApprovalJournal.load(dir).conflicts("withdrawal:3", "x", NOW));
 });
 
-test("withdrawal memos", () => {
-  for (const [memo, id] of [["svm-withdrawal 0", 0n], ["svm-withdrawal 7", 7n], ["svm-withdrawal 18446744073709551615", 18446744073709551615n]] as const) {
-    assert.equal(parseWithdrawalMemo(memo), id);
-    assert.equal(withdrawalMemo(id), memo);
+const linkOf = (json: string, requiredAuths = [BANK], requiredPostingAuths: string[] = [], id = PAYOUT_LINK_ID): tx.CustomJSON =>
+  ({ kind: "custom_json", requiredAuths, requiredPostingAuths, id, json });
+const linkBody = (id: number) => ({ required_auths: [BANK], required_posting_auths: [], id: PAYOUT_LINK_ID, json: payoutLinkJson(BigInt(id)) });
+
+test("payout links", () => {
+  for (const id of [0n, 7n, 18446744073709551615n]) assert.equal(parsePayoutLink(linkOf(payoutLinkJson(id)), BANK), id);
+  for (const body of ['{"withdrawal_id":"07"}', '{"withdrawal_id":7}', '{"withdrawal_id":"+7"}', '{"withdrawal_id":"-1"}', '{"withdrawal_id":"0x7"}',
+    '{"withdrawal_id":""}', '{ "withdrawal_id":"7"}', '{"withdrawal_id":"7"} ', '{"withdrawal_id":"7","x":1}', '{"id":"7"}',
+    '{"withdrawal_id":"18446744073709551616"}', '{"withdrawal_id":"٧"}', "svm-withdrawal 7", ""]) {
+    assert.equal(parsePayoutLink(linkOf(body), BANK), undefined, body);
   }
-  for (const memo of ["svm-withdrawal 07", "svm-withdrawal +7", "svm-withdrawal 7 ", " svm-withdrawal 7", "svm-withdrawal  7", "svm-withdrawal",
-    "svm-withdrawal ", "svm-withdraw 7", "SVM-WITHDRAWAL 7", "svm-withdrawal 0x7", "svm-withdrawal 18446744073709551616", "svm-withdrawal -1",
-    "svm-withdrawal 7\n", "svm-withdrawal ٧"]) {
-    assert.equal(parseWithdrawalMemo(memo), undefined, memo);
-  }
-  assert.equal(paidMemoId("  svm-withdrawal   9 "), 9n);
-  assert.equal(paidMemoId("svm-withdrawal x"), undefined);
+  const ok = payoutLinkJson(7n);
+  assert.equal(parsePayoutLink(linkOf(ok, [BANK], [], "other"), BANK), undefined);
+  assert.equal(parsePayoutLink(linkOf(ok, ["alice"]), BANK), undefined);
+  assert.equal(parsePayoutLink(linkOf(ok, [], [BANK]), BANK), undefined);
+  assert.equal(parsePayoutLink(linkOf(ok, [BANK, "alice"]), BANK), undefined);
+  assert.equal(parsePayoutLink(linkOf(ok, [BANK], ["alice"]), BANK), undefined);
 });
 
 test("history apply and sync paging", async () => {
   const node = new FakeSteem();
   for (let i = 0; i < 250; i++) {
-    node.addHistory(BANK, `trx${String(i).padStart(3, "0")}`, ts(NOW), "transfer", { from: BANK, to: "rcpt", amount: "1.000 STEEM", memo: withdrawalMemo(BigInt(i)) });
+    node.addHistory(BANK, `trx${String(i).padStart(3, "0")}`, ts(NOW), "custom_json", linkBody(i));
   }
-  node.addHistory(BANK, "dep", ts(NOW), "transfer", { from: "user", to: BANK, amount: "1.000 STEEM", memo: "svm-withdrawal 999" });
+  // A memo is the user's own text: it never marks a withdrawal paid.
+  node.addHistory(BANK, "dep", ts(NOW), "transfer", { from: BANK, to: "rcpt", amount: "1.000 STEEM", memo: "svm-withdrawal 999" });
   node.addHistory(BANK, "own", ts(NOW), "account_update", { account: BANK, owner: bankAuthority().toJSON() });
   const h = new HistoryIndex();
   await h.sync(node, BANK, 110000000, NOW);
@@ -203,7 +209,7 @@ test("history apply and sync paging", async () => {
   assert.equal(h.paid["249"], "trx249");
   assert.ok(!h.isPaid(999n));
   assert.equal(h.lastOwnerChange, ts(NOW));
-  node.addHistory(BANK, "trx250", ts(NOW), "transfer", { from: BANK, to: "rcpt", amount: "1.000 STEEM", memo: "svm-withdrawal 250" });
+  node.addHistory(BANK, "trx250", ts(NOW), "custom_json", linkBody(250));
   node.starts = [];
   await h.sync(node, BANK, 110000001, NOW);
   assert.equal(h.nextSeq as number, 253);

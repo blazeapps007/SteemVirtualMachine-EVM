@@ -1,6 +1,7 @@
 package types
 
 import (
+	"unicode"
 	"unicode/utf8"
 
 	errortypes "github.com/cosmos/cosmos-sdk/types/errors"
@@ -14,20 +15,42 @@ import (
 // honest submission:
 //
 //   - MaxMemoBytes mirrors Steem's own 2048-byte transfer-memo cap, so any
-//     memo that actually rode in on a Steem transfer fits. It also bounds the
-//     bridge-out memo, which is relayed back to Steem as a transfer memo.
+//     memo that actually rode in on a Steem transfer fits.
+//   - MaxWithdrawalMemoBytes bounds the memo a user gives when bridging out. It
+//     is copied onto the Steem payout and into the multisig proposal in the
+//     proposing validator's account metadata, so a long one would let a user
+//     crowd out other withdrawals' proposals. Exchange deposit memos fit easily.
 //   - MaxSteemTimestampBytes covers Steem's ISO-8601 block timestamp
 //     ("2006-01-02T15:04:05", 19 chars) with ample slack.
 //   - MaxSteemTxidBytes/op-index are already pinned by the txid regex and the
 //     uint32 type; no separate limit is needed for them.
 const (
 	MaxMemoBytes           = 2048
+	MaxWithdrawalMemoBytes = 256
 	MaxSteemTimestampBytes = 64
 )
 
+// ValidateWithdrawalMemo checks the memo a user gives when bridging out, which
+// the Steem payout carries unchanged. Control characters are refused: nothing
+// legitimate needs them, and they could disguise the memo in wallets and logs.
+// An empty memo is allowed.
+func ValidateWithdrawalMemo(memo string) error {
+	if err := ValidateMemo(memo); err != nil {
+		return err
+	}
+	if len(memo) > MaxWithdrawalMemoBytes {
+		return errortypes.ErrInvalidRequest.Wrapf("memo is %d bytes, over the %d-byte limit", len(memo), MaxWithdrawalMemoBytes)
+	}
+	for _, r := range memo {
+		if unicode.IsControl(r) {
+			return errortypes.ErrInvalidRequest.Wrap("memo contains a control character")
+		}
+	}
+	return nil
+}
+
 // ValidateMemo bounds a free-form memo field and requires valid UTF-8 (the
-// field is persisted and re-emitted in events and, for bridge-out, relayed to
-// Steem). An empty memo is allowed.
+// field is persisted and re-emitted in events). An empty memo is allowed.
 func ValidateMemo(memo string) error {
 	if len(memo) > MaxMemoBytes {
 		return errortypes.ErrInvalidRequest.Wrapf("memo is %d bytes, over the %d-byte limit", len(memo), MaxMemoBytes)

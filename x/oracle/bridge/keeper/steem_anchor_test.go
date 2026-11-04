@@ -93,7 +93,7 @@ func TestSteemAnchor_RejectsPayoutsBeforeTheAnchor(t *testing.T) {
 
 	old := &types.MsgAttestWithdrawalPayout{
 		Validator: v.AccAddr, WithdrawalId: 0, SteemTxid: strings.Repeat("5", 40),
-		AmountMillisteem: 1000, SteemBlock: anchorBlock - 1, SteemTimestamp: "2026-10-01T00:00:00",
+		DestinationSteemAccount: "alice", AmountMillisteem: 1000, SteemBlock: anchorBlock - 1, SteemTimestamp: "2026-10-01T00:00:00",
 	}
 	_, err = ms.AttestWithdrawalPayout(f.ctx, old)
 	require.ErrorIs(t, err, types.ErrSteemBlockBeforeAnchor)

@@ -12,7 +12,11 @@
 #      mnemonic to a root-only file (validator-mnemonic.txt) for you to back
 #      up — or, with --import-mnemonic, imports an existing one instead;
 #   3. builds genesis.json: parameters from Instructions/genesis-params.json,
-#      the anchor, the validator's Steem name link, the allocation, the gentx;
+#      the anchor, the validator's Steem name link, the allocation, the gentx.
+#      The allocation is backed: there is no pre-mint. Before running this, send
+#      exactly ALLOC_STEEM STEEM from @MONIKER to svm.bank. The script finds that
+#      transfer on Steem below the anchor (so it can never be credited as a
+#      deposit too), and records the allocation as bridged in;
 #   4. starts the node and the oracle — bridge relay, price feed and the
 #      svm.bank multisig signer, live, with @MONIKER's Steem ACTIVE key (asked
 #      up front, verified by the signer against the account) — and verifies
@@ -39,7 +43,9 @@
 #   CHAIN_ID [steemvm-2]   MONIKER [asked]  the genesis validator's Steem username (its moniker)
 #   MNEMONIC_FILE [validator-mnemonic.txt]   where a new key's mnemonic is saved
 #   EXPECTED_ADDRESS [""]  with --import-mnemonic: refuse if the key's address differs
-#   ALLOC_STEEM [1000000]  ALLOC_SBD [1000000]  SELF_STAKE_STEEM [100000]
+#   ALLOC_STEEM [250]  ALLOC_SBD [0]  SELF_STAKE_STEEM [240]
+#   UNBACKED_GENESIS [0]   1 = TESTNET ONLY: skip the funding check. The allocation
+#                          can then be spent on the chain but not bridged out.
 #   COMMISSION_RATE [0.10]  COMMISSION_MAX_RATE [0.20]  COMMISSION_MAX_CHANGE_RATE [0.01]
 #   STEEM_RPC [https://api.steemit.com]   PUBLIC_IP [detected]
 #   STEEMVM_HOME [$HOME/.steemvm]         STEEMVM_IMAGE [steemblazer/steemvmd:v<VERSION>]
@@ -57,9 +63,10 @@ CHAIN_ID="${CHAIN_ID:-steemvm-2}"
 MONIKER="${MONIKER:-}"
 EXPECTED_ADDRESS="${EXPECTED_ADDRESS:-}"
 MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}"
-ALLOC_STEEM="${ALLOC_STEEM:-1000000}"
-ALLOC_SBD="${ALLOC_SBD:-1000000}"
-SELF_STAKE_STEEM="${SELF_STAKE_STEEM:-100000}"
+ALLOC_STEEM="${ALLOC_STEEM:-250}"
+ALLOC_SBD="${ALLOC_SBD:-0}"
+SELF_STAKE_STEEM="${SELF_STAKE_STEEM:-240}"
+UNBACKED_GENESIS="${UNBACKED_GENESIS:-0}"
 COMMISSION_RATE="${COMMISSION_RATE:-0.10}"
 COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
 COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
@@ -100,7 +107,11 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # Whole-STEEM amounts → 18-decimal base units, as exact strings (no floats).
 whole() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || die "$2 must be a whole number, got '$1'"; printf '%s000000000000000000' "$1"; }
 ALLOC_ASTEEM="$(whole "$ALLOC_STEEM" ALLOC_STEEM)"
-ALLOC_ASBD="$(whole "$ALLOC_SBD" ALLOC_SBD)"
+ALLOC_ASBD=""
+if [ "$ALLOC_SBD" != "0" ]; then
+  ALLOC_ASBD="$(whole "$ALLOC_SBD" ALLOC_SBD)"
+  [ "$UNBACKED_GENESIS" = "1" ] || die "ALLOC_SBD must be 0: only the STEEM allocation is backed by a transfer to svm.bank."
+fi
 STAKE_ASTEEM="$(whole "$SELF_STAKE_STEEM" SELF_STAKE_STEEM)"
 [ "$SELF_STAKE_STEEM" -lt "$ALLOC_STEEM" ] || die "SELF_STAKE_STEEM must be less than ALLOC_STEEM (the gentx fee comes from the same balance)."
 
@@ -180,6 +191,28 @@ ANCHOR_ID="$(steem condenser_api.get_block "[$ANCHOR_BLOCK]" | jq -r '.result.bl
 [ "${ANCHOR_ID:0:8}" = "$(printf '%08x' "$ANCHOR_BLOCK")" ] || die "Steem block ID $ANCHOR_ID does not start with block $ANCHOR_BLOCK — refusing a bad anchor."
 ok "Steem anchor: block $ANCHOR_BLOCK, ID $ANCHOR_ID"
 
+# No pre-mint: every genesis coin must already be in svm.bank. The transfer must
+# be below the anchor, because the chain accepts Steem history from the anchor on
+# and could otherwise credit it as a deposit too.
+if [ "$UNBACKED_GENESIS" = "1" ]; then
+  warn "UNBACKED_GENESIS=1: this genesis is NOT backed by STEEM in svm.bank. Testnet only."
+  GENESIS_MINTED="0"
+  BACKING="none (UNBACKED_GENESIS=1, testnet only)"
+else
+  log "Looking for the funding transfer: $ALLOC_STEEM.000 STEEM from @$MONIKER to @$GATEWAY…"
+  FUNDING_TRX="$(steem condenser_api.get_account_history "[\"$GATEWAY\",-1,100]" | jq -r \
+    --arg from "$MONIKER" --arg to "$GATEWAY" --arg amount "$ALLOC_STEEM.000 STEEM" --argjson anchor "$ANCHOR_BLOCK" '
+      [.result[]?[1] | select(.op[0] == "transfer" and .op[1].from == $from and .op[1].to == $to
+        and .op[1].amount == $amount and .block < $anchor)] | last | .trx_id // empty')"
+  [ -n "$FUNDING_TRX" ] || die "no transfer of exactly $ALLOC_STEEM.000 STEEM from @$MONIKER to @$GATEWAY in Steem's irreversible history. Send it, wait about a minute, and run this again. Nothing was created."
+  GATEWAY_BALANCE="$(steem condenser_api.get_accounts "[[\"$GATEWAY\"]]" | jq -r '.result[0].balance // empty')"
+  awk -v b="${GATEWAY_BALANCE%% *}" -v a="$ALLOC_STEEM" 'BEGIN{exit !(b+0 >= a+0)}' \
+    || die "@$GATEWAY holds only '$GATEWAY_BALANCE', less than the $ALLOC_STEEM STEEM genesis allocation. Nothing was created."
+  ok "Funding transfer found: $FUNDING_TRX (@$GATEWAY holds $GATEWAY_BALANCE)."
+  GENESIS_MINTED="$ALLOC_ASTEEM"
+  BACKING="$ALLOC_STEEM STEEM in @$GATEWAY (trx $FUNDING_TRX)"
+fi
+
 PUBLIC_IP="${PUBLIC_IP:-$(curl -fsS -m 10 https://api.ipify.org 2>/dev/null || true)}"
 [[ "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "could not detect this VPS's public IPv4 — set PUBLIC_IP=x.x.x.x"
 
@@ -194,6 +227,7 @@ cat <<EOF
   New chain        $CHAIN_ID (EVM chain-id from the binary)
   Genesis validator @$MONIKER  self-stake $SELF_STAKE_STEEM STEEM
   Allocation        $ALLOC_STEEM STEEM + $ALLOC_SBD SBD to @$MONIKER's account
+  Backed by         $BACKING
   Steem anchor      block $ANCHOR_BLOCK  $ANCHOR_ID
   Public address    $PUBLIC_IP:26656
   Node home         $STEEMVM_HOME
@@ -306,9 +340,10 @@ log "Writing genesis parameters, the Steem anchor and @$MONIKER's name link…"
 TMP="$(mktemp)"
 jq --slurpfile p Instructions/genesis-params.json \
    --arg acct "$MONIKER" --arg addr "$ADDRESS" --arg gw "$GATEWAY" \
-   --arg blk "$ANCHOR_BLOCK" --arg bid "$ANCHOR_ID" '
+   --arg blk "$ANCHOR_BLOCK" --arg bid "$ANCHOR_ID" --arg minted "$GENESIS_MINTED" '
   .app_state = (.app_state * $p[0].app_state)
   | .consensus = (.consensus * $p[0].consensus)
+  | .app_state.steembridge.total_minted_asteem = $minted
   | .app_state.steembridge.params.relayer_start_block = $blk
   | .app_state.steembridge.params.relayer_start_block_id = $bid
   | .app_state.steembridge.name_registration_count = "1"
@@ -324,7 +359,9 @@ jq --slurpfile p Instructions/genesis-params.json \
 ' "$G" > "$TMP" && mv "$TMP" "$G"
 
 log "Funding @$MONIKER and creating the gentx…"
-sv genesis add-genesis-account "$ADDRESS" "${ALLOC_ASBD}asbd,${ALLOC_ASTEEM}asteem" --keyring-backend "$KEYRING" >/dev/null
+GENESIS_COINS="${ALLOC_ASTEEM}asteem"
+[ -z "$ALLOC_ASBD" ] || GENESIS_COINS="${ALLOC_ASBD}asbd,$GENESIS_COINS"
+sv genesis add-genesis-account "$ADDRESS" "$GENESIS_COINS" --keyring-backend "$KEYRING" >/dev/null
 sv genesis gentx "$MONIKER" "${STAKE_ASTEEM}asteem" --chain-id "$CHAIN_ID" \
   --moniker "$MONIKER" --details "$DETAILS" --ip "$PUBLIC_IP" \
   --commission-rate "$COMMISSION_RATE" --commission-max-rate "$COMMISSION_MAX_RATE" \

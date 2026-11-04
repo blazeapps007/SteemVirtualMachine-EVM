@@ -33,7 +33,7 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 		return nil, types.ErrBridgeOutDisabled
 	}
 
-	if err := types.ValidateSteemAccountName(msg.DestinationSteemAccount); err != nil {
+	if err := types.ValidateWithdrawalDestination(msg.DestinationSteemAccount); err != nil {
 		return nil, err
 	}
 
@@ -41,7 +41,7 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 	// bridgeOut precompile (precompiles/steembridge) calls this msg server
 	// directly, so it never passes through the ante handler's
 	// ValidateBasicDecorator.
-	if err := types.ValidateMemo(msg.Memo); err != nil {
+	if err := types.ValidateWithdrawalMemo(msg.Memo); err != nil {
 		return nil, err
 	}
 	if msg.AmountAsteem.IsNil() || !msg.AmountAsteem.IsPositive() {
@@ -68,6 +68,21 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 	netAsteem := types.MillisteemToAsteem(netMilli)
 	feeAsteem := types.MillisteemToAsteem(feeMilli)
 
+	// Never owe more STEEM or SBD than came in: coins that weren't bridged in (a
+	// mistaken genesis allocation, inflation switched on by governance, a minting
+	// bug) must not be able to take depositors' funds out of the gateway.
+	totals, err := k.Totals.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	minted, burned := totals.TotalMintedAsteem, totals.TotalBurnedAsteem
+	if msg.Asset == types.BridgeAsset_BRIDGE_ASSET_SBD {
+		minted, burned = totals.TotalMintedAsbd, totals.TotalBurnedAsbd
+	}
+	if burned.Add(netAsteem).GT(minted) {
+		return nil, errorsmod.Wrapf(types.ErrExceedsBridgedAmount, "%s %s bridged in, %s already bridged out, %s requested", minted, denom, burned, netAsteem)
+	}
+
 	// Net -> STEEMBLACKHOLE (burned by the EndBlock sweep, the app's sole burn
 	// point); fee -> bridge_reward (100% staking reward, §4b). Together they remove
 	// the full amount from the sender.
@@ -82,10 +97,6 @@ func (k msgServer) BridgeOut(ctx context.Context, msg *types.MsgBridgeOut) (*typ
 		}
 	}
 
-	totals, err := k.Totals.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if msg.Asset == types.BridgeAsset_BRIDGE_ASSET_SBD {
 		totals.TotalBurnedAsbd = totals.TotalBurnedAsbd.Add(netAsteem)
 	} else {

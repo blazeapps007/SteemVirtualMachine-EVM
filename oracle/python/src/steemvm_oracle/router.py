@@ -128,8 +128,8 @@ def build_transfer_any(transfer: Transfer, intent: Intent, validator_address: st
 
 
 def build_payout_any(payout: Payout, validator_address: str):
-    # amount_millisteem/asset are what was ACTUALLY observed paid out on
-    # Steem, not the expected value from the Withdrawal record -- the chain
+    # The recipient, memo, amount and asset are what was ACTUALLY observed on
+    # Steem, not the expected values from the Withdrawal record -- the chain
     # independently compares the two, so echoing the expected value back
     # would defeat the check. See Payout's docstring in steem_client.py.
     msg = steembridge_tx_pb2.MsgAttestWithdrawalPayout(
@@ -141,5 +141,7 @@ def build_payout_any(payout: Payout, validator_address: str):
         steem_timestamp=payout.steem_timestamp,
         amount_millisteem=payout.amount_millisteem,
         asset=_ASSET_MAP[payout.asset],
+        destination_steem_account=payout.destination,
+        memo=payout.memo,
     )
     return pack_any(TYPE_URL_ATTEST_WITHDRAWAL_PAYOUT, msg)

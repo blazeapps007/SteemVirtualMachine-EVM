@@ -8,17 +8,26 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { PRUNE_AFTER_MS } from "./ballot";
-import { atomicWrite } from "./chain";
+import { atomicWrite, payoutOf } from "./chain";
 import * as tx from "./steemTx";
 
 export const JOURNAL_FILE = "svm_bank_approvals.json";
 
 /** What a single-operation proposal acts on: two proposals with the same
  * subject must never both be approved while either can still execute. */
+/** The journal subject of a withdrawal's payouts. */
+export function payoutSubject(id: bigint): string {
+  return `withdrawal:${id}`;
+}
+
 export function subjectOf(t: tx.Transaction): string {
+  if (t.operations.length === 2) {
+    const first = t.operations[0];
+    const pay = first.kind === "transfer" ? payoutOf(t, first.from) : undefined;
+    return pay ? payoutSubject(pay[1]) : "";
+  }
   if (t.operations.length !== 1) return "";
   const op = t.operations[0];
-  if (op.kind === "transfer") return "transfer:" + op.memo;
   if (op.kind === "account_update") return "account_update:" + op.account;
   return "";
 }

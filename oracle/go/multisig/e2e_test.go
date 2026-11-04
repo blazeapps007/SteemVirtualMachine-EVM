@@ -176,8 +176,16 @@ func (n *fakeSteem) apply(tx steemtx.Transaction) (string, error) {
 	if err != nil || !n.now.Before(exp) || exp.Sub(n.now) > time.Hour {
 		return "", errors.New("transaction expiration out of range")
 	}
-	if len(tx.Operations) != 1 {
-		return "", errors.New("test node applies single-operation transactions only")
+	// One operation, or a transfer followed by a custom_json the same account
+	// signs, which is all the signers ever send.
+	if len(tx.Operations) == 2 {
+		t, isTransfer := tx.Operations[0].Value.(steemtx.Transfer)
+		c, isCustom := tx.Operations[1].Value.(steemtx.CustomJSON)
+		if !isTransfer || !isCustom || len(c.RequiredAuths) != 1 || c.RequiredAuths[0] != t.From || len(c.RequiredPostingAuths) != 0 {
+			return "", errors.New("test node: unsupported two-operation transaction")
+		}
+	} else if len(tx.Operations) != 1 {
+		return "", errors.New("test node applies one- or two-operation transactions only")
 	}
 	digest, _ := tx.Digest()
 	keys, used := map[string]bool{}, map[string]bool{}
@@ -254,8 +262,10 @@ func (n *fakeSteem) apply(tx steemtx.Transaction) (string, error) {
 		acc.MemoKey = op.MemoKey
 	}
 	n.seen[id] = true
-	h := histEntry(id, n.now.Format(steemtx.TimeLayout), tx.Operations[0].Type, tx.Operations[0].Value)
-	n.history[account] = append(n.history[account], h)
+	for _, op := range tx.Operations {
+		h := histEntry(id, n.now.Format(steemtx.TimeLayout), op.Type, op.Value)
+		n.history[account] = append(n.history[account], h)
+	}
 	return id, nil
 }
 
@@ -347,7 +357,9 @@ func (nw *network) rounds(k int) {
 
 func TestSignersPayWithdrawalsExactlyOnce(t *testing.T) {
 	nw := newNetwork(t)
-	nw.svm.all[6] = Withdrawal{ID: 6, Destination: "rcpt", AmountMilli: 12345, Symbol: "STEEM", CreatedAt: 90000, Status: "REQUESTED"}
+	// Withdrawal 6 asks for a memo that looks like a link to 9: it must reach
+	// Steem unchanged and do nothing to 9.
+	nw.svm.all[6] = Withdrawal{ID: 6, Destination: "rcpt", AmountMilli: 12345, Symbol: "STEEM", Memo: "svm-withdrawal 9", CreatedAt: 90000, Status: "REQUESTED"}
 	nw.svm.all[9] = Withdrawal{ID: 9, Destination: "rcpt", AmountMilli: 2500, Symbol: "SBD", CreatedAt: 95000, Status: "REQUESTED"}
 	// Too close to its automatic refund: must never be paid.
 	nw.svm.all[3] = Withdrawal{ID: 3, Destination: "rcpt", AmountMilli: 1000, Symbol: "STEEM", CreatedAt: 100000 + 14400 - 50400 - 1, Status: "REQUESTED"}
@@ -358,8 +370,8 @@ func TestSignersPayWithdrawalsExactlyOnce(t *testing.T) {
 		t.Fatalf("the node rejected broadcasts: %v", n.rejected)
 	}
 	want := map[string]steemtx.Transfer{
-		"svm-withdrawal 6": {From: testBank, To: "rcpt", Amount: "12.345 STEEM", Memo: "svm-withdrawal 6"},
-		"svm-withdrawal 9": {From: testBank, To: "rcpt", Amount: "2.500 SBD", Memo: "svm-withdrawal 9"},
+		"svm-withdrawal 9": {From: testBank, To: "rcpt", Amount: "12.345 STEEM", Memo: "svm-withdrawal 9"},
+		"":                 {From: testBank, To: "rcpt", Amount: "2.500 SBD"},
 	}
 	if len(n.transfers) != len(want) {
 		t.Fatalf("executed %d transfers %+v, want %d", len(n.transfers), n.transfers, len(want))

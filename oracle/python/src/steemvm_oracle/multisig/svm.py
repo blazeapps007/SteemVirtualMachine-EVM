@@ -30,6 +30,7 @@ def _withdrawal(w: dict) -> Withdrawal:
         symbol="SBD" if w.get("asset") in ("BRIDGE_ASSET_SBD", 1) else "STEEM",
         created_at=int(w.get("created_at", 0)),
         status=str(w.get("status") or "WITHDRAWAL_STATUS_REQUESTED").removeprefix("WITHDRAWAL_STATUS_"),
+        memo=str(w.get("memo", "")),
     )
 
 

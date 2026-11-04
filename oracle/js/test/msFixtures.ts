@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2";
 
 import type { StakeEntry } from "../src/multisig/apportion";
 import { Ballot, type StoredProposal } from "../src/multisig/ballot";
-import { accountToJSON, HistoryIndex, newAccount, type Account } from "../src/multisig/chain";
+import { accountToJSON, HistoryIndex, newAccount, type Account, PAYOUT_LINK_ID, payoutOps } from "../src/multisig/chain";
 import { defaultPolicyConfig, Policy, type SVM, type SVMState, type Withdrawal } from "../src/multisig/policy";
 import * as tx from "../src/multisig/steemTx";
 import { buildView, type Proposal, type View } from "../src/multisig/view";
@@ -27,8 +27,11 @@ export const bankAuthority = (weights = WEIGHTS) => new tx.Authority(7500, weigh
 export const stakes = (o: Record<string, number>): StakeEntry[] => Object.entries(o).map(([account, t]) => ({ account, tokens: BigInt(t) }));
 export const ts = (ms: number) => tx.formatTime(ms);
 export const transferOp = (to: string, amount: string, memo: string, from = BANK): tx.Operation => ({ kind: "transfer", from, to, amount, memo });
-export const withdrawal = (id: number, destination: string, milli: number, symbol: string, createdAt: number, status = "REQUESTED"): Withdrawal =>
-  ({ id: BigInt(id), destination, amountMilli: BigInt(milli), symbol, createdAt: BigInt(createdAt), status });
+export const payOps = (id: number, to: string, amount: string, memo = ""): tx.Operation[] => payoutOps(BANK, to, amount, memo, BigInt(id));
+export const linkOp = (auth: string, body: string, linkId = PAYOUT_LINK_ID, posting: string[] = []): tx.Operation =>
+  ({ kind: "custom_json", requiredAuths: [auth], requiredPostingAuths: posting, id: linkId, json: body });
+export const withdrawal = (id: number, destination: string, milli: number, symbol: string, createdAt: number, status = "REQUESTED", memo = ""): Withdrawal =>
+  ({ id: BigInt(id), destination, amountMilli: BigInt(milli), symbol, createdAt: BigInt(createdAt), status, memo });
 
 export class FakeSVM implements SVM {
   height_ = 100000n;
@@ -212,7 +215,17 @@ export class FakeSteem implements tx.SteemRpc {
     if (this.seen.has(id)) throw new tx.ChainError("Duplicate transaction check failed");
     const exp = tx.parseTime(t.expiration);
     if (!(this.nowMs < exp) || exp - this.nowMs > 3600_000) throw new tx.ChainError("transaction expiration out of range");
-    if (t.operations.length !== 1) throw new tx.ChainError("test node applies single-operation transactions only");
+    // One operation, or a transfer followed by a custom_json the same account
+    // signs, which is all the signers ever send.
+    if (t.operations.length === 2) {
+      const [first, second] = t.operations;
+      if (first.kind !== "transfer" || second.kind !== "custom_json" || second.requiredAuths.length !== 1 ||
+        second.requiredAuths[0] !== first.from || second.requiredPostingAuths.length !== 0) {
+        throw new tx.ChainError("test node: unsupported two-operation transaction");
+      }
+    } else if (t.operations.length !== 1) {
+      throw new tx.ChainError("test node applies one- or two-operation transactions only");
+    }
     const digest = t.digest();
     const keys = new Set<string>();
     for (const s of t.signatures) {
@@ -260,7 +273,7 @@ export class FakeSteem implements tx.SteemRpc {
       acc!.memoKey = op.memoKey;
     }
     this.seen.add(id);
-    this.addHistory(account, id, ts(this.nowMs), op.kind, tx.opToJSON(op)[1]);
+    for (const o of t.operations) this.addHistory(account, id, ts(this.nowMs), o.kind, tx.opToJSON(o)[1]);
     return { id, block_num: this.head + 1 };
   }
 
