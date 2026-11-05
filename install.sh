@@ -8,7 +8,7 @@
 # It installs Docker (with the compose plugin), git, curl and jq, opens the p2p
 # port if ufw is active, clones this repository to /opt/steemvm, asks for your
 # Steem username and Steem ACTIVE private key, and then runs new-validator.sh
-# with those answers (CoinGecko prices, the public steemvm-2 RPC). The key is
+# with those answers (CoinGecko prices, the public SteemVM-Manaslu-81630 RPC). The key is
 # typed into this terminal only: it is never put on a command line and goes
 # nowhere but this server's oracle/.env (mode 600).
 #

@@ -86,8 +86,8 @@ under Docker at all.
 - **Already a validator on the previous chain (`steemvm`)? Run `./reset.sh`**
   from the repository root (or `./update.sh`, which hands over to it when the
   release moves to a new chain). It keeps your keys, address and
-  `oracle/.env`, moves the node to `steemvm-2` (its genesis, checked against
-  the network's; chain-id `steemvm-2`; EVM chain-id `81630`; state-sync from
+  `oracle/.env`, moves the node to `SteemVM-Manaslu-81630` (its genesis, checked against
+  the network's; chain-id `SteemVM-Manaslu-81630`; EVM chain-id `81630`; state-sync from
   `https://rpc.steemvmscan.com`), then rejoins as a validator: it asks for your
   Steem **active** key once (unless `oracle/.env` already has it), sends the
   0.001 STEEM name registration, confirms the name, waits until your address
@@ -282,7 +282,7 @@ only the address in the memo can do so.
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge confirm-name <registration-id> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 --fees 0asteem -y
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 --fees 0asteem -y
 ```
 
 Valid confirmations are **fee-exempt on the CLI path**, so `--fees 0asteem`
@@ -387,7 +387,7 @@ Field notes:
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd tx staking create-validator /workspace/validator.json \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -432,7 +432,7 @@ VALOPER=$(docker exec steemvm-node /root/go/bin/steemvmd keys show blazed007 --b
 docker exec -it steemvm-node /root/go/bin/steemvmd tx staking delegate \
   "$VALOPER" 5000000000000000000000asteem \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -536,7 +536,7 @@ docker compose logs -f oracle-go     # or oracle-python / oracle-js
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
   <txid> <op-index> <steem-block> <steem-timestamp> <steem-sender> <gateway-account> <amount-millisteem> <memo> <asset> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -547,7 +547,7 @@ sent `1000.000 STEEM` to the gateway with an EVM address as the memo:
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
   bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a BRIDGE_ASSET_STEEM \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -903,7 +903,7 @@ the halt as you can manage.
   cover `amount` + gas. Bridge in more (step 7).
 - **Validator jailed**: your node fell out of sync or was offline too long.
   Get it synced again, then unjail:
-  `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id steemvm-2 --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
+  `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
 
 **Faster resync via state-sync**
 

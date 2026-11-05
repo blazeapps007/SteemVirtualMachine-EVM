@@ -76,7 +76,7 @@ VALIDATOR_KEY="${VALIDATOR_KEY:-}"
 STEEM_USERNAME="${STEEM_USERNAME:-}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-}"
 
-# Public RPC of the steemvm-2 genesis node (nginx, TLS). Validators bind their
+# Public RPC of the SteemVM-Manaslu-81630 genesis node (nginx, TLS). Validators bind their
 # own RPC to 127.0.0.1 (docker-compose.yml), so they can't be a source.
 SEED_RPC="${SEED_RPC:-https://rpc.steemvmscan.com}"
 START_TIMEOUT="${START_TIMEOUT:-1800}"
@@ -165,10 +165,10 @@ done
 MIN_STATESYNC_HEIGHT=1500
 
 # Standing peers, always added to whatever $SEED_RPC resolves to: blaze.apps,
-# the steemvm-2 genesis node. Keep this to nodes known to run THIS launch — a
+# the SteemVM-Manaslu-81630 genesis node. Keep this to nodes known to run THIS launch — a
 # node of an earlier launch shares the chain-id and would be accepted. Add
 # validators as they join; space-separated "id@host:26656" entries.
-EXTRA_PERSISTENT_PEERS="c45b7eb5b59f2f86c270e0971df1f74ee1776348@62.169.19.142:26656"
+EXTRA_PERSISTENT_PEERS="11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656"
 
 fetch_statesync_trust() {
   TRUST_HEIGHT="" TRUST_HASH=""

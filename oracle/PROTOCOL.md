@@ -38,7 +38,7 @@ All three clients read the same `oracle/.env` (see `oracle/.env.example`).
 2. Build `AuthInfo{signer_infos: [{public_key: Any(ethsecp256k1.PubKey), mode_info: {single:
    {mode: SIGN_MODE_DIRECT}}, sequence}], fee: {amount, gas_limit, payer: "", granter: ""}}`.
 3. Serialize both to protobuf bytes: `body_bytes`, `auth_info_bytes`.
-4. Build `SignDoc{body_bytes, auth_info_bytes, chain_id: "steemvm-2", account_number}` and serialize
+4. Build `SignDoc{body_bytes, auth_info_bytes, chain_id: "SteemVM-Manaslu-81630", account_number}` and serialize
    it to protobuf bytes.
 5. Digest = `Keccak256(serialized SignDoc)`.
 6. Signature = ECDSA-sign the digest with the secp256k1 private key, go-ethereum style

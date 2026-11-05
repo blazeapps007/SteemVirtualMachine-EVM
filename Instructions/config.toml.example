@@ -214,7 +214,7 @@ external_address = ""
 seeds = ""
 
 # Comma separated list of nodes to keep persistent connections to
-persistent_peers = "c45b7eb5b59f2f86c270e0971df1f74ee1776348@62.169.19.142:26656"
+persistent_peers = "11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656"
 
 # Path to address book
 addr_book_file = "config/addrbook.json"
@@ -378,7 +378,7 @@ enable = false
 # genesis, just slower). Before your first start, set enable = true above and
 # fill trust_height/trust_hash from a recent block — see "Joining with
 # state-sync" in Instructions/README.md (reset.sh and new-validator.sh do this
-# for you). rpc_servers is pre-filled with the public steemvm-2 RPC, twice (the
+# for you). rpc_servers is pre-filled with the public SteemVM-Manaslu-81630 RPC, twice (the
 # light client wants two entries); put a second, different RPC as a witness if
 # you have one.
 rpc_servers = "https://rpc.steemvmscan.com:443,https://rpc.steemvmscan.com:443"

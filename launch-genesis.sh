@@ -40,7 +40,7 @@
 #   --yes              don't ask for confirmation before creating the chain
 #
 # Overridable via env (defaults in brackets):
-#   CHAIN_ID [steemvm-2]   MONIKER [asked]  the genesis validator's Steem username (its moniker)
+#   CHAIN_ID [SteemVM-Manaslu-81630]   MONIKER [asked]  the genesis validator's Steem username (its moniker)
 #   MNEMONIC_FILE [validator-mnemonic.txt]   where a new key's mnemonic is saved
 #   EXPECTED_ADDRESS [""]  with --import-mnemonic: refuse if the key's address differs
 #   ALLOC_STEEM [414]  ALLOC_SBD [0]  SELF_STAKE_STEEM [400]
@@ -59,7 +59,7 @@ fi
 set -euo pipefail
 
 # ── config ───────────────────────────────────────────────────────────────────
-CHAIN_ID="${CHAIN_ID:-steemvm-2}"
+CHAIN_ID="${CHAIN_ID:-SteemVM-Manaslu-81630}"
 MONIKER="${MONIKER:-}"
 EXPECTED_ADDRESS="${EXPECTED_ADDRESS:-}"
 MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}"

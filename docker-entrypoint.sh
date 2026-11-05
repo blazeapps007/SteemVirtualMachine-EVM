@@ -31,7 +31,7 @@ if [ ! -f /root/.steemvm/config/priv_validator_key.json ]; then
   # The chain-id comes from the network's own genesis, so it can never drift
   # from the genesis.json copied in below.
   CHAIN_ID="$(sed -n 's/^ *"chain_id": *"\([^"]*\)".*/\1/p' /workspace/Instructions/genesis.json | head -1)"
-  /root/go/bin/steemvmd init node --chain-id "${CHAIN_ID:-steemvm-2}" --home /root/.steemvm --overwrite
+  /root/go/bin/steemvmd init node --chain-id "${CHAIN_ID:-SteemVM-Manaslu-81630}" --home /root/.steemvm --overwrite
   if [ -f /root/.steemvm/config/genesis.json.staged ]; then
     mv /root/.steemvm/config/genesis.json.staged /root/.steemvm/config/genesis.json
   else

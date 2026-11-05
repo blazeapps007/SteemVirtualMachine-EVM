@@ -4,7 +4,7 @@
 # network's live node list, leaving this node itself out.
 #
 # Candidates come from:
-#   1. PEERS_RPC (the public steemvm-2 RPC): its own node (/status) and every
+#   1. PEERS_RPC (the public SteemVM-Manaslu-81630 RPC): its own node (/status) and every
 #      node it is connected to (/net_info) — so validators that join later are
 #      picked up without editing this script;
 #   2. NODE_IPS + KNOWN_PEERS, the standing list (used even when PEERS_RPC is
@@ -49,8 +49,8 @@ fi
 set -euo pipefail
 
 PEERS_RPC="${PEERS_RPC-https://rpc.steemvmscan.com}"
-NODE_IPS="${NODE_IPS:-62.169.19.142}"
-KNOWN_PEERS="${KNOWN_PEERS:-c45b7eb5b59f2f86c270e0971df1f74ee1776348@62.169.19.142:26656}"
+NODE_IPS="${NODE_IPS:-57.131.13.43}"
+KNOWN_PEERS="${KNOWN_PEERS:-11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656}"
 EXCLUDE_IPS="${EXCLUDE_IPS:-}"
 P2P_PORT="${P2P_PORT:-26656}"
 RPC_PORT="${RPC_PORT:-26657}"

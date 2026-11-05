@@ -26,7 +26,7 @@ providing a full Ethereum execution layer (JSON-RPC, ERC-20, EIP-1559 fee market
 
 | | |
 |---|---|
-| Cosmos chain ID | `steemvm-2` |
+| Cosmos chain ID | `SteemVM-Manaslu-81630` |
 | EVM chain ID | `81630` |
 | Address prefix | `steem` (e.g. `steem1…`, operators `steemvaloper1…`) |
 | Native denom | `asteem` — 18 decimals, atto-denominated (`1 STEEM = 10^18 asteem`) |

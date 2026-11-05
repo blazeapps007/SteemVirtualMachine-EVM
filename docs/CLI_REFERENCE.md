@@ -15,7 +15,7 @@ contradicts it; this document is the exhaustive module-by-module reference.
 
 ## Conventions used below
 
-- Chain-id: `steemvm-2`. EVM chain-id: `81630` (`0x13ede`). Bech32 prefix: `steem` (validator operator
+- Chain-id: `SteemVM-Manaslu-81630`. EVM chain-id: `81630` (`0x13ede`). Bech32 prefix: `steem` (validator operator
   addresses: `steemvaloper1...`; consensus addresses: `steemvalcons1...`). Base denom: `asteem` (18
   decimals, display `steem`). Bridged SBD denom: `asbd` (18 decimals, display `sbd`).
 - Every `tx` command below additionally accepts the standard Cosmos SDK tx flags

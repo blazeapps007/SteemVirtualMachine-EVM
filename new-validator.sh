@@ -6,6 +6,11 @@
 # -> new SteemVM key -> Steem name registration -> bridge in + stake -> create
 # validator -> start oracle.
 #
+# Default stake: 400 STEEM, from a 414 STEEM transfer to svm.bank that this script
+# sends with your active key once you confirm it. After the bridge's 0.25% fee,
+# the other 12.965 STEEM stays liquid for fees. You can stake more later; the
+# script prints the command when it finishes.
+#
 # Usage: ./new-validator.sh [--cleanup | --cleanup-full | --fix-config]
 #   --cleanup       wipes generated files + `docker compose down` (keeps node home/volumes)
 #   --cleanup-full  --cleanup plus wipes $STEEMVM_HOME and volumes (irreversible)
@@ -13,7 +18,7 @@
 #                    already-running validator, then restarts the node. Does NOT
 #                    touch keys/validator.json/mnemonic. Safe to run any time.
 #
-# Overridable via env: STAKE_AMOUNT, COMMISSION_RATE, COMMISSION_MAX_RATE,
+# Overridable via env: STAKE_AMOUNT, BRIDGE_STEEM, COMMISSION_RATE, COMMISSION_MAX_RATE,
 # COMMISSION_MAX_CHANGE_RATE, MIN_SELF_DELEGATION, GAS_PRICES, START_TIMEOUT,
 # FUND_TIMEOUT, NAME_TIMEOUT, ORACLE_PROFILE, FAUCET_URL
 #
@@ -44,11 +49,15 @@ BIN="${BIN:-/root/go/bin/steemvmd}"
 HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # must match docker-compose.yml's bind mount
 export STEEMVM_HOME
-CHAIN_ID="${CHAIN_ID:-steemvm-2}"
+CHAIN_ID="${CHAIN_ID:-SteemVM-Manaslu-81630}"
 KEYRING="${KEYRING:-test}"    # unencrypted, no prompts. Set KEYRING=file/os for a password-protected keyring.
 KEY_TYPE="${KEY_TYPE:-eth_secp256k1}"
 
-STAKE_AMOUNT="${STAKE_AMOUNT:-4000000000000000000000asteem}"   # 4000 STEEM
+STAKE_AMOUNT="${STAKE_AMOUNT:-400000000000000000000asteem}"   # 400 STEEM
+# Whole STEEM to bridge in: the stake + 14, which covers the 0.25% fee and leaves
+# some liquid for fees (400 -> 414).
+BRIDGE_STEEM="${BRIDGE_STEEM:-$(awk -v s="${STAKE_AMOUNT%asteem}" 'BEGIN{printf "%d", s / 1e18 + 14}')}"
+[[ "$BRIDGE_STEEM" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: BRIDGE_STEEM must be a whole number of STEEM, got '$BRIDGE_STEEM'." >&2; exit 1; }
 COMMISSION_RATE="${COMMISSION_RATE:-0.10}"
 COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
 COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
@@ -63,7 +72,7 @@ MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}"    # master recovery ph
 
 START_TIMEOUT="${START_TIMEOUT:-1800}"
 NAME_TIMEOUT="${NAME_TIMEOUT:-1800}"
-FUND_TIMEOUT="${FUND_TIMEOUT:-300}"
+FUND_TIMEOUT="${FUND_TIMEOUT:-1800}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -139,12 +148,12 @@ fetch_statesync_trust() {
   return 0
 }
 
-# Standing extra peers (blaze.apps, the steemvm-2 genesis node — only nodes
+# Standing extra peers (blaze.apps, the SteemVM-Manaslu-81630 genesis node — only nodes
 # known to run THIS launch: an earlier launch shares the chain-id), always
 # included alongside whatever $SEED_RPC resolves to. Space-separated
 # "id@host:26656" entries — add more here as validators join, or update an
 # entry if that node's identity/address ever changes.
-EXTRA_PERSISTENT_PEERS="c45b7eb5b59f2f86c270e0971df1f74ee1776348@62.169.19.142:26656"
+EXTRA_PERSISTENT_PEERS="11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656"
 
 # rpc_with_port: CometBFT's light client wants an explicit port.
 rpc_with_port() {
@@ -717,6 +726,8 @@ fi
 
 # ── 8. fund the stake + wait for balance ─────────────────────────────────────
 STAKE_NUM="${STAKE_AMOUNT%asteem}"   # awk, not [ -ge ]: these numbers exceed bash's 64-bit arithmetic
+# base units -> STEEM, for messages (whole amounts, as the stake is).
+steem_atoms() { awk -v a="$1" 'BEGIN{printf "%d", a / 1e18}'; }
 
 FUNDED=0
 if [ -n "$FAUCET_URL" ]; then
@@ -730,9 +741,46 @@ if [ -n "$FAUCET_URL" ]; then
   fi
 fi
 if [ "$FUNDED" = "0" ]; then
-  echo "  Bridge in your stake: send STEEM to 'svm.bank', memo EXACTLY your address: $ADDR"
-  echo "  The bridge keeps 0.25%, and 1 STEEM stays liquid for fees."
-  read -rp "Press ENTER once sent… " _unused < /dev/tty
+  DEPOSIT_MEMO="svm-deposit $ADDR"
+  BRIDGE_AMOUNT="$BRIDGE_STEEM.000 STEEM"
+  # Only a deposit from this chain's anchor on counts, so an earlier chain's is
+  # never mistaken for this one.
+  ANCHOR="$(kf query steembridge params --output json 2>/dev/null | jq -r '.params.relayer_start_block // "0"' 2>/dev/null || true)"
+  [[ "$ANCHOR" =~ ^[0-9]+$ ]] || ANCHOR=0
+  BRIDGE_SENT=0
+  if steem_memo_sent "$STEEM_USERNAME" "$DEPOSIT_MEMO" "$ANCHOR"; then
+    ok "The bridge transfer was already sent."
+    BRIDGE_SENT=1
+  else
+    echo
+    log "Your stake: bridge in $BRIDGE_AMOUNT. After the 0.25% bridge fee, $(steem_atoms "$STAKE_NUM") STEEM is staked and the rest stays liquid for fees."
+    read -rp "Send $BRIDGE_AMOUNT from @$STEEM_USERNAME to svm.bank now? [Y/n]: " SEND_BRIDGE < /dev/tty
+    case "$SEND_BRIDGE" in
+      [nN]*) ;;
+      *)
+        STEEM_BALANCE="$(curl -fsS -m 30 "$STEEM_RPC" -H 'Content-Type: application/json' \
+            -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"condenser_api.get_accounts\",\"params\":[[\"$STEEM_USERNAME\"]]}" 2>/dev/null \
+          | jq -r '.result[0].balance // empty' 2>/dev/null || true)"
+        if [ -z "$STEEM_BALANCE" ]; then
+          warn "could not read @$STEEM_USERNAME's balance, so nothing was sent."
+        elif ! awk -v b="${STEEM_BALANCE%% *}" -v a="$BRIDGE_STEEM" 'BEGIN{exit !(b+0 >= a+0)}'; then
+          warn "@$STEEM_USERNAME holds only $STEEM_BALANCE, less than $BRIDGE_AMOUNT, so nothing was sent."
+        else
+          log "Sending $BRIDGE_AMOUNT from @$STEEM_USERNAME to svm.bank (memo: $DEPOSIT_MEMO)…"
+          if TXID="$(steem_helper transfer "$STEEM_USERNAME" svm.bank "$BRIDGE_AMOUNT" "$DEPOSIT_MEMO")"; then
+            ok "Sent (Steem transaction $TXID)."
+            BRIDGE_SENT=1
+          else
+            warn "the automatic transfer failed. Check @$STEEM_USERNAME's history on Steem before sending again, so you don't pay twice."
+          fi
+        fi
+        ;;
+    esac
+  fi
+  if [ "$BRIDGE_SENT" = "0" ]; then
+    echo "  Bridge in your stake by hand: send $BRIDGE_AMOUNT from @$STEEM_USERNAME to 'svm.bank', memo EXACTLY: $DEPOSIT_MEMO"
+    read -rp "Press ENTER once sent… " _unused < /dev/tty
+  fi
 fi
 
 log "Waiting for balance (timeout ${FUND_TIMEOUT}s)…"
@@ -833,3 +881,6 @@ ok "All done. Confirm your validator bonded:"
 echo "    docker exec $CONTAINER $BIN query staking validator $VALOPER"
 echo "Watch your oracle:"
 echo "    $COMPOSE logs -f oracle-$ORACLE_PROFILE"
+echo "Stake more later: bridge STEEM in (send it to svm.bank, memo: svm-deposit $ADDR), keep about 1 STEEM liquid for fees, then:"
+echo "    docker exec -it $CONTAINER $BIN tx staking delegate $VALOPER <amount>asteem --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
+echo "    (<amount> has 18 decimals: 100 STEEM is 100000000000000000000asteem.)"

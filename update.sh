@@ -73,13 +73,13 @@ HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME_FROM_ENV="${STEEMVM_HOME:-}"   # set explicitly by the operator?
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"
 export STEEMVM_HOME
-CHAIN_ID="${CHAIN_ID:-steemvm-2}"
+CHAIN_ID="${CHAIN_ID:-SteemVM-Manaslu-81630}"
 KEYRING="${KEYRING:-}"   # default: keyring-backend in the node home's client.toml
 GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 VALIDATOR_KEY="${VALIDATOR_KEY:-}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-}"
 
-NODE_IPS="${NODE_IPS:-62.169.19.142}"
+NODE_IPS="${NODE_IPS:-57.131.13.43}"
 export NODE_IPS
 # Public CometBFT RPCs (full URLs) tried first for the state-sync trust anchor;
 # NODE_IPS' plain :RPC_PORT is only a fallback (validators keep RPC private).
