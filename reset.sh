@@ -168,7 +168,7 @@ MIN_STATESYNC_HEIGHT=1500
 # the SteemVM-Manaslu-81630 genesis node. Keep this to nodes known to run THIS launch — a
 # node of an earlier launch shares the chain-id and would be accepted. Add
 # validators as they join; space-separated "id@host:26656" entries.
-EXTRA_PERSISTENT_PEERS="11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656 69992c6fb7310fe8002b33b06bc8e9f4914dec09@45.151.123.214:26656"
+EXTRA_PERSISTENT_PEERS="11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656 69992c6fb7310fe8002b33b06bc8e9f4914dec09@45.151.123.214:26656 89af45e442585a00b8a2836680a9f8892497a70d@62.169.19.142:26656"
 
 fetch_statesync_trust() {
   TRUST_HEIGHT="" TRUST_HASH=""
