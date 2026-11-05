@@ -82,7 +82,7 @@ SEED_RPC="${SEED_RPC:-https://rpc.steemvmscan.com}"
 START_TIMEOUT="${START_TIMEOUT:-1800}"
 
 # Rejoin (new chain) settings — the same defaults as new-validator.sh.
-STAKE_AMOUNT="${STAKE_AMOUNT:-4000000000000000000000asteem}"   # 4000 STEEM
+STAKE_AMOUNT="${STAKE_AMOUNT:-400000000000000000000asteem}"   # 400 STEEM
 COMMISSION_RATE="${COMMISSION_RATE:-0.10}"
 COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
 COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
@@ -935,8 +935,9 @@ wait_for_stake() {
     fi
     echo
     warn "$ADDR needs $(steem_atoms "$need") STEEM on $TARGET_CHAIN for the stake (it holds $(steem_atoms "$bal"))."
-    echo "   Bridge STEEM from Steem (the bridge keeps 0.25%): send it from @$STEEM_USERNAME to"
+    echo "   Bridge STEEM from Steem: send $(awk -v s="$need" 'BEGIN{printf "%d", s / 1e18 + 14}').000 STEEM from @$STEEM_USERNAME to"
     echo "   svm.bank with memo EXACTLY:  $ADDR"
+    echo "   That covers the bridge's 0.25% fee and leaves some liquid for fees. Skip it if you already sent it."
     echo "   or ask an existing $TARGET_CHAIN validator to send it. (Smaller stake: STAKE_AMOUNT=<n>asteem ./reset.sh --rejoin-only)"
     log "Waiting for the balance (timeout ${FUND_TIMEOUT}s)…"
     local deadline=$(( $(date +%s) + FUND_TIMEOUT ))

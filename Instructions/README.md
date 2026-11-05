@@ -91,8 +91,8 @@ under Docker at all.
   `https://rpc.steemvmscan.com`), then rejoins as a validator: it asks for your
   Steem **active** key once (unless `oracle/.env` already has it), sends the
   0.001 STEEM name registration, confirms the name, waits until your address
-  holds the stake (bridge it in; `STAKE_AMOUNT`, default 4000
-  STEEM — it keeps 1 STEEM liquid for fees), creates
+  holds the stake (bridge it in; `STAKE_AMOUNT`, default 400
+  STEEM, from a 414 STEEM transfer — it keeps 1 STEEM liquid for fees), creates
   the validator and restarts your oracle on its latest image.
   `./reset.sh --rejoin-only` resumes after a funding timeout.
 - **Manual Docker Compose** — steps 1–10 below, one command at a time. Use
@@ -313,7 +313,10 @@ supersedes the old link.)
 Steem.** Before creating a validator, send STEEM from your Steem account to
 `svm.bank` with the `steem...` address from step 4 as the memo, exactly, and wait
 until it arrives. You need enough to cover the self-stake (the `amount` in step
-8), a little extra for gas, and the bridge's 0.25% fee. Check your balance with:
+8), a little extra for gas, and the bridge's 0.25% fee. `new-validator.sh` does
+this for you: by default it asks to send 414 STEEM and stakes 400, leaving about
+13 STEEM liquid. You can stake more later (see "Add more stake later" in step 9).
+Check your balance with:
 
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd query bank balances $(docker exec steemvm-node /root/go/bin/steemvmd keys show blazed007 -a --keyring-backend test --home /root/.steemvm)
