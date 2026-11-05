@@ -153,7 +153,7 @@ fetch_statesync_trust() {
 # included alongside whatever $SEED_RPC resolves to. Space-separated
 # "id@host:26656" entries — add more here as validators join, or update an
 # entry if that node's identity/address ever changes.
-EXTRA_PERSISTENT_PEERS="11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656"
+EXTRA_PERSISTENT_PEERS="11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656 69992c6fb7310fe8002b33b06bc8e9f4914dec09@45.151.123.214:26656"
 
 # rpc_with_port: CometBFT's light client wants an explicit port.
 rpc_with_port() {
