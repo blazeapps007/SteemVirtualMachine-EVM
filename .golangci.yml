@@ -1,0 +1,11 @@
+# Config for `make lint` (golangci-lint v1).
+issues:
+  exclude-rules:
+    # The app still has to use these Cosmos SDK APIs (AppModule, x/params,
+    # simulation flags, telemetry config). Replace them on an SDK upgrade.
+    - linters:
+        - staticcheck
+      text: "SA1019: .*github.com/cosmos/cosmos-sdk"
+  # Report everything, so a new problem can't hide behind a repeated one.
+  max-issues-per-linter: 0
+  max-same-issues: 0
