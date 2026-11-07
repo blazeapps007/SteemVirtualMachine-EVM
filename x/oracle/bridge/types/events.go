@@ -13,11 +13,10 @@ const (
 	EventTypeWithdrawalConfirmed         = "withdrawal_confirmed"
 	EventTypeWithdrawalPayoutMismatch    = "withdrawal_payout_mismatch"
 	// EventTypeWithdrawalPayoutAssetMismatch fires when a validator's
-	// MsgAttestWithdrawalPayout reports an observed amount/asset that doesn't
-	// match the Withdrawal record — a benign no-op for the tx (the
-	// confirmation isn't recorded, doesn't count toward the threshold), but a
-	// loud audit signal that a manually-relayed payout may have sent the
-	// wrong asset or amount.
+	// MsgAttestWithdrawalPayout reports an observed amount, asset, recipient or
+	// memo that doesn't match the Withdrawal record — a benign no-op for the tx
+	// (the confirmation isn't recorded, doesn't count toward the threshold), but
+	// a loud audit signal that a payout may have gone out wrong.
 	EventTypeWithdrawalPayoutAssetMismatch = "withdrawal_payout_asset_mismatch"
 	EventTypeWithdrawalProcessed           = "withdrawal_processed"
 	// EventTypeWithdrawalRefunded is emitted by the EndBlock timeout sweep
@@ -58,20 +57,22 @@ const (
 	AttributeKeyStoredTxid      = "stored_steem_txid"
 	AttributeKeySubmittedTxid   = "submitted_steem_txid"
 
-	AttributeKeyStoredSteemBlock    = "stored_steem_block"
-	AttributeKeySubmittedSteemBlock = "submitted_steem_block"
-	AttributeKeyStoredTimestamp     = "stored_steem_timestamp"
-	AttributeKeySubmittedTimestamp  = "submitted_steem_timestamp"
-	AttributeKeyStoredSender        = "stored_steem_sender"
-	AttributeKeySubmittedSender     = "submitted_steem_sender"
-	AttributeKeyStoredAmount        = "stored_amount_millisteem"
-	AttributeKeySubmittedAmount     = "submitted_amount_millisteem"
-	AttributeKeyStoredAsset         = "stored_asset"
-	AttributeKeySubmittedAsset      = "submitted_asset"
-	AttributeKeyStoredGateway       = "stored_gateway_account"
-	AttributeKeySubmittedGateway    = "submitted_gateway_account"
-	AttributeKeyStoredMemo          = "stored_memo"
-	AttributeKeySubmittedMemo       = "submitted_memo"
+	AttributeKeyStoredSteemBlock     = "stored_steem_block"
+	AttributeKeySubmittedSteemBlock  = "submitted_steem_block"
+	AttributeKeyStoredTimestamp      = "stored_steem_timestamp"
+	AttributeKeySubmittedTimestamp   = "submitted_steem_timestamp"
+	AttributeKeyStoredSender         = "stored_steem_sender"
+	AttributeKeySubmittedSender      = "submitted_steem_sender"
+	AttributeKeyStoredAmount         = "stored_amount_millisteem"
+	AttributeKeySubmittedAmount      = "submitted_amount_millisteem"
+	AttributeKeyStoredAsset          = "stored_asset"
+	AttributeKeySubmittedAsset       = "submitted_asset"
+	AttributeKeyStoredDestination    = "stored_destination"
+	AttributeKeySubmittedDestination = "submitted_destination"
+	AttributeKeyStoredGateway        = "stored_gateway_account"
+	AttributeKeySubmittedGateway     = "submitted_gateway_account"
+	AttributeKeyStoredMemo           = "stored_memo"
+	AttributeKeySubmittedMemo        = "submitted_memo"
 
 	AttributeKeyRegistrationID    = "registration_id"
 	AttributeKeySteemAccount      = "steem_account"

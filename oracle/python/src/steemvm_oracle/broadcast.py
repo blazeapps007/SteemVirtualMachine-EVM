@@ -79,12 +79,13 @@ class RestClient:
         acct = resp.json()["account"]
         return Account(account_number=int(acct["account_number"]), sequence=int(acct["sequence"]))
 
-    def get_json(self, path: str, params: dict | None = None) -> dict:
+    def get_json(self, path: str, params: dict | None = None, headers: dict | None = None) -> dict:
         """GET an arbitrary REST (gRPC-gateway) path and return its parsed
         JSON body. Raises NotFoundError for a "record doesn't exist" style
         response (see NotFoundError's docstring), otherwise raises on any
-        non-2xx status."""
-        resp = self._client.get(f"{self.base_url}{path}", params=params)
+        non-2xx status. A historical read passes
+        ``headers={"x-cosmos-block-height": "<height>"}``."""
+        resp = self._client.get(f"{self.base_url}{path}", params=params, headers=headers)
         if resp.status_code == 200:
             return resp.json()
         try:

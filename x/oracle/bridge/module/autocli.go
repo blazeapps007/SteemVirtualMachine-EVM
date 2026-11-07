@@ -155,9 +155,9 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod:      "AttestWithdrawalPayout",
-					Use:            "attest-withdrawal-payout [withdrawal-id] [steem-txid] [op-index] [steem-block] [steem-timestamp]",
+					Use:            "attest-withdrawal-payout [withdrawal-id] [steem-txid] [op-index] [steem-block] [steem-timestamp] [destination-steem-account] [memo]",
 					Short:          "Attest a Steem bridge-out payout (bonded validators only)",
-					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "withdrawal_id"}, {ProtoField: "steem_txid"}, {ProtoField: "op_index"}, {ProtoField: "steem_block"}, {ProtoField: "steem_timestamp"}},
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "withdrawal_id"}, {ProtoField: "steem_txid"}, {ProtoField: "op_index"}, {ProtoField: "steem_block"}, {ProtoField: "steem_timestamp"}, {ProtoField: "destination_steem_account"}, {ProtoField: "memo"}},
 				},
 				{
 					RpcMethod:      "SubmitNameRegistration",

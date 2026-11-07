@@ -19,6 +19,42 @@ config from the templates in this directory (`app.toml.example`,
 > Steps 5 and 6 below do the linking; `create-validator` (step 9) is rejected
 > until they are done.
 
+## One-click validator on DigitalOcean
+
+[![Run a SteemVM validator on DigitalOcean](https://img.shields.io/badge/DigitalOcean-Run%20a%20validator-0080FF?style=for-the-badge&logo=digitalocean&logoColor=white)](https://m.do.co/c/ca4fa7f3ca18)
+
+The button is a DigitalOcean referral link: new accounts get trial credit. A
+validator runs on a Droplet (a normal VPS). DigitalOcean's App Platform
+"Deploy" button can't host one, because App Platform has no persistent disk
+(the validator's keys and chain data would be lost on every restart) and no
+raw TCP port for p2p.
+
+1. Click the button and sign up (or log in).
+2. **Create → Droplets**: **Ubuntu 24.04 LTS**, a Basic plan with at least
+   **2 vCPU / 4 GB RAM / 80 GB SSD** (4 vCPU / 8 GB recommended), any region,
+   and an SSH key or a root password.
+3. Open the Droplet and click **Console** (a terminal in your browser — no
+   SSH client needed).
+4. Paste:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.6/install.sh | sudo bash
+   ```
+
+5. Enter your **Steem username** and your **Steem active private key** (shown
+   as you paste it, so you can check it). It is checked against your account,
+   used to pay the 0.001 STEEM name registration, and saved only in
+   `oracle/.env` on your Droplet for the oracle's svm.bank signer. Never enter
+   your owner key, posting key or master password.
+
+The installer ([`install.sh`](../install.sh)) installs Docker, git and jq,
+opens p2p port 26656 if `ufw` is on, clones this repository to `/opt/steemvm`,
+and runs `new-validator.sh` with your answers (CoinGecko prices, state-sync
+from `https://rpc.steemvmscan.com`). The setup then registers your name,
+waits for your stake to arrive, creates the validator and starts the oracle.
+If it stops part-way (a registration or funding timeout), finish with
+`cd /opt/steemvm && ./reset.sh --rejoin-only`.
+
 ## Three ways to run a node
 
 Pick one before diving in — all three end up as the same bonded validator,
@@ -31,10 +67,12 @@ under Docker at all.
   (CoinMarketCap or CoinGecko), fetches the live genesis and peer list, starts
   the node and waits for it to sync (with automatic state-sync when the chain
   is old enough to serve snapshots — see the state-sync note in step 3), makes
-  your key, walks the Steem-side name registration and confirmation with
-  retries, claims faucet coins, builds `validator.json`, creates the
-  validator, and wires up the oracle client. Still requires Docker. Run it
-  from the repository root:
+  your key, sends the 0.001 STEEM name registration itself (signed with your
+  Steem **active** key, which it asks for once — shown as you paste it,
+  checked against your account — and saves to `oracle/.env` for the oracle's
+  svm.bank signer), confirms the name with retries, waits for your stake to be
+  bridged in, builds `validator.json`, creates the validator, and wires up the oracle
+  client. Still requires Docker. Run it from the repository root:
 
   ```sh
   ./new-validator.sh
@@ -45,6 +83,18 @@ under Docker at all.
   (`STAKE_AMOUNT`, `ORACLE_PROFILE`, etc.). If anything about your setup is
   non-standard, or you'd rather understand/control each step yourself, use the
   manual path below instead — it's exactly what the script automates.
+- **Already a validator on the previous chain (`steemvm`)? Run `./reset.sh`**
+  from the repository root (or `./update.sh`, which hands over to it when the
+  release moves to a new chain). It keeps your keys, address and
+  `oracle/.env`, moves the node to `SteemVM-Manaslu-81630` (its genesis, checked against
+  the network's; chain-id `SteemVM-Manaslu-81630`; EVM chain-id `81630`; state-sync from
+  `https://rpc.steemvmscan.com`), then rejoins as a validator: it asks for your
+  Steem **active** key once (unless `oracle/.env` already has it), sends the
+  0.001 STEEM name registration, confirms the name, waits until your address
+  holds the stake (bridge it in; `STAKE_AMOUNT`, default 400
+  STEEM, from a 414 STEEM transfer — it keeps 1 STEEM liquid for fees), creates
+  the validator and restarts your oracle on its latest image.
+  `./reset.sh --rejoin-only` resumes after a funding timeout.
 - **Manual Docker Compose** — steps 1–10 below, one command at a time. Use
   this if the script doesn't fit your setup, or you want to understand what
   each step actually does before trusting it to automation.
@@ -61,7 +111,7 @@ under Docker at all.
 | 4 | Create your key (your chain address) |
 | 5 | Send `0.001 STEEM` with memo `svm-register <address>` |
 | 6 | Confirm the name is yours → link goes ACTIVE |
-| 7 | Get faucet coins for the self-stake |
+| 7 | Bridge in STEEM for the self-stake |
 | 8–9 | Build `validator.json` and create the validator |
 | 10+ | Attest Steem transfers as a bonded validator |
 
@@ -232,7 +282,7 @@ only the address in the memo can do so.
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge confirm-name <registration-id> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 --fees 0asteem -y
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 --fees 0asteem -y
 ```
 
 Valid confirmations are **fee-exempt on the CLI path**, so `--fees 0asteem`
@@ -257,12 +307,16 @@ Only once `resolve-name` returns your address are you allowed to create a
 validator. (Re-linking later is allowed: a newer confirmed registration
 supersedes the old link.)
 
-## 7. Get faucet coins
+## 7. Bridge in your stake
 
-**Before creating a validator, ask for faucet coins in the project Discord.**
-Post the `steem...` address from step 4 and wait until the tokens arrive. You
-need enough to cover the self-stake (the `amount` in step 8) plus a little
-extra for gas. Check your balance with:
+**There is no pre-mint and no faucet: every coin on the chain was bridged in from
+Steem.** Before creating a validator, send STEEM from your Steem account to
+`svm.bank` with the `steem...` address from step 4 as the memo, exactly, and wait
+until it arrives. You need enough to cover the self-stake (the `amount` in step
+8), a little extra for gas, and the bridge's 0.25% fee. `new-validator.sh` does
+this for you: by default it asks to send 414 STEEM and stakes 400, leaving about
+13 STEEM liquid. You can stake more later (see "Add more stake later" in step 9).
+Check your balance with:
 
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd query bank balances $(docker exec steemvm-node /root/go/bin/steemvmd keys show blazed007 -a --keyring-backend test --home /root/.steemvm)
@@ -327,7 +381,7 @@ Field notes:
   rejected.
 - `amount` is your self-stake in `asteem` (18 decimals):
   `1000000000000000000000asteem` = 1000 STEEM. It must be covered by your
-  faucet balance (step 7).
+  bridged balance (step 7).
 - `commission-*` and `min-self-delegation` are standard Cosmos staking
   settings; the values above are sane defaults.
 
@@ -336,7 +390,7 @@ Field notes:
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd tx staking create-validator /workspace/validator.json \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -381,7 +435,7 @@ VALOPER=$(docker exec steemvm-node /root/go/bin/steemvmd keys show blazed007 --b
 docker exec -it steemvm-node /root/go/bin/steemvmd tx staking delegate \
   "$VALOPER" 5000000000000000000000asteem \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -485,7 +539,7 @@ docker compose logs -f oracle-go     # or oracle-python / oracle-js
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
   <txid> <op-index> <steem-block> <steem-timestamp> <steem-sender> <gateway-account> <amount-millisteem> <memo> <asset> \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -496,7 +550,7 @@ sent `1000.000 STEEM` to the gateway with an EVM address as the memo:
 docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit \
   bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank 1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a BRIDGE_ASSET_STEEM \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -682,7 +736,7 @@ certificates with [certbot](https://certbot.eff.org/).
 ### Use it
 
 - **MetaMask** → *Add network manually*: RPC URL `https://evm.mychain.io`, Chain
-  ID `8163`, currency `STEEM`. WebSocket subscriptions use
+  ID `81630`, currency `STEEM`. WebSocket subscriptions use
   `wss://evm-ws.mychain.io`.
 - **CometBFT RPC**: `https://rpc.mychain.io/status`,
   `https://rpc.mychain.io/net_info`, etc.
@@ -849,10 +903,10 @@ the halt as you can manage.
   `steemvm-home` volume no longer matches the new genesis. Reset with
   `docker compose down -v` (wipes node keys and caches too) and start over.
 - **`create-validator` fails with insufficient funds**: your balance must
-  cover `amount` + gas. Ask the faucet for more (step 7).
+  cover `amount` + gas. Bridge in more (step 7).
 - **Validator jailed**: your node fell out of sync or was offline too long.
   Get it synced again, then unjail:
-  `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id steemvm --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
+  `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
 
 **Faster resync via state-sync**
 
@@ -876,7 +930,7 @@ node after a manual wipe.
    height's block hash:
 
    ```sh
-   SEED_RPC=http://<a-live-peer>:26657
+   SEED_RPC=https://rpc.steemvmscan.com    # or http://<a-live-peer>:26657
    LATEST=$(curl -fsS "$SEED_RPC/status" | jq -r '.result.sync_info.latest_block_height')
    TRUST_HEIGHT=$((LATEST - 1000))
    TRUST_HASH=$(curl -fsS "$SEED_RPC/commit?height=$TRUST_HEIGHT" | jq -r '.result.signed_header.commit.block_id.hash')
@@ -887,7 +941,7 @@ node after a manual wipe.
    ```toml
    [statesync]
    enable = true
-   rpc_servers = "http://<a-live-peer>:26657,http://<another-live-peer>:26657"
+   rpc_servers = "https://rpc.steemvmscan.com:443,http://<another-live-peer>:26657"
    trust_height = <TRUST_HEIGHT from above>
    trust_hash = "<TRUST_HASH from above>"
    ```

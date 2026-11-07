@@ -69,7 +69,7 @@ class MsgBridgeOutResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class MsgAttestWithdrawalPayout(_message.Message):
-    __slots__ = ("validator", "withdrawal_id", "steem_txid", "op_index", "steem_block", "steem_timestamp", "amount_millisteem", "asset")
+    __slots__ = ("validator", "withdrawal_id", "steem_txid", "op_index", "steem_block", "steem_timestamp", "amount_millisteem", "asset", "destination_steem_account", "memo")
     VALIDATOR_FIELD_NUMBER: _ClassVar[int]
     WITHDRAWAL_ID_FIELD_NUMBER: _ClassVar[int]
     STEEM_TXID_FIELD_NUMBER: _ClassVar[int]
@@ -78,6 +78,8 @@ class MsgAttestWithdrawalPayout(_message.Message):
     STEEM_TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     AMOUNT_MILLISTEEM_FIELD_NUMBER: _ClassVar[int]
     ASSET_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_STEEM_ACCOUNT_FIELD_NUMBER: _ClassVar[int]
+    MEMO_FIELD_NUMBER: _ClassVar[int]
     validator: str
     withdrawal_id: int
     steem_txid: str
@@ -86,7 +88,9 @@ class MsgAttestWithdrawalPayout(_message.Message):
     steem_timestamp: str
     amount_millisteem: int
     asset: _asset_pb2.BridgeAsset
-    def __init__(self, validator: _Optional[str] = ..., withdrawal_id: _Optional[int] = ..., steem_txid: _Optional[str] = ..., op_index: _Optional[int] = ..., steem_block: _Optional[int] = ..., steem_timestamp: _Optional[str] = ..., amount_millisteem: _Optional[int] = ..., asset: _Optional[_Union[_asset_pb2.BridgeAsset, str]] = ...) -> None: ...
+    destination_steem_account: str
+    memo: str
+    def __init__(self, validator: _Optional[str] = ..., withdrawal_id: _Optional[int] = ..., steem_txid: _Optional[str] = ..., op_index: _Optional[int] = ..., steem_block: _Optional[int] = ..., steem_timestamp: _Optional[str] = ..., amount_millisteem: _Optional[int] = ..., asset: _Optional[_Union[_asset_pb2.BridgeAsset, str]] = ..., destination_steem_account: _Optional[str] = ..., memo: _Optional[str] = ...) -> None: ...
 
 class MsgAttestWithdrawalPayoutResponse(_message.Message):
     __slots__ = ()

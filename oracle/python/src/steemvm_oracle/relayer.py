@@ -24,7 +24,7 @@ from .pricefeeder import CompositePriceSource, Feeder
 from .validator_gate import validator_can_submit
 from .router import GATEWAY_ACCOUNT, Intent, build_payout_any, build_transfer_any, derive_destination, route_memo
 from .state import FeederState, State, load_feeder_state, load_state, save_feeder_state, save_state
-from .steem_client import SteemClient, extract_gateway_payouts, extract_gateway_transfers
+from .steem_client import ASSET_SBD, ASSET_STEEM, Payout, SteemClient, extract_gateway_payouts, extract_gateway_transfers
 
 logger = logging.getLogger("steemvm_oracle.relayer")
 
@@ -107,6 +107,36 @@ def _has_confirmation(confirmations: list[dict], valoper_address: str) -> bool:
     return any(c.get("validator_address") == valoper_address for c in confirmations)
 
 
+def compare_payout(payout: Payout, withdrawal: dict) -> Optional[str]:
+    """What differs between an observed payout and its withdrawal, the same
+    comparison the chain makes; None when they match."""
+    if payout.destination != withdrawal.get("destination_steem_account"):
+        return "recipient differs"
+    if payout.memo != withdrawal.get("memo", ""):
+        return "memo differs"
+    if payout.amount_millisteem != int(withdrawal.get("amount_millisteem", 0)):
+        return "amount differs"
+    asset = ASSET_SBD if withdrawal.get("asset") in ("BRIDGE_ASSET_SBD", 1) else ASSET_STEEM
+    if payout.asset != asset:
+        return "asset differs"
+    return None
+
+
+def _payout_mismatch(rest: RestClient, payout: Payout) -> Optional[str]:
+    """Why a payout must not be attested, if any. A withdrawal this chain has
+    never heard of doesn't match; any other failed query raises, so the same
+    blocks are rescanned next cycle."""
+    try:
+        withdrawal = rest.get_json(f"/steemvm/steembridge/v1/withdrawal/{payout.withdrawal_id}")["withdrawal"]
+    except NotFoundError:
+        return "no such withdrawal"
+    except Exception as exc:  # noqa: BLE001 - only the bridge queries' "key not found" means absent
+        if "key not found" in str(exc).lower():
+            return "no such withdrawal"
+        raise
+    return compare_payout(payout, withdrawal)
+
+
 def _already_attested(rest: RestClient, transfer, intent: Intent, valoper_address: str) -> bool:
     """Reports whether this validator has already confirmed the transfer's
     (txid, op_index) key. Keeps rescans idempotent -- a duplicate message
@@ -143,6 +173,38 @@ class Cycle:
     chain_id: str
     cfg: Config
     state_dir: str
+    # The chain's Steem anchor ID once this process has verified it.
+    verified_anchor: str = ""
+
+
+class SteemAnchorMismatch(RuntimeError):
+    """This oracle's Steem node disagrees with the chain's Steem anchor."""
+
+
+def verify_steem_anchor(cycle: Cycle, block: int, block_id: str) -> None:
+    """Checks this oracle's Steem node against the chain's Steem anchor
+    (relayer_start_block + relayer_start_block_id, recorded in genesis): the
+    node must return the recorded ID for the anchor block, or nothing it
+    reports may be attested. Verified once per process. Mirrors
+    oracle/go/relayer/anchor.go."""
+    if not block_id or block_id == cycle.verified_anchor:
+        return
+    got = cycle.steem.block_id(block)
+    if got != block_id:
+        raise SteemAnchorMismatch(
+            f"steem anchor mismatch: this chain starts at Steem block {block} with ID {block_id}, but the Steem RPC "
+            f"returns {got} (the RPC is on another network, or this node has the wrong genesis) -- not attesting anything"
+        )
+    cycle.verified_anchor = block_id
+
+
+def _anchored_cursor(cursor: int, chain_start: int) -> int:
+    """Never lets the scan cursor sit below the chain's Steem anchor: the chain
+    rejects attestations of earlier blocks (they predate it). Scanning begins
+    at cursor+1, so the lowest cursor is anchor-1."""
+    if chain_start > 0 and cursor < chain_start - 1:
+        return chain_start - 1
+    return cursor
 
 
 def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> State:
@@ -171,12 +233,26 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
         return state
     not_bonded_logged[0] = False
 
+    # The chain's Steem anchor (genesis): this oracle's Steem node must agree
+    # on the anchor block's ID before anything it reports is attested.
+    chain_start = int(params.get("relayer_start_block", 0) or 0)
+    verify_steem_anchor(cycle, chain_start, str(params.get("relayer_start_block_id", "") or ""))
+
     lib = cycle.steem.last_irreversible_block()
 
-    # First run: establish the cursor.
+    # First run: establish the cursor (never below the anchor).
     if state.last_scanned_block == 0:
-        state.last_scanned_block = _initial_cursor(cycle.cfg.start_block, int(params.get("relayer_start_block", 0)), lib)
+        state.last_scanned_block = _anchored_cursor(_initial_cursor(cycle.cfg.start_block, chain_start, lib), chain_start)
         logger.info("steem relayer cursor initialized: cursor=%d", state.last_scanned_block)
+        save_state(cycle.state_dir, state)
+        return state
+    # A saved cursor from before the anchor (e.g. a state volume kept from a
+    # previous chain) jumps up to it: that history predates this chain.
+    anchored = _anchored_cursor(state.last_scanned_block, chain_start)
+    if anchored != state.last_scanned_block:
+        logger.info("steem relayer cursor moved up to the chain's steem anchor: from=%d to=%d",
+                    state.last_scanned_block, anchored)
+        state.last_scanned_block = anchored
         save_state(cycle.state_dir, state)
         return state
 
@@ -215,10 +291,18 @@ def run_cycle(cycle: Cycle, state: State, not_bonded_logged: list[bool]) -> Stat
                 transfer.amount_millisteem, transfer.memo,
             )
 
-        # Withdrawal payouts: optimistic, no per-validator dedup query
-        # needed (chain benign-no-ops duplicates at 2/3 threshold).
+        # Withdrawal payouts: no per-validator dedup query needed (chain
+        # benign-no-ops duplicates at 2/3 threshold). A payout that doesn't match
+        # its withdrawal is logged and skipped: the chain would refuse it anyway.
         if bridge_out_enabled:
             for payout in extract_gateway_payouts(block_num, block, gateway, cycle.cfg.steem_symbol, cycle.cfg.sbd_symbol):
+                why = _payout_mismatch(cycle.rest, payout)
+                if why is not None:
+                    logger.error(
+                        "not attesting a payout that doesn't match its withdrawal: withdrawal_id=%d steem_txid=%s reason=%s",
+                        payout.withdrawal_id, payout.txid, why,
+                    )
+                    continue
                 block_msgs.append(build_payout_any(payout, cycle.keypair.address))
                 logger.info(
                     "attesting withdrawal payout: withdrawal_id=%d steem_txid=%s op_index=%d",

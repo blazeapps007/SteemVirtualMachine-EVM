@@ -66,6 +66,9 @@ func (k Keeper) ValidateDepositAcceptance(ctx context.Context, msg *types.MsgAtt
 	if msg.GatewayAccount != types.GatewayAccount {
 		return types.ErrInvalidGatewayAccount
 	}
+	if err := params.CheckSteemBlock(msg.SteemBlock); err != nil {
+		return err
+	}
 
 	validatorAddr, err := k.addressCodec.StringToBytes(msg.Validator)
 	if err != nil {
@@ -93,10 +96,11 @@ func (k Keeper) ValidateDepositAcceptance(ctx context.Context, msg *types.MsgAtt
 		return types.ErrDepositAlreadyMinted
 	}
 
-	if !matchesPending(existing, msg) {
-		return types.ErrDepositMismatch
-	}
-
+	// A fact-set differing from the record's provisional facts is NOT rejected:
+	// deposits are tallied per fact-set, so this is a valid vote for a different
+	// candidate and stays fee-exempt. An honest validator reporting the true
+	// facts must not be pushed onto the fee-paying path just because another
+	// validator recorded different facts first.
 	return nil
 }
 

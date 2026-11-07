@@ -12,7 +12,7 @@
 # same path docker-compose.yml, new-validator.sh (BIN=), and
 # Instructions/README.md already assume, so nothing downstream needs to
 # change to consume this image.
-FROM golang:1.26.8-trixie AS builder
+FROM golang:1.26.9-trixie AS builder
 WORKDIR /workspace
 ENV CGO_ENABLED=1
 # GOPATH pinned to /root/go (the base image's own default is /go) so the

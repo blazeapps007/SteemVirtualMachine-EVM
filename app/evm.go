@@ -8,13 +8,12 @@ import (
 
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/log/v2"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
-	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkmempool "github.com/cosmos/cosmos-sdk/types/mempool"
 	"github.com/cosmos/cosmos-sdk/types/module"
@@ -22,9 +21,11 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 	"github.com/spf13/cast"
 
 	evmcryptocodec "github.com/cosmos/evm/crypto/codec"
+	evmaddress "github.com/cosmos/evm/encoding/address"
 	"github.com/cosmos/evm/ethereum/eip712"
 	evmmempool "github.com/cosmos/evm/mempool"
 	precompiletypes "github.com/cosmos/evm/precompiles/types"
@@ -47,6 +48,7 @@ import (
 
 	oracledataprecompile "steemvm/precompiles/oracledata"
 	steembridgeprecompile "steemvm/precompiles/steembridge"
+	"steemvm/app/stakinggate"
 	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
 )
 
@@ -92,6 +94,13 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 
 	// chain config
 	chainID := GetEVMChainID(appOpts)
+	// The JSON-RPC server reports app.toml's [evm] evm-chain-id while consensus
+	// signs with EVMChainID. A stale app.toml (e.g. one written before the
+	// chain-id changed) would make every wallet fail with "incorrect chain-id",
+	// so refuse to start instead of running half-broken. 0 = unset (defaulted).
+	if v := cast.ToUint64(appOpts.Get(srvflags.EVMChainID)); v != 0 && v != EVMChainID {
+		return fmt.Errorf("app.toml [evm] evm-chain-id is %d, but this chain's EVM chain-id is %d: set evm-chain-id = %d in app.toml", v, EVMChainID, EVMChainID)
+	}
 
 	// set up non depinject support modules store keys. The transient stores
 	// evmtypes.TransientKey/feemarkettypes.TransientKey are gone as of
@@ -119,6 +128,35 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		app.GetKey(feemarkettypes.StoreKey),
 	)
 
+	staticPrecompiles := precompiletypes.DefaultStaticPrecompiles(
+		*app.StakingKeeper,
+		app.DistrKeeper,
+		app.BankKeeper,
+		&app.Erc20Keeper,
+		app.TransferKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		app.IBCKeeper.ClientKeeper,
+		*app.GovKeeper,
+		app.SlashingKeeper,
+		app.appCodec,
+	)
+
+	// Replace upstream's staking precompile (0x...0800) with one built on the
+	// identity-gated MsgServer (see app/stakinggate). It calls its
+	// MsgServer directly rather than through the router, so unwrapped its
+	// createValidator/editValidator would bypass the gate entirely.
+	stakingAddr := common.HexToAddress(evmtypes.StakingPrecompileAddress)
+	if _, ok := staticPrecompiles[stakingAddr]; !ok {
+		return fmt.Errorf("no staking precompile to replace at %s", stakingAddr)
+	}
+	staticPrecompiles[stakingAddr] = stakinggate.NewPrecompile(
+		app.StakingKeeper,
+		app.BankKeeper,
+		// Same codec cosmos/evm's defaults construct the precompile with.
+		evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
+		app.StakingIdentityGate,
+	)
+
 	app.EVMKeeper = evmkeeper.NewKeeper(
 		app.appCodec,
 		app.GetKey(evmtypes.StoreKey),
@@ -133,20 +171,7 @@ func (app *App) registerEVMModules(appOpts servertypes.AppOptions) error {
 		&app.Erc20Keeper,
 		chainID,
 		tracer,
-	).WithStaticPrecompiles(
-		precompiletypes.DefaultStaticPrecompiles(
-			*app.StakingKeeper,
-			app.DistrKeeper,
-			app.BankKeeper,
-			&app.Erc20Keeper,
-			app.TransferKeeper,
-			app.IBCKeeper.ChannelKeeper,
-			app.IBCKeeper.ClientKeeper,
-			*app.GovKeeper,
-			app.SlashingKeeper,
-			app.appCodec,
-		),
-	)
+	).WithStaticPrecompiles(staticPrecompiles)
 
 	// NOTE: virtual fee collection (EnableVirtualFeeCollection) is deliberately
 	// NOT wired here. It is part of the BlockSTM parallel-execution bundle
@@ -322,7 +347,7 @@ func GetEVMChainID(appOpts servertypes.AppOptions) uint64 {
 // for app.toml's [evm] evm-chain-id (cmd/steemvmd/cmd/config.go) — the
 // JSON-RPC server reads the latter, so the two MUST agree or wallets get
 // "incorrect chain-id" errors.
-const EVMChainID uint64 = 8163
+const EVMChainID uint64 = 81630
 
 // cosmosChainIDToEVMChainID converts a Cosmos chain ID to an EVM chain ID.
 // This is an opinionated function to simplify chain id management.

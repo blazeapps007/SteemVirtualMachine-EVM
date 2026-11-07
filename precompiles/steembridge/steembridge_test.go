@@ -110,6 +110,10 @@ func TestBridgeOut_HappyPath(t *testing.T) {
 	funded := types.MillisteemToAsteem(5000)
 	require.NoError(t, f.bankKeeper.MintCoins(f.ctx, "faucet", sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, funded))))
 	require.NoError(t, f.bankKeeper.SendCoinsFromModuleToAccount(f.ctx, "faucet", callerAcc, sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, funded))))
+	totals, err := f.keeper.Totals.Get(f.ctx)
+	require.NoError(t, err)
+	totals.TotalMintedAsteem = totals.TotalMintedAsteem.Add(funded)
+	require.NoError(t, f.keeper.Totals.Set(f.ctx, totals))
 
 	amount := types.MillisteemToAsteem(1000) // 1 STEEM, a whole millisteem multiple
 	out, err := f.precompile.Execute(f.ctx, f.stateDB,

@@ -3,8 +3,13 @@
 # new-validator.sh — interactive validator + oracle setup.
 #
 # Steps: username -> Steem pubkeys -> price source -> fetch genesis -> start node
-# -> new SteemVM key -> Steem name registration -> faucet + stake -> create
+# -> new SteemVM key -> Steem name registration -> bridge in + stake -> create
 # validator -> start oracle.
+#
+# Default stake: 400 STEEM, from a 414 STEEM transfer to svm.bank that this script
+# sends with your active key once you confirm it. After the bridge's 0.25% fee,
+# the other 12.965 STEEM stays liquid for fees. You can stake more later; the
+# script prints the command when it finishes.
 #
 # Usage: ./new-validator.sh [--cleanup | --cleanup-full | --fix-config]
 #   --cleanup       wipes generated files + `docker compose down` (keeps node home/volumes)
@@ -13,9 +18,17 @@
 #                    already-running validator, then restarts the node. Does NOT
 #                    touch keys/validator.json/mnemonic. Safe to run any time.
 #
-# Overridable via env: STAKE_AMOUNT, COMMISSION_RATE, COMMISSION_MAX_RATE,
+# Overridable via env: STAKE_AMOUNT, BRIDGE_STEEM, COMMISSION_RATE, COMMISSION_MAX_RATE,
 # COMMISSION_MAX_CHANGE_RATE, MIN_SELF_DELEGATION, GAS_PRICES, START_TIMEOUT,
 # FUND_TIMEOUT, NAME_TIMEOUT, ORACLE_PROFILE, FAUCET_URL
+#
+# Preset answers skip their prompts (install.sh uses these): STEEM_USERNAME,
+# ORACLE_STEEM_ACTIVE_WIF, PRICE_SOURCE (cmc|coingecko) with CMC_KEY or
+# COINGECKO_KEY, SEED_RPC.
+#
+# Stopped after the node synced (a registration or funding timeout)? Don't
+# re-run this script — it would start over with a new key. Finish with:
+#   ./reset.sh --rejoin-only
 
 # re-exec under bash if run as `sh new-validator.sh` (needs set -o pipefail)
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -36,18 +49,22 @@ BIN="${BIN:-/root/go/bin/steemvmd}"
 HOME_DIR="${HOME_DIR:-/root/.steemvm}"
 STEEMVM_HOME="${STEEMVM_HOME:-$HOME/.steemvm}"    # must match docker-compose.yml's bind mount
 export STEEMVM_HOME
-CHAIN_ID="${CHAIN_ID:-steemvm}"
+CHAIN_ID="${CHAIN_ID:-SteemVM-Manaslu-81630}"
 KEYRING="${KEYRING:-test}"    # unencrypted, no prompts. Set KEYRING=file/os for a password-protected keyring.
 KEY_TYPE="${KEY_TYPE:-eth_secp256k1}"
 
-STAKE_AMOUNT="${STAKE_AMOUNT:-4000000000000000000000asteem}"   # 4000 STEEM
+STAKE_AMOUNT="${STAKE_AMOUNT:-400000000000000000000asteem}"   # 400 STEEM
+# Whole STEEM to bridge in: the stake + 14, which covers the 0.25% fee and leaves
+# some liquid for fees (400 -> 414).
+BRIDGE_STEEM="${BRIDGE_STEEM:-$(awk -v s="${STAKE_AMOUNT%asteem}" 'BEGIN{printf "%d", s / 1e18 + 14}')}"
+[[ "$BRIDGE_STEEM" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: BRIDGE_STEEM must be a whole number of STEEM, got '$BRIDGE_STEEM'." >&2; exit 1; }
 COMMISSION_RATE="${COMMISSION_RATE:-0.10}"
 COMMISSION_MAX_RATE="${COMMISSION_MAX_RATE:-0.20}"
 COMMISSION_MAX_CHANGE_RATE="${COMMISSION_MAX_CHANGE_RATE:-0.01}"
 MIN_SELF_DELEGATION="${MIN_SELF_DELEGATION:-1}"
 GAS_PRICES="${GAS_PRICES:-1000000000asteem}"
 ORACLE_PROFILE="${ORACLE_PROFILE:-go}"     # go|python|js
-FAUCET_URL="${FAUCET_URL:-https://faucet.steemscanner.com/faucet}"
+FAUCET_URL="${FAUCET_URL:-}"   # a testnet's faucet; mainnet has none
 
 VALIDATOR_JSON="${VALIDATOR_JSON:-validator.json}"
 ADDRESS_FILE="${ADDRESS_FILE:-validator-address.txt}"
@@ -55,7 +72,7 @@ MNEMONIC_FILE="${MNEMONIC_FILE:-validator-mnemonic.txt}"    # master recovery ph
 
 START_TIMEOUT="${START_TIMEOUT:-1800}"
 NAME_TIMEOUT="${NAME_TIMEOUT:-1800}"
-FUND_TIMEOUT="${FUND_TIMEOUT:-300}"
+FUND_TIMEOUT="${FUND_TIMEOUT:-1800}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -71,6 +88,16 @@ kf_i() { node_i "$@" --keyring-backend "$KEYRING" --home "$HOME_DIR"; }
 command -v docker >/dev/null || die "docker not found on PATH"
 $COMPOSE version >/dev/null 2>&1 || die "'$COMPOSE' not available (set COMPOSE=docker-compose ?)"
 [ -f docker-compose.yml ] || die "run this from the repository root."
+
+# Images: this release's, from docker-compose.yml's defaults. An image pin in
+# the repo-root .env (an earlier release's) would override them, so this run
+# uses the defaults — unless set on the command line — and the pins are
+# commented out.
+for v in STEEMVM_IMAGE ORACLE_GO_IMAGE ORACLE_PYTHON_IMAGE ORACLE_JS_IMAGE; do
+  d="$(sed -n "s/.*\${$v:-\([^}]*\)}.*/\1/p" docker-compose.yml | head -1)"
+  [ -z "${!v:-}" ] && [ -n "$d" ] && export "$v=$d"
+done
+./unpin_images.sh
 
 # fix_mempool_type patches a known-stale config.toml value: an old/carried-over
 # config.toml (repo-level Instructions/ cache, or an already-initialized node's
@@ -121,12 +148,22 @@ fetch_statesync_trust() {
   return 0
 }
 
-# Standing extra peers (xpilar.witness, blaze.apps), always included
-# alongside whatever $SEED_RPC resolves to, so every new validator connects
-# to multiple independent nodes instead of a single point of failure.
-# Space-separated "id@host:26656" entries — add more here as needed, or
-# update an entry if that node's identity/address ever changes.
-EXTRA_PERSISTENT_PEERS="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:26656 9ce6a5ecd05e9bd8a7f455976b308094329d7937@167.235.9.31:26656"
+# Standing extra peers (blaze.apps, the SteemVM-Manaslu-81630 genesis node — only nodes
+# known to run THIS launch: an earlier launch shares the chain-id), always
+# included alongside whatever $SEED_RPC resolves to. Space-separated
+# "id@host:26656" entries — add more here as validators join, or update an
+# entry if that node's identity/address ever changes.
+EXTRA_PERSISTENT_PEERS="11c8b6936ea5ba2f9f102a8dc62c80b731252fc9@57.131.13.43:26656 69992c6fb7310fe8002b33b06bc8e9f4914dec09@45.151.123.214:26656 89af45e442585a00b8a2836680a9f8892497a70d@62.169.19.142:26656"
+
+# rpc_with_port: CometBFT's light client wants an explicit port.
+rpc_with_port() {
+  local u="${1%/}" rest
+  rest="${u#*://}"
+  case "$rest" in
+    *:*) printf '%s' "$u" ;;
+    *) case "$u" in https://*) printf '%s:443' "$u" ;; *) printf '%s:80' "$u" ;; esac ;;
+  esac
+}
 
 # fetch_seed_peer derives this network's persistent_peers/rpc_servers entries
 # LIVE from $SEED_RPC, instead of relying on Instructions/config.toml's
@@ -142,21 +179,32 @@ EXTRA_PERSISTENT_PEERS="fe9ccc3ada6f92f20028430021585e413562bdbc@95.217.44.178:2
 fetch_seed_peer() {
   SEED_PEER="" SEED_RPC_LIST=""
   command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
-  local node_id host p
-  node_id="$(curl -fsS "${SEED_RPC%/}/status" 2>/dev/null | jq -r '.result.node_info.id // empty' 2>/dev/null)"
+  local status node_id host addr p rpc
+  status="$(curl -fsS -m 15 "${SEED_RPC%/}/status" 2>/dev/null)" || return 1
+  node_id="$(printf '%s' "$status" | jq -r '.result.node_info.id // empty' 2>/dev/null)"
   [ -n "$node_id" ] || return 1
-  host="$(printf '%s' "$SEED_RPC" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')"
-  [ -n "$host" ] || return 1
-  SEED_PEER="${node_id}@${host}:26656"
-  # Append the standing extras, skipping any whose host matches $SEED_RPC's
-  # own (avoids a duplicate self-peer entry).
+  # The node's advertised p2p address; else the RPC's host on :26656 (an RPC
+  # behind a TLS proxy has a hostname, not the p2p IP).
+  addr="$(printf '%s' "$status" | jq -r '.result.node_info.listen_addr // empty' 2>/dev/null)"
+  addr="${addr#tcp://}"
+  case "$addr" in
+    ""|0.0.0.0:*|127.*|localhost:*|"[::]:"*)
+      host="$(printf '%s' "$SEED_RPC" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*##')"
+      [ -n "$host" ] || return 1
+      addr="${host}:26656" ;;
+  esac
+  SEED_PEER="${node_id}@${addr}"
+  # Append the standing extras, skipping the seed itself.
   for p in $EXTRA_PERSISTENT_PEERS; do
+    # Skip the seed itself — also under an old node ID at the same address
+    # (a node reset with a fresh home gets a new ID).
     case "$p" in
-      *"@${host}:"*) ;;
+      "${node_id}@"*|*"@${addr}") ;;
       *) SEED_PEER="${SEED_PEER},${p}" ;;
     esac
   done
-  SEED_RPC_LIST="${SEED_RPC},${SEED_RPC}"
+  rpc="$(rpc_with_port "$SEED_RPC")"
+  SEED_RPC_LIST="${rpc},${rpc}"
   return 0
 }
 
@@ -289,12 +337,47 @@ if [ -f "$STEEMVM_HOME/config/priv_validator_key.json" ]; then
 fi
 
 # ── 1. Steem username → moniker + key name ────────────────────────────────
-read -rp "Steem username (becomes your validator moniker): " STEEM_USERNAME < /dev/tty
+# Preset answers (e.g. from install.sh) skip their prompts: STEEM_USERNAME,
+# ORACLE_STEEM_ACTIVE_WIF, PRICE_SOURCE (+ CMC_KEY / COINGECKO_KEY), SEED_RPC.
+PRESET_USERNAME=0
+if [ -n "${STEEM_USERNAME:-}" ]; then
+  PRESET_USERNAME=1
+  ok "Steem username: $STEEM_USERNAME"
+else
+  read -rp "Steem username (becomes your validator moniker): " STEEM_USERNAME < /dev/tty
+fi
 [ -n "$STEEM_USERNAME" ] || die "a Steem username is required."
 
 # ── 2. Steem owner / active / posting public keys ─────────────────────────
 # Auto-fetched (public data); falls back to manual entry for multisig/delegated accounts.
 STEEM_RPC="${STEEM_RPC:-https://api.steemit.com}"
+
+# The Steem nodes the oracle will use must answer get_block for this chain's
+# Steem anchor with the anchor's ID (reachable, the API the oracle uses, the
+# right network). A failing STEEM_RPC is swapped for a working public node;
+# the signer's list (STEEM_RPCS) gets two working nodes.
+STEEM_FALLBACKS="https://api.steemit.com https://api.justyy.com https://steemd.steemworld.org https://api.steememory.com https://api.pennsif.net"
+ANCHOR_BLOCK="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block // "0"' 2>/dev/null || echo 0)"
+ANCHOR_ID="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block_id // empty' 2>/dev/null || true)"
+steem_ok() {
+  local id
+  id="$(curl -fsS -m 15 "$1" -H 'Content-Type: application/json' \
+          -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"condenser_api.get_block\",\"params\":[$ANCHOR_BLOCK]}" 2>/dev/null \
+        | jq -r '.result.block_id // empty' 2>/dev/null || true)"
+  [ -n "$ANCHOR_ID" ] && [ "$id" = "$ANCHOR_ID" ]
+}
+if [ -n "$ANCHOR_ID" ] && ! steem_ok "$STEEM_RPC"; then
+  for c in $STEEM_FALLBACKS; do
+    if steem_ok "$c"; then warn "$STEEM_RPC doesn't serve this chain's Steem anchor — using $c."; STEEM_RPC="$c"; break; fi
+  done
+fi
+if [ -z "${STEEM_RPCS:-}" ]; then
+  STEEM_RPCS="$STEEM_RPC"
+  for c in $STEEM_FALLBACKS; do
+    [ "$c" = "$STEEM_RPC" ] && continue
+    if [ -z "$ANCHOR_ID" ] || steem_ok "$c"; then STEEM_RPCS="$STEEM_RPC,$c"; break; fi
+  done
+fi
 
 fetch_steem_keys() {
   local resp
@@ -320,7 +403,8 @@ if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && fetch_ste
   echo "  owner:   $OWNER_KEY"
   echo "  active:  $ACTIVE_KEY"
   echo "  posting: $POSTING_KEY"
-  read -rp "Use these? [Y/n]: " USE_FETCHED < /dev/tty
+  if [ "$PRESET_USERNAME" = "1" ]; then USE_FETCHED=y
+  else read -rp "Use these? [Y/n]: " USE_FETCHED < /dev/tty; fi
   case "$USE_FETCHED" in
     [nN]*) OWNER_KEY="" ACTIVE_KEY="" POSTING_KEY="" ;;
   esac
@@ -335,27 +419,76 @@ fi
 [ -n "$OWNER_KEY" ] && [ -n "$ACTIVE_KEY" ] && [ -n "$POSTING_KEY" ] || die "owner, active, and posting keys are all required."
 DETAILS="owner=$OWNER_KEY;active=$ACTIVE_KEY;posting=$POSTING_KEY"
 
+# ── 2b. Steem ACTIVE private key ───────────────────────────────────────────
+# Pays the 0.001 STEEM name registration (step 7) and runs the oracle's
+# svm.bank signer. The signing runs in the published oracle-python image
+# (oracle/tools/steem_transfer.py), so the host needs no Steem library.
+STEEM_IMG=""
+steem_helper() {
+  if [ -z "$STEEM_IMG" ]; then
+    STEEM_IMG="$($COMPOSE --profile python config --format json 2>/dev/null | jq -r '.services["oracle-python"].image // empty')"
+    STEEM_IMG="${STEEM_IMG:-${ORACLE_PYTHON_IMAGE:-steemblazer/steemvm-oracle-python:latest}}"
+    docker pull -q "$STEEM_IMG" >/dev/null 2>&1 || docker image inspect "$STEEM_IMG" >/dev/null 2>&1 \
+      || die "could not pull $STEEM_IMG (it signs the Steem registration transfer)."
+  fi
+  ORACLE_STEEM_ACTIVE_WIF="$ACTIVE_WIF" STEEM_RPCS="$STEEM_RPCS" \
+    docker run --rm -i -e ORACLE_STEEM_ACTIVE_WIF -e STEEM_RPCS --entrypoint python "$STEEM_IMG" \
+    -I - "$@" < oracle/tools/steem_transfer.py
+}
+# steem_memo_sent <account> <memo> <from-block>: that transfer to svm.bank is
+# in the account's last 100 history entries, at or after <from-block>.
+steem_memo_sent() {
+  curl -fsS -m 30 "$STEEM_RPC" -H 'Content-Type: application/json' \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"condenser_api.get_account_history\",\"params\":[\"$1\",-1,100]}" 2>/dev/null \
+    | jq -e --arg m "$2" --argjson b "$3" \
+        '[.result[]? | .[1] | select(.block >= $b and .op[0] == "transfer" and .op[1].to == "svm.bank" and .op[1].memo == $m)] | length > 0' >/dev/null 2>&1
+}
+
+ACTIVE_WIF="${ORACLE_STEEM_ACTIVE_WIF:-}"
+if [ -z "$ACTIVE_WIF" ]; then
+  echo
+  log "Your Steem ACTIVE private key for @$STEEM_USERNAME (starts with 5)."
+  log "It pays the 0.001 STEEM name registration and is saved to oracle/.env for your oracle's svm.bank signer."
+  log "Never the owner key, posting key or master password."
+  read -rp "Steem active key: " ACTIVE_WIF < /dev/tty
+fi
+ACTIVE_WIF="$(printf '%s' "$ACTIVE_WIF" | tr -d '[:space:]')"
+[[ "$ACTIVE_WIF" =~ ^5[1-9A-HJ-NP-Za-km-z]{50}$ ]] || die "that is not a Steem private key (51 base58 characters starting with 5)."
+log "Checking the key against @$STEEM_USERNAME's active authority…"
+ACTIVE_PUB="$(steem_helper check "$STEEM_USERNAME")" || die "the Steem active key was rejected (see above)."
+ok "Active key matches @$STEEM_USERNAME ($ACTIVE_PUB)."
+
 # ── 3. Price source for the STEEM/USD + SBD/USD feed ────────────────────────
-read -rp "Price source — CoinMarketCap or CoinGecko? [cmc/coingecko] (default: cmc): " PRICE_SOURCE < /dev/tty
+PRESET_PRICE=0
+if [ -n "${PRICE_SOURCE:-}" ]; then
+  PRESET_PRICE=1
+else
+  read -rp "Price source — CoinMarketCap or CoinGecko? [cmc/coingecko] (default: cmc): " PRICE_SOURCE < /dev/tty
+fi
 PRICE_SOURCE="${PRICE_SOURCE:-cmc}"
 case "$PRICE_SOURCE" in
   cmc)
-    CMC_KEY=""
+    CMC_KEY="${CMC_KEY:-}"
     while [ -z "$CMC_KEY" ]; do
       read -rp "CoinMarketCap API key (REQUIRED — free at coinmarketcap.com/api): " CMC_KEY < /dev/tty
       [ -z "$CMC_KEY" ] && warn "required — without it your oracle misses price-feed duty and risks jailing."
     done
     ;;
   coingecko)
-    read -rp "CoinGecko API key (optional — press Enter to skip, uses the public rate limit): " COINGECKO_KEY < /dev/tty
+    COINGECKO_KEY="${COINGECKO_KEY:-}"
+    if [ "$PRESET_PRICE" = "0" ]; then
+      read -rp "CoinGecko API key (optional — press Enter to skip, uses the public rate limit): " COINGECKO_KEY < /dev/tty
+    fi
     ;;
   *) die "unknown price source '$PRICE_SOURCE' — must be 'cmc' or 'coingecko'." ;;
 esac
 
 # ── 4. fetch the network's live genesis.json ───────────────────────────────
 # Fetched live (not from Instructions/genesis.json) so it can't go stale vs the running network.
-read -rp "Existing node's RPC to fetch genesis + sync from [http://57.131.13.43:26657]: " SEED_RPC < /dev/tty
-SEED_RPC="${SEED_RPC:-http://57.131.13.43:26657}"
+if [ -z "${SEED_RPC:-}" ]; then
+  read -rp "Existing node's RPC to fetch genesis + sync from [https://rpc.steemvmscan.com]: " SEED_RPC < /dev/tty
+fi
+SEED_RPC="${SEED_RPC:-https://rpc.steemvmscan.com}"
 mkdir -p "$STEEMVM_HOME/config"
 
 if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
@@ -373,7 +506,10 @@ fi
 if fetch_statesync_trust; then
   ok "State-sync trust anchor: height $TRUST_HEIGHT."
 else
-  warn "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — will fall back to a full replay from genesis (cheap at this height)."
+  # A young chain has no snapshot yet: replay it from genesis instead. That
+  # only works while the chain has had no coordinated upgrade (one binary
+  # can't replay both sides of one).
+  warn "state-sync unavailable (chain below height $MIN_STATESYNC_HEIGHT, or $SEED_RPC unreachable) — replaying from genesis instead."
 fi
 
 if fetch_seed_peer; then
@@ -452,6 +588,21 @@ while :; do
 done
 ok "Node is fully synced (height $height)."
 
+# The EVM JSON-RPC indexer (cosmos/evm, --json-rpc.enable-indexer) starts
+# while state-sync is still running, asks for block 1 — which a state-synced
+# node never has — and then stops for good (it never retries a failed fetch).
+# One restart once synced makes it start at the synced height instead.
+if [ -n "${TRUST_HEIGHT:-}" ]; then
+  log "Restarting the node once so its EVM indexer starts at the synced height…"
+  docker restart "$CONTAINER" >/dev/null
+  deadline=$(( $(date +%s) + START_TIMEOUT ))
+  until [ "$(node status 2>/dev/null | jq -r '.sync_info.catching_up' 2>/dev/null || true)" = "false" ]; do
+    [ "$(date +%s)" -ge "$deadline" ] && die "the node did not come back within ${START_TIMEOUT}s of its restart. Check: \`$COMPOSE logs -f steemvm\`."
+    sleep 5
+  done
+  ok "Node restarted and caught up."
+fi
+
 # ── 6. generate a fresh SteemVM key and save the address ────────────────────
 log "Generating SteemVM key '$STEEM_USERNAME'…"
 # The leftover-home check earlier already guarantees a fresh or freshly-wiped
@@ -498,7 +649,21 @@ RESOLVED_ADDR="$(kf query steembridge resolve-name "$STEEM_USERNAME" --output js
 if [ "$RESOLVED_ADDR" = "$ADDR" ]; then
   ok "'$STEEM_USERNAME' already ACTIVE for $ADDR — skipping name registration."
 else
-  log "Send $MIN_STEEM+ STEEM from '$STEEM_USERNAME' to 'svm.bank', memo EXACTLY: svm-register $ADDR"
+  REG_MEMO="svm-register $ADDR"
+  # A registration sent before this chain's Steem anchor (an earlier chain's)
+  # doesn't count, so it is never mistaken for this one.
+  ANCHOR="$(kf query steembridge params --output json 2>/dev/null | jq -r '.params.relayer_start_block // "0"' 2>/dev/null || true)"
+  [[ "$ANCHOR" =~ ^[0-9]+$ ]] || ANCHOR=0
+  if steem_memo_sent "$STEEM_USERNAME" "$REG_MEMO" "$ANCHOR"; then
+    ok "The registration transfer was already sent."
+  else
+    log "Sending $MIN_STEEM STEEM from @$STEEM_USERNAME to svm.bank (memo: $REG_MEMO)…"
+    if TXID="$(steem_helper transfer "$STEEM_USERNAME" svm.bank "$MIN_STEEM STEEM" "$REG_MEMO")"; then
+      ok "Sent (Steem transaction $TXID)."
+    else
+      warn "the automatic transfer failed — send $MIN_STEEM+ STEEM from '$STEEM_USERNAME' to 'svm.bank' by hand, memo EXACTLY: $REG_MEMO"
+    fi
+  fi
   log "Waiting for attestation (timeout ${NAME_TIMEOUT}s)…"
   deadline=$(( $(date +%s) + NAME_TIMEOUT ))
   REG_ID=""
@@ -522,7 +687,7 @@ else
       REG_ID=""
       break
     fi
-    [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Then run: $BIN tx steembridge confirm-name <id> --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
+    [ "$(date +%s)" -ge "$deadline" ] && die "no attested registration for $ADDR within ${NAME_TIMEOUT}s. Once it is attested, finish with: ./reset.sh --rejoin-only"
     sleep 15
   done
   if [ -n "$REG_ID" ]; then
@@ -559,17 +724,63 @@ else
   fi
 fi
 
-# ── 8. claim faucet + wait for balance ───────────────────────────────────────
+# ── 8. fund the stake + wait for balance ─────────────────────────────────────
 STAKE_NUM="${STAKE_AMOUNT%asteem}"   # awk, not [ -ge ]: these numbers exceed bash's 64-bit arithmetic
+# base units -> STEEM, for messages (whole amounts, as the stake is).
+steem_atoms() { awk -v a="$1" 'BEGIN{printf "%d", a / 1e18}'; }
 
-log "Claiming faucet…"
-FAUCET_OUT="$(curl -fsS -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
-if echo "$FAUCET_OUT" | jq -e '.success == true' >/dev/null 2>&1; then
-  ok "Faucet sent $(echo "$FAUCET_OUT" | jq -r '.amount') STEEM (tx $(echo "$FAUCET_OUT" | jq -r '.txHash'))."
-else
-  warn "faucet claim failed: $FAUCET_OUT"
-  echo "  Send STEEM to 'svm.bank', memo EXACTLY your address: $ADDR"
-  read -rp "Press ENTER once funded… " _unused < /dev/tty
+FUNDED=0
+if [ -n "$FAUCET_URL" ]; then
+  log "Claiming faucet…"
+  FAUCET_OUT="$(curl -sS -m 60 -X POST "$FAUCET_URL" -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}" 2>&1)" || true
+  if echo "$FAUCET_OUT" | jq -e '.success == true' >/dev/null 2>&1; then
+    ok "Faucet sent $(echo "$FAUCET_OUT" | jq -r '.amount') STEEM (tx $(echo "$FAUCET_OUT" | jq -r '.txHash'))."
+    FUNDED=1
+  else
+    warn "faucet claim failed: $(printf '%s' "$FAUCET_OUT" | jq -r '.error // empty' 2>/dev/null | grep . || printf '%s' "$FAUCET_OUT" | head -c 300)"
+  fi
+fi
+if [ "$FUNDED" = "0" ]; then
+  DEPOSIT_MEMO="svm-deposit $ADDR"
+  BRIDGE_AMOUNT="$BRIDGE_STEEM.000 STEEM"
+  # Only a deposit from this chain's anchor on counts, so an earlier chain's is
+  # never mistaken for this one.
+  ANCHOR="$(kf query steembridge params --output json 2>/dev/null | jq -r '.params.relayer_start_block // "0"' 2>/dev/null || true)"
+  [[ "$ANCHOR" =~ ^[0-9]+$ ]] || ANCHOR=0
+  BRIDGE_SENT=0
+  if steem_memo_sent "$STEEM_USERNAME" "$DEPOSIT_MEMO" "$ANCHOR"; then
+    ok "The bridge transfer was already sent."
+    BRIDGE_SENT=1
+  else
+    echo
+    log "Your stake: bridge in $BRIDGE_AMOUNT. After the 0.25% bridge fee, $(steem_atoms "$STAKE_NUM") STEEM is staked and the rest stays liquid for fees."
+    read -rp "Send $BRIDGE_AMOUNT from @$STEEM_USERNAME to svm.bank now? [Y/n]: " SEND_BRIDGE < /dev/tty
+    case "$SEND_BRIDGE" in
+      [nN]*) ;;
+      *)
+        STEEM_BALANCE="$(curl -fsS -m 30 "$STEEM_RPC" -H 'Content-Type: application/json' \
+            -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"condenser_api.get_accounts\",\"params\":[[\"$STEEM_USERNAME\"]]}" 2>/dev/null \
+          | jq -r '.result[0].balance // empty' 2>/dev/null || true)"
+        if [ -z "$STEEM_BALANCE" ]; then
+          warn "could not read @$STEEM_USERNAME's balance, so nothing was sent."
+        elif ! awk -v b="${STEEM_BALANCE%% *}" -v a="$BRIDGE_STEEM" 'BEGIN{exit !(b+0 >= a+0)}'; then
+          warn "@$STEEM_USERNAME holds only $STEEM_BALANCE, less than $BRIDGE_AMOUNT, so nothing was sent."
+        else
+          log "Sending $BRIDGE_AMOUNT from @$STEEM_USERNAME to svm.bank (memo: $DEPOSIT_MEMO)…"
+          if TXID="$(steem_helper transfer "$STEEM_USERNAME" svm.bank "$BRIDGE_AMOUNT" "$DEPOSIT_MEMO")"; then
+            ok "Sent (Steem transaction $TXID)."
+            BRIDGE_SENT=1
+          else
+            warn "the automatic transfer failed. Check @$STEEM_USERNAME's history on Steem before sending again, so you don't pay twice."
+          fi
+        fi
+        ;;
+    esac
+  fi
+  if [ "$BRIDGE_SENT" = "0" ]; then
+    echo "  Bridge in your stake by hand: send $BRIDGE_AMOUNT from @$STEEM_USERNAME to 'svm.bank', memo EXACTLY: $DEPOSIT_MEMO"
+    read -rp "Press ENTER once sent… " _unused < /dev/tty
+  fi
 fi
 
 log "Waiting for balance (timeout ${FUND_TIMEOUT}s)…"
@@ -586,10 +797,17 @@ while :; do
   if [ $((poll_n % 6)) -eq 0 ]; then
     log "still waiting — balance ${BAL}, need ${STAKE_NUM}"
   fi
-  [ "$(date +%s)" -ge "$deadline" ] && die "balance still below stake requirement after ${FUND_TIMEOUT}s (current: ${BAL}). Fund more, then run create-validator manually."
+  [ "$(date +%s)" -ge "$deadline" ] && die "balance still below stake requirement after ${FUND_TIMEOUT}s (current: ${BAL}). Once funded, finish with: ./reset.sh --rejoin-only"
   sleep 10
 done
 ok "Funded (balance ${BAL})."
+
+# Stake STAKE_AMOUNT, or less so 1 STEEM stays liquid for the oracle's price-feed
+# fees (those txs are not fee-exempt). Whole STEEM, so the amount is exact.
+STAKE_WHOLE="$(awk -v b="$BAL" -v s="$STAKE_NUM" 'BEGIN{x = b - 1e18; if (x > s) x = s; printf "%d", x / 1e18}')"
+[ "$STAKE_WHOLE" -ge 1 ] 2>/dev/null || die "the balance leaves nothing to stake after 1 STEEM for fees."
+STAKE_AMOUNT="${STAKE_WHOLE}000000000000000000asteem"
+log "Staking $STAKE_WHOLE STEEM; the rest stays liquid for fees."
 
 # ── 9. build validator.json + create the validator ──────────────────────────
 PUBKEY="$(node comet show-validator --home "$HOME_DIR")"
@@ -635,10 +853,15 @@ PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail 
 [ -n "$PRIVKEY" ] || die "could not export the private key — set it up manually in oracle/.env and run: $COMPOSE --profile $ORACLE_PROFILE up -d"
 
 [ -f oracle/.env ] && warn "oracle/.env already exists — overwriting."
+: > oracle/.env
+chmod 600 oracle/.env    # before any key is written into it
 {
   echo "ORACLE_PRIVATE_KEY=$PRIVKEY"
   echo "ORACLE_START_BLOCK=latest"
-  echo "ORACLE_STEEM_RPC=https://api.steemit.com"
+  echo "ORACLE_STEEM_RPC=$STEEM_RPC"
+  echo "ORACLE_MULTISIG_ENABLED=true"
+  echo "ORACLE_STEEM_ACTIVE_WIF=$ACTIVE_WIF"
+  echo "ORACLE_STEEM_RPCS=$STEEM_RPCS"
   echo "ORACLE_PRICE_SOURCE=$PRICE_SOURCE"
   if [ "$PRICE_SOURCE" = "cmc" ]; then
     echo "ORACLE_CMC_API_KEY=$CMC_KEY"
@@ -647,7 +870,9 @@ PRIVKEY="$(kf_i keys unsafe-export-eth-key "$STEEM_USERNAME" 2>/dev/null | tail 
   fi
   echo "ORACLE_SBD_SYMBOL=SBD"
 } > oracle/.env
-ok "oracle/.env written."
+chmod 600 oracle/.env
+unset ACTIVE_WIF PRIVKEY
+ok "oracle/.env written (mode 600)."
 
 log "Starting the oracle ($ORACLE_PROFILE profile)…"
 $COMPOSE --profile "$ORACLE_PROFILE" up -d
@@ -656,3 +881,6 @@ ok "All done. Confirm your validator bonded:"
 echo "    docker exec $CONTAINER $BIN query staking validator $VALOPER"
 echo "Watch your oracle:"
 echo "    $COMPOSE logs -f oracle-$ORACLE_PROFILE"
+echo "Stake more later: bridge STEEM in (send it to svm.bank, memo: svm-deposit $ADDR), keep about 1 STEEM liquid for fees, then:"
+echo "    docker exec -it $CONTAINER $BIN tx staking delegate $VALOPER <amount>asteem --from $STEEM_USERNAME --keyring-backend $KEYRING --home $HOME_DIR --chain-id $CHAIN_ID --gas auto --gas-adjustment 1.5 --gas-prices $GAS_PRICES -y"
+echo "    (<amount> has 18 decimals: 100 STEEM is 100000000000000000000asteem.)"

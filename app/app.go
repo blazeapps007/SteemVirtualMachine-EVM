@@ -58,6 +58,7 @@ import (
 	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 	"github.com/spf13/cast"
 
+	"steemvm/app/stakinggate"
 	"steemvm/docs"
 	steembridgemodulekeeper "steemvm/x/oracle/bridge/keeper"
 	oracledatakeeper "steemvm/x/oracle/data/keeper"
@@ -103,6 +104,7 @@ type App struct {
 	AuthKeeper            authkeeper.AccountKeeper
 	BankKeeper            bankkeeper.Keeper
 	StakingKeeper         *stakingkeeper.Keeper
+	StakingIdentityGate   *stakinggate.Gate
 	SlashingKeeper        slashingkeeper.Keeper
 	MintKeeper            mintkeeper.Keeper
 	DistrKeeper           distrkeeper.Keeper
@@ -208,6 +210,7 @@ func New(
 		&app.AuthKeeper,
 		&app.BankKeeper,
 		&app.StakingKeeper,
+		&app.StakingIdentityGate,
 		&app.SlashingKeeper,
 		&app.MintKeeper,
 		&app.DistrKeeper,
@@ -223,6 +226,11 @@ func New(
 	); err != nil {
 		panic(err)
 	}
+
+	// The steembridge keeper depends on the staking keeper, so the staking
+	// module's identity gate can only be given it now, before Build registers
+	// the module's services.
+	app.StakingIdentityGate.Bind(app.SteembridgeKeeper)
 
 	// add to default baseapp options
 	// enable optimistic execution
@@ -375,20 +383,13 @@ func GetMaccPerms() map[string][]string {
 	return dup
 }
 
-// BlockedAddresses returns all the app's blocked account addresses.
+// BlockedAddresses returns the addresses the bank module blocks: every module
+// account (x/bank's default, see app_config.go), keyed by bech32 address.
 func BlockedAddresses() map[string]bool {
 	result := make(map[string]bool)
-
-	if len(blockAccAddrs) > 0 {
-		for _, addr := range blockAccAddrs {
-			result[addr] = true
-		}
-	} else {
-		for addr := range GetMaccPerms() {
-			result[addr] = true
-		}
+	for name := range GetMaccPerms() {
+		result[authtypes.NewModuleAddress(name).String()] = true
 	}
-
 	return result
 }
 

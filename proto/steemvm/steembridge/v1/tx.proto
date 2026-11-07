@@ -110,6 +110,13 @@ message MsgAttestWithdrawalPayout {
   uint64 amount_millisteem = 7;
   // asset is the asset the validator observed actually paid out on Steem.
   BridgeAsset asset = 8;
+  // destination_steem_account is the recipient the validator observed on the
+  // Steem transfer. The keeper checks it against the record, so a payout to the
+  // wrong account can't mark the withdrawal paid and cancel its refund.
+  string destination_steem_account = 9;
+  // memo is the memo the validator observed on the Steem transfer. The keeper
+  // checks it against the memo the user gave when bridging out.
+  string memo = 10;
 }
 
 // MsgAttestWithdrawalPayoutResponse defines the MsgAttestWithdrawalPayout response.

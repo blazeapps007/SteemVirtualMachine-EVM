@@ -243,7 +243,7 @@ func TestSubmitNameRegistration_AlreadyResolvedResubmissionIsBenignNoOp(t *testi
 	require.Len(t, genesis.NameRegistrationList[0].ValidatorConfirmations, 1, "the redundant attestation must not be recorded")
 }
 
-func TestSubmitNameRegistration_MismatchLeavesPendingUntouched(t *testing.T) {
+func TestSubmitNameRegistration_DifferingFactsBecomeASeparateCandidate(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableNameService(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -257,18 +257,18 @@ func TestSubmitNameRegistration_MismatchLeavesPendingUntouched(t *testing.T) {
 	_, err := ms.SubmitNameRegistration(f.ctx, baseNameRegistrationMsg(v1, txid, 0))
 	require.NoError(t, err)
 
-	mismatch := baseNameRegistrationMsg(v2, txid, 0)
-	mismatch.Memo = "0x2222222222222222222222222222222222222222"
-	resp, err := ms.SubmitNameRegistration(f.ctx, mismatch)
-	require.NoError(t, err, "a mismatch is a benign no-op, not a tx error")
+	differing := baseNameRegistrationMsg(v2, txid, 0)
+	differing.Memo = "0x2222222222222222222222222222222222222222" // its own candidate
+	resp, err := ms.SubmitNameRegistration(f.ctx, differing)
+	require.NoError(t, err, "a differing-facts attestation is a valid candidate vote, not an error")
 	require.NotNil(t, resp)
 
 	id, err := f.keeper.NameRegistrationByTxid.Get(f.ctx, collections.Join(txid, uint32(0)))
 	require.NoError(t, err)
 	registration, err := f.keeper.NameRegistration.Get(f.ctx, id)
 	require.NoError(t, err)
-	require.Equal(t, types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_PENDING, registration.Status)
-	require.Len(t, registration.ValidatorConfirmations, 1, "the mismatching validator's attestation must not be recorded")
+	require.Equal(t, types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_PENDING, registration.Status, "neither 50% candidate reaches 2/3")
+	require.Len(t, registration.ValidatorConfirmations, 2, "both attesters are recorded for audit/participation")
 }
 
 func TestSubmitNameRegistration_UnbondedConfirmerNotCounted(t *testing.T) {

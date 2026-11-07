@@ -5,6 +5,11 @@
 # backend, pulled in transitively via eth-account -- see pyproject.toml);
 # the final image is python:3.12-slim with just the installed package and
 # its runtime shared libraries, no compiler.
+#
+# Build context is oracle/ (docker-compose.yml: context ./oracle, dockerfile
+# python/Dockerfile), so the shared svm.bank signer conformance vectors
+# (oracle/multisig/vectors.json) ship inside the package:
+#   docker build -f oracle/python/Dockerfile oracle
 FROM python:3.12-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,8 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY pyproject.toml ./
-COPY src ./src
+COPY python/pyproject.toml ./
+COPY python/src ./src
+COPY multisig/vectors.json ./src/steemvm_oracle/multisig/vectors.json
 
 RUN pip install --no-cache-dir --prefix=/install .
 

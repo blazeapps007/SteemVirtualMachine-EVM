@@ -8,15 +8,17 @@ import { toBech32, fromBech32 } from "@cosmjs/encoding";
 import type { Registry } from "@cosmjs/proto-signing";
 import Long from "long";
 
+import { BridgeAsset } from "./proto/steemvm/steembridge/v1/asset";
 import type { Config } from "./config";
 import type { EthSecp256k1DirectSigner } from "./signer";
-import { SteemClient, extractGatewayTransfers, extractGatewayPayouts } from "./steemClient";
+import { SteemClient, extractGatewayTransfers, extractGatewayPayouts, type Payout } from "./steemClient";
 import { routeMemo, buildMsg, Intent, GATEWAY_ACCOUNT } from "./router";
 import { broadcastAttestations, broadcastPriceFeedMsgs, type EncodeObject } from "./broadcast";
 import { loadState, saveState, loadFeederState, saveFeederState } from "./state";
 import { Feeder, getAggregateVoteHash, type PriceSource } from "./priceFeeder";
 import { TYPE_URL_MSG_ATTEST_WITHDRAWAL_PAYOUT } from "./broadcast";
 import { validatorCanSubmit, type ValidatorRecord } from "./validatorGate";
+import { anchoredCursor, SteemAnchor } from "./steemAnchor";
 
 export interface CycleLogger {
   info(msg: string, meta?: Record<string, unknown>): void;
@@ -28,9 +30,9 @@ const VALOPER_HRP = "steemvaloper";
 
 /** Derives the bech32 valoper address from an account bech32 address — same
  * 20 bytes, different HRP (see oracle/PROTOCOL.md §1). Only used for
- * `x/staking` bonded-status lookups; every duty message field uses the
- * account address. */
-function toValoperAddress(accountAddress: string): string {
+ * `x/staking` lookups (bonded status here, the svm.bank signer's identity);
+ * every duty message field uses the account address. */
+export function toValoperAddress(accountAddress: string): string {
   const { data } = fromBech32(accountAddress);
   return toBech32(VALOPER_HRP, data);
 }
@@ -58,6 +60,7 @@ interface BridgeParams {
   name_service_enabled: boolean;
   bridge_out_enabled: boolean;
   relayer_start_block: string;
+  relayer_start_block_id?: string;
 }
 
 async function queryBridgeParams(restUrl: string): Promise<BridgeParams> {
@@ -84,6 +87,37 @@ async function queryValidatorCanSubmit(
   } catch (err) {
     if ((err as any).notFound) return { ...validatorCanSubmit(undefined), definitive: true };
     return { ok: false, reason: `validator lookup failed: ${String(err)}`, definitive: false };
+  }
+}
+
+interface WithdrawalRecord {
+  destination_steem_account?: string;
+  memo?: string;
+  amount_millisteem?: string;
+  asset?: string | number;
+}
+
+/** What differs between an observed payout and its withdrawal, the same
+ * comparison the chain makes; undefined when they match. */
+export function comparePayout(p: Payout, w: WithdrawalRecord): string | undefined {
+  if (p.destination !== w.destination_steem_account) return "recipient differs";
+  if (p.memo !== (w.memo ?? "")) return "memo differs";
+  if (p.amountMillisteem !== BigInt(w.amount_millisteem ?? 0)) return "amount differs";
+  const asset = w.asset === "BRIDGE_ASSET_SBD" || w.asset === 1 ? BridgeAsset.BRIDGE_ASSET_SBD : BridgeAsset.BRIDGE_ASSET_STEEM;
+  if (p.asset !== asset) return "asset differs";
+  return undefined;
+}
+
+/** Why a payout must not be attested, if any. A withdrawal this chain has never
+ * heard of doesn't match; any other failed query throws, so the same blocks are
+ * rescanned next cycle. */
+async function payoutMismatch(restUrl: string, p: Payout): Promise<string | undefined> {
+  try {
+    const resp = await getJson<{ withdrawal: WithdrawalRecord }>(restUrl, `/steemvm/steembridge/v1/withdrawal/${p.withdrawalId}`);
+    return comparePayout(p, resp.withdrawal);
+  } catch (err) {
+    if ((err as any).notFound || (err instanceof Error && err.message.toLowerCase().includes("key not found"))) return "no such withdrawal";
+    throw err;
   }
 }
 
@@ -217,6 +251,7 @@ export async function run(opts: {
   });
 
   let notBondedLogged = false;
+  const anchor = new SteemAnchor();
   // Why the price feeder is currently idle ("" when active), so the idle and
   // resume messages are logged once per change rather than every tick.
   const priceIdle = { reason: "" };
@@ -232,7 +267,7 @@ export async function run(opts: {
     if (abortSignal.aborted) break;
 
     try {
-      const result = await runCycle(logger, cfg, chainId, signer, registry, steem, stateDir, state, valoperAddr, notBondedLogged);
+      const result = await runCycle(logger, cfg, chainId, signer, registry, steem, stateDir, state, valoperAddr, notBondedLogged, anchor);
       state = result.state;
       notBondedLogged = result.notBondedLogged;
     } catch (err) {
@@ -293,6 +328,7 @@ async function runCycle(
   state: RelayerCycleState,
   valoperAddr: string,
   notBondedLogged: boolean,
+  anchor: SteemAnchor,
 ): Promise<{ state: RelayerCycleState; notBondedLogged: boolean }> {
   const params = await queryBridgeParams(cfg.nodeRestUrl);
   // GatewayAccount is a hardcoded chain constant, never read from params —
@@ -314,12 +350,26 @@ async function runCycle(
   }
   notBondedLogged = false;
 
+  // The chain's Steem anchor (genesis): this oracle's Steem node must agree
+  // on the anchor block's ID before anything it reports is attested.
+  const chainStart = Number(params.relayer_start_block || 0);
+  await anchor.verify(steem, chainStart, params.relayer_start_block_id || "");
+
   const lib = await steem.lastIrreversibleBlock();
 
   if (state.last_scanned_block === 0) {
-    const cursor = initialCursor(cfg.startBlock, cfg.startBlockIsLatest, lib, Number(params.relayer_start_block));
+    const cursor = anchoredCursor(initialCursor(cfg.startBlock, cfg.startBlockIsLatest, lib, chainStart), chainStart);
     const next = { last_scanned_block: cursor };
     logger.info("steem relayer cursor initialized", { cursor });
+    await saveState(stateDir, next);
+    return { state: next, notBondedLogged };
+  }
+  // A saved cursor from before the anchor (e.g. a state volume kept from a
+  // previous chain) jumps up to it: that history predates this chain.
+  const anchored = anchoredCursor(state.last_scanned_block, chainStart);
+  if (anchored !== state.last_scanned_block) {
+    logger.info("steem relayer cursor moved up to the chain's steem anchor", { from: state.last_scanned_block, to: anchored });
+    const next = { last_scanned_block: anchored };
     await saveState(stateDir, next);
     return { state: next, notBondedLogged };
   }
@@ -368,6 +418,15 @@ async function runCycle(
 
     if (params.bridge_out_enabled) {
       for (const payout of extractGatewayPayouts(nb.num, nb.block, gateway, cfg.steemSymbol, cfg.sbdSymbol)) {
+        const why = await payoutMismatch(cfg.nodeRestUrl, payout);
+        if (why) {
+          logger.error("not attesting a payout that doesn't match its withdrawal", {
+            withdrawalId: payout.withdrawalId.toString(),
+            steemTxid: payout.txid,
+            reason: why,
+          });
+          continue;
+        }
         blockMsgs.push({
           typeUrl: TYPE_URL_MSG_ATTEST_WITHDRAWAL_PAYOUT,
           value: {
@@ -377,11 +436,13 @@ async function runCycle(
             opIndex: payout.opIndex,
             steemBlock: payout.steemBlock,
             steemTimestamp: payout.steemTimestamp,
-            // Observed amount/asset — NOT the expected value from the
-            // Withdrawal record — so the chain's cross-check actually means
-            // something. See extractGatewayPayouts's doc comment.
+            // Observed facts — NOT the expected values from the Withdrawal
+            // record — so the chain's cross-check actually means something.
+            // See the Payout doc comment.
             amountMillisteem: Long.fromString(payout.amountMillisteem.toString(), true),
             asset: payout.asset,
+            destinationSteemAccount: payout.destination,
+            memo: payout.memo,
           },
         });
         logger.info("attesting withdrawal payout", {

@@ -21,18 +21,21 @@ export interface Transfer {
   asset: BridgeAsset;
 }
 
-/** A gateway→user payout of a bridge-out on Steem, identified by its
- * "svm-withdrawal <id>" memo. amountMillisteem/asset are what was ACTUALLY
- * observed paid out on Steem (not the expected value from the on-chain
- * Withdrawal record) — the chain cross-checks these against its own record,
- * so a manual relay that sent the wrong asset or amount can't be confirmed
- * as a valid payout. */
+/** A gateway→user payout of a bridge-out on Steem: one transaction with exactly
+ * two operations, the transfer and then a custom_json only the gateway's active
+ * authority can sign, naming the withdrawal. The transfer's memo is the user's
+ * own and means nothing here. Every other field is what was ACTUALLY observed on
+ * Steem (not the expected value from the on-chain Withdrawal record) — the chain
+ * cross-checks them against its own record, so a payout with the wrong recipient,
+ * memo, asset or amount can't be confirmed as a valid payout. */
 export interface Payout {
   withdrawalId: bigint;
   txid: string;
   opIndex: number;
   steemBlock: number;
   steemTimestamp: string;
+  destination: string;
+  memo: string;
   amountMillisteem: bigint;
   asset: BridgeAsset;
 }
@@ -99,6 +102,16 @@ export class SteemClient {
     return dgp.last_irreversible_block_num;
   }
 
+  /** The ID of Steem block num (its first 8 hex chars are the block number),
+   * used to verify the chain's Steem anchor. */
+  async blockId(num: number): Promise<string> {
+    const block = await this.call<{ block_id?: string } | null>("condenser_api.get_block", [num]);
+    if (!block || !block.block_id) {
+      throw new Error(`steem rpc returned no data for block ${num}`);
+    }
+    return block.block_id;
+  }
+
   /** Returns blocks from..to inclusive, fetched sequentially. A null result
    * for a block at or below the last irreversible block is an error, not a
    * skip: aborting the cycle makes the relayer retry rather than silently
@@ -154,18 +167,23 @@ function parseAssetAmountDec(amount: string, symbol: string): bigint {
   return parseLegacyDec(parts[0]);
 }
 
-/** Parses a gateway payout memo "svm-withdrawal <id>" into the withdrawal
- * id. The prefix must be a whole token and the id a plain base-10
- * integer; anything else returns undefined so the relayer ignores it. */
-export function parseWithdrawalMemo(memo: string): bigint | undefined {
-  const fields = memo.trim().split(/\s+/);
-  if (fields.length !== 2 || fields[0] !== "svm-withdrawal") {
-    return undefined;
-  }
-  if (!/^[0-9]+$/.test(fields[1])) {
-    return undefined;
-  }
-  return BigInt(fields[1]);
+export const PAYOUT_LINK_ID = "svm-withdrawal";
+const U64_MAX = (1n << 64n) - 1n;
+
+/** The withdrawal a custom_json operation names, if it is exactly a payout link
+ * signed by the gateway's active authority alone. */
+export function parsePayoutLink(rawOp: unknown, gateway: string): bigint | undefined {
+  if (!Array.isArray(rawOp) || rawOp.length !== 2 || rawOp[0] !== "custom_json") return undefined;
+  const body = rawOp[1];
+  if (typeof body !== "object" || body === null) return undefined;
+  const { id, required_auths: auths, required_posting_auths: posting, json } = body as Record<string, unknown>;
+  if (id !== PAYOUT_LINK_ID || !Array.isArray(auths) || auths.length !== 1 || auths[0] !== gateway) return undefined;
+  if (Array.isArray(posting) ? posting.length !== 0 : posting !== undefined && posting !== null) return undefined;
+  if (typeof json !== "string") return undefined;
+  const m = /^\{"withdrawal_id":"(0|[1-9][0-9]*)"\}$/.exec(json);
+  if (!m) return undefined;
+  const wid = BigInt(m[1]);
+  return wid <= U64_MAX ? wid : undefined;
 }
 
 /** Converts a Steem asset string like "70.561 STEEM" into millisteem
@@ -216,7 +234,9 @@ export function extractGatewayTransfers(
 
     tx.operations.forEach((rawOp, opIndex) => {
       const parsed = parseTransferOp(rawOp);
-      if (!parsed || parsed.to !== gateway) return;
+      // A gateway→gateway transfer is never a deposit: a payout's memo is chosen
+      // by the user who bridged out.
+      if (!parsed || parsed.to !== gateway || parsed.from === gateway) return;
 
       let amount: bigint | undefined;
       let asset: BridgeAsset;
@@ -248,14 +268,11 @@ export function extractGatewayTransfers(
   return transfers;
 }
 
-/** Scans a block for transfer operations sent FROM the gateway account
- * whose memo is "svm-withdrawal <id>" — the gateway's on-Steem payout of a
- * bridge-out. The observed amount/asset ARE parsed and reported (unlike the
- * chain's own knowledge of the expected payout, this is what lets the
- * keeper's on-chain check catch a wrong-asset/wrong-amount manual relay
- * instead of trusting txid/opIndex alone). An operation whose amount doesn't
- * parse as either configured symbol is skipped — a payout the oracle can't
- * identify the asset of isn't reported as a fact. */
+/** Scans a block for withdrawal payouts: transactions with exactly two
+ * operations, a transfer FROM the gateway and the custom_json naming the
+ * withdrawal. A memo alone never counts. An operation whose amount doesn't parse
+ * as either configured symbol is skipped — a payout the oracle can't identify the
+ * asset of isn't reported as a fact. */
 export function extractGatewayPayouts(
   blockNum: number,
   block: SteemBlock,
@@ -266,38 +283,38 @@ export function extractGatewayPayouts(
   const payouts: Payout[] = [];
   block.transactions.forEach((tx, txNum) => {
     const txid = tx.transaction_id || block.transaction_ids?.[txNum];
-    if (!txid) return;
+    if (!txid || tx.operations.length !== 2) return;
 
-    tx.operations.forEach((rawOp, opIndex) => {
-      const parsed = parseTransferOp(rawOp);
-      if (!parsed || parsed.from !== gateway) return;
-      const id = parseWithdrawalMemo(parsed.memo);
-      if (id === undefined) return;
+    const parsed = parseTransferOp(tx.operations[0]);
+    if (!parsed || parsed.from !== gateway) return;
+    const id = parsePayoutLink(tx.operations[1], gateway);
+    if (id === undefined) return;
 
-      let amount: bigint | undefined;
-      let asset: BridgeAsset;
-      const steemAmount = parseSteemAmount(parsed.amount, steemSymbol);
-      if (steemAmount !== undefined) {
-        amount = steemAmount;
-        asset = BridgeAsset.BRIDGE_ASSET_STEEM;
-      } else if (sbdSymbol !== "") {
-        const sbdAmount = parseSteemAmount(parsed.amount, sbdSymbol);
-        if (sbdAmount === undefined) return;
-        amount = sbdAmount;
-        asset = BridgeAsset.BRIDGE_ASSET_SBD;
-      } else {
-        return;
-      }
+    let amount: bigint | undefined;
+    let asset: BridgeAsset;
+    const steemAmount = parseSteemAmount(parsed.amount, steemSymbol);
+    if (steemAmount !== undefined) {
+      amount = steemAmount;
+      asset = BridgeAsset.BRIDGE_ASSET_STEEM;
+    } else if (sbdSymbol !== "") {
+      const sbdAmount = parseSteemAmount(parsed.amount, sbdSymbol);
+      if (sbdAmount === undefined) return;
+      amount = sbdAmount;
+      asset = BridgeAsset.BRIDGE_ASSET_SBD;
+    } else {
+      return;
+    }
 
-      payouts.push({
-        withdrawalId: id,
-        txid,
-        opIndex,
-        steemBlock: blockNum,
-        steemTimestamp: block.timestamp,
-        amountMillisteem: amount,
-        asset,
-      });
+    payouts.push({
+      withdrawalId: id,
+      txid,
+      opIndex: 0,
+      steemBlock: blockNum,
+      steemTimestamp: block.timestamp,
+      destination: parsed.to,
+      memo: parsed.memo,
+      amountMillisteem: amount,
+      asset,
     });
   });
   return payouts;

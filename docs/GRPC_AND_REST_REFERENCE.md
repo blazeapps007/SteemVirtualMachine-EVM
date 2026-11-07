@@ -247,7 +247,7 @@ The `asteem`/`asbd` balances live here. **Query** (13 methods, all REST GET)
 
 ### staking — `cosmos.staking.v1beta1`
 
-The validator-identity ante gate (`app/ante_steembridge.go`) sits in front of `MsgCreateValidator`/
+The validator-identity gate (`app/stakinggate`) wraps `MsgCreateValidator`/
 `MsgEditValidator` here — see the steembridge section above. **Query** (14 methods, all REST GET)
 
 | RPC | REST path | Description |
@@ -271,7 +271,7 @@ The validator-identity ante gate (`app/ante_steembridge.go`) sits in front of `M
 
 | RPC | Description |
 |---|---|
-| `CreateValidator` | Create a new validator — gated by the steembridge validator-identity ante check (moniker must be an ACTIVE name link, `Description.details` must embed `owner/active/posting=STM...` keys). |
+| `CreateValidator` | Create a new validator — gated by the steembridge validator-identity check (moniker must be an ACTIVE name link, `Description.details` must embed `owner/active/posting=STM...` keys). |
 | `EditValidator` | Edit an existing validator — same identity gate. |
 | `Delegate` | Delegate `asteem` to a validator. |
 | `BeginRedelegate` | Move a delegation from one validator to another. |
@@ -480,7 +480,7 @@ a direct message.
 ## cosmos/evm v0.7.1 modules
 
 Proto sources read from the vendored `github.com/cosmos/evm@v0.7.1` module cache
-(`proto/cosmos/evm/**`). Wired in `app/evm.go`; EVM chain id `8163` (`0x1fe3`), evm denom `asteem`
+(`proto/cosmos/evm/**`). Wired in `app/evm.go`; EVM chain id `81630` (`0x13ede`), evm denom `asteem`
 (18 dec). All three below are also directly reachable through the EVM JSON-RPC surface (`eth_*`
 etc.) documented in the companion EVM reference — the entries here are the Cosmos-side gRPC/REST
 duplicate of that same state.

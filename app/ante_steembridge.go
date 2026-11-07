@@ -1,9 +1,7 @@
 package app
 
 import (
-	errorsmod "cosmossdk.io/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	stdante "github.com/cosmos/cosmos-sdk/x/auth/ante"
 	sdkvesting "github.com/cosmos/cosmos-sdk/x/auth/vesting/types"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
@@ -13,6 +11,8 @@ import (
 	vmante "github.com/cosmos/evm/ante/evm"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	ibcante "github.com/cosmos/ibc-go/v11/modules/core/ante"
+
+	"github.com/cosmos/gogoproto/proto"
 
 	steembridgekeeper "steemvm/x/oracle/bridge/keeper"
 	steembridgetypes "steemvm/x/oracle/bridge/types"
@@ -33,9 +33,9 @@ import (
 // steembridgeFeeExemptionDecorator) — waiving only DeductFeeDecorator
 // isn't enough, since MinGasPriceDecorator runs first and independently
 // rejects zero-fee txs whenever the feemarket's min_gas_price is non-zero.
-// Ethereum and dynamic-fee-extension txs are untouched and delegate to
-// cosmos/evm's own handler unchanged, since neither tx type can ever carry
-// steembridge messages.
+// Only Ethereum txs delegate to cosmos/evm's own handler. A Cosmos tx carrying
+// the dynamic-fee extension runs this same chain, not upstream's copy: it can
+// hold any Cosmos message, and this chain's authz limiter must apply to it too.
 //
 // Re-diffed against cosmos/evm v0.7.0's ante/cosmos.go: the chain is
 // otherwise decorator-for-decorator identical to the v0.6.0 fork this was
@@ -59,15 +59,24 @@ func newSteembridgeAnteHandler(
 	defaultHandler := evmante.NewAnteHandler(options)
 
 	return func(ctx sdk.Context, tx sdk.Tx, sim bool) (sdk.Context, error) {
-		if txWithExtensions, ok := tx.(stdante.HasExtensionOptionsTx); ok {
-			if len(txWithExtensions.GetExtensionOptions()) > 0 {
-				return defaultHandler(ctx, tx, sim)
-			}
+		if isEthereumTx(tx) {
+			return defaultHandler(ctx, tx, sim)
 		}
 
 		handler := newSteembridgeCosmosAnteHandler(ctx, options, bridgeKeeper, stakingKeeper)
 		return handler(ctx, tx, sim)
 	}
+}
+
+// isEthereumTx reports whether a tx belongs to cosmos/evm's Ethereum handler,
+// which dispatches on the first extension option the same way.
+func isEthereumTx(tx sdk.Tx) bool {
+	withExtensions, ok := tx.(stdante.HasExtensionOptionsTx)
+	if !ok {
+		return false
+	}
+	opts := withExtensions.GetExtensionOptions()
+	return len(opts) > 0 && opts[0].GetTypeUrl() == "/"+proto.MessageName(&evmtypes.ExtensionOptionsEthereumTx{})
 }
 
 // newSteembridgeCosmosAnteHandler is a fork of cosmos/evm's unexported
@@ -93,14 +102,10 @@ func newSteembridgeCosmosAnteHandler(
 
 	return sdk.ChainAnteDecorators(
 		cosmosante.NewRejectMessagesDecorator(), // reject MsgEthereumTxs
-		cosmosante.NewAuthzLimiterDecorator( // disable the Msg types that cannot be included on an authz.MsgExec msgs field
-			sdk.MsgTypeURL(&evmtypes.MsgEthereumTx{}),
-			sdk.MsgTypeURL(&sdkvesting.MsgCreateVestingAccount{}),
-		),
+		cosmosante.NewAuthzLimiterDecorator(authzDisabledMsgTypes()...),
 		stdante.NewSetUpContextDecorator(),
 		stdante.NewExtensionOptionsDecorator(options.ExtensionOptionChecker),
 		stdante.NewValidateBasicDecorator(),
-		newSteembridgeValidatorGateDecorator(bridgeKeeper),
 		stdante.NewTxTimeoutHeightDecorator(),
 		stdante.NewValidateMemoDecorator(options.AccountKeeper),
 		newSteembridgeFeeExemptionDecorator(minGasPriceDecorator, consumeGasForTxSizeDecorator, deductFeeDecorator, bridgeKeeper, stakingKeeper),
@@ -112,6 +117,23 @@ func newSteembridgeCosmosAnteHandler(
 		stdante.NewIncrementSequenceDecorator(options.AccountKeeper),
 		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
 	)
+}
+
+// authzDisabledMsgTypes are the Msg types that may never be granted via
+// authz.MsgGrant or executed inside authz.MsgExec (the limiter recurses into
+// nested MsgExec too).
+//
+// MsgCreateValidator/MsgEditValidator are on the list because the validator
+// identity gate (steembridgeValidatorGateDecorator) only sees a tx's top-level
+// messages: wrapped in MsgExec they would otherwise reach x/staking unchecked,
+// letting anyone register an anonymous validator or strip an identity.
+func authzDisabledMsgTypes() []string {
+	return []string{
+		sdk.MsgTypeURL(&evmtypes.MsgEthereumTx{}),
+		sdk.MsgTypeURL(&sdkvesting.MsgCreateVestingAccount{}),
+		sdk.MsgTypeURL(&stakingtypes.MsgCreateValidator{}),
+		sdk.MsgTypeURL(&stakingtypes.MsgEditValidator{}),
+	}
 }
 
 // steembridgeFeeExemptionDecorator waives BOTH of the chain's fee-charging
@@ -259,48 +281,4 @@ func (d steembridgeFeeExemptionDecorator) qualifiesAsValidatorAttestation(ctx sd
 		return false
 	}
 	return true
-}
-
-// steembridgeValidatorGateDecorator forces every validator to carry a Steem
-// identity. It rejects MsgCreateValidator / MsgEditValidator unless the
-// validator's staking moniker is a registered, ACTIVE Steem username owned by
-// this validator's own account, and its Description.details embeds the three
-// Steem public keys (owner=STM...;active=STM...;posting=STM...). The check is
-// waived when the name service is disabled. Read-only; it never writes state.
-//
-// On MsgEditValidator, x/staking's DoNotModifyDesc sentinel means "leave that
-// field unchanged"; an edit touching neither moniker nor details can't affect
-// the identity and passes, while any edit that rewrites either is validated on
-// the effective post-edit values, so the identity can't be stripped. See
-// Keeper.ValidateValidatorEdit.
-type steembridgeValidatorGateDecorator struct {
-	bridgeKeeper steembridgekeeper.Keeper
-}
-
-func newSteembridgeValidatorGateDecorator(bridgeKeeper steembridgekeeper.Keeper) steembridgeValidatorGateDecorator {
-	return steembridgeValidatorGateDecorator{bridgeKeeper: bridgeKeeper}
-}
-
-func (d steembridgeValidatorGateDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	for _, msg := range tx.GetMsgs() {
-		switch m := msg.(type) {
-		case *stakingtypes.MsgCreateValidator:
-			valAddr, err := sdk.ValAddressFromBech32(m.ValidatorAddress)
-			if err != nil {
-				return ctx, errorsmod.Wrapf(sdkerrors.ErrInvalidAddress, "invalid validator address: %s", err)
-			}
-			if err := d.bridgeKeeper.ValidateValidatorCreationEligibility(ctx, valAddr.Bytes(), m.Description.Moniker, m.Description.Details); err != nil {
-				return ctx, errorsmod.Wrap(sdkerrors.ErrUnauthorized, err.Error())
-			}
-		case *stakingtypes.MsgEditValidator:
-			valAddr, err := sdk.ValAddressFromBech32(m.ValidatorAddress)
-			if err != nil {
-				return ctx, errorsmod.Wrapf(sdkerrors.ErrInvalidAddress, "invalid validator address: %s", err)
-			}
-			if err := d.bridgeKeeper.ValidateValidatorEdit(ctx, valAddr.Bytes(), m.Description.Moniker, m.Description.Details); err != nil {
-				return ctx, errorsmod.Wrap(sdkerrors.ErrUnauthorized, err.Error())
-			}
-		}
-	}
-	return next(ctx, tx, simulate)
 }
