@@ -7,8 +7,6 @@ import (
 	"cosmossdk.io/collections"
 	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-
-	"steemvm/x/oracle/bridge/types"
 )
 
 // payoutCandidateKey encodes a (txid, op-index) payout candidate into the
