@@ -105,8 +105,7 @@ govet:
 
 govulncheck:
 	@echo Running govulncheck...
-	@go tool golang.org/x/vuln/cmd/govulncheck@latest
-	@govulncheck ./...
+	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 .PHONY: govet govulncheck
 
