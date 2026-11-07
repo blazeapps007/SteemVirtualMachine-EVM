@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -133,6 +134,21 @@ func (c *SteemClient) LastIrreversibleBlock() (uint64, error) {
 	return dgp.LastIrreversibleBlockNum, nil
 }
 
+// BlockID returns the ID of Steem block num (its first 8 hex chars are the
+// block number), used to verify the chain's Steem anchor.
+func (c *SteemClient) BlockID(num uint64) (string, error) {
+	var block *struct {
+		BlockID string `json:"block_id"`
+	}
+	if err := c.call("condenser_api.get_block", []any{num}, &block); err != nil {
+		return "", err
+	}
+	if block == nil || block.BlockID == "" {
+		return "", fmt.Errorf("steem rpc returned no data for block %d", num)
+	}
+	return block.BlockID, nil
+}
+
 // FetchBlocks returns blocks from..to inclusive, fetched sequentially. A
 // null result for a block at or below the last irreversible block is an
 // error, not a skip: it means the RPC endpoint (e.g. a lagging backend in a
@@ -193,7 +209,9 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, steemS
 			if err := json.Unmarshal(tuple[1], &op); err != nil {
 				continue
 			}
-			if op.To != gateway {
+			// A gateway→gateway transfer is never a deposit: a payout's memo is
+			// chosen by the user who bridged out.
+			if op.To != gateway || op.From == gateway {
 				continue
 			}
 
@@ -226,32 +244,70 @@ func ExtractGatewayTransfers(blockNum uint64, block *steemBlock, gateway, steemS
 	return transfers
 }
 
-// Payout is a gateway→user payout of a bridge-out on Steem, identified by its
-// "svm-withdrawal <id>" memo, that a validator attests to flip the withdrawal
-// REQUESTED→PROCESSED. AmountMillisteem/Asset are what was ACTUALLY observed
-// paid out on Steem (not the expected value from the Withdrawal record) — the
-// chain cross-checks these against its own record, so a manual relay that
-// sent the wrong asset or amount can't be confirmed as a valid payout.
+// Payout is a gateway→user payout of a bridge-out on Steem that a validator
+// attests to flip the withdrawal REQUESTED→PROCESSED. It is one transaction with
+// exactly two operations: the transfer, then a custom_json that only the gateway's
+// active authority can sign, naming the withdrawal. The transfer's memo is the
+// user's own and means nothing here. Every other field is what was ACTUALLY
+// observed on Steem (not the expected value from the Withdrawal record) — the
+// chain cross-checks them against its own record, so a payout with the wrong
+// recipient, memo, asset or amount can't be confirmed as a valid payout.
 type Payout struct {
 	WithdrawalID     uint64
 	Txid             string
 	OpIndex          uint32
 	SteemBlock       uint64
 	SteemTimestamp   string
+	Destination      string
+	Memo             string
 	AmountMillisteem uint64
 	Asset            steembridgetypes.BridgeAsset
 }
 
-// ExtractGatewayPayouts scans a block for transfer operations sent FROM the
-// gateway account whose memo is "svm-withdrawal <id>" — the gateway's on-Steem
-// payout of bridge-out #id. The observed amount/asset ARE parsed and reported
-// (unlike the chain's own knowledge of the expected payout, this is what lets
-// AttestWithdrawalPayout's on-chain check catch a wrong-asset/wrong-amount
-// manual relay instead of trusting txid/op_index alone). An operation whose
-// amount doesn't parse as either configured symbol is skipped — a payout the
-// oracle can't identify the asset of isn't reported as a fact. OpIndex matches
-// the module's (txid, op_index) dedup key; the block timestamp is used
-// verbatim so all validators submit byte-identical facts.
+// PayoutLinkID is the custom_json id of a payout's link.
+const PayoutLinkID = "svm-withdrawal"
+
+var payoutLinkRe = regexp.MustCompile(`^\{"withdrawal_id":"(0|[1-9][0-9]*)"\}$`)
+
+type customJSONOp struct {
+	RequiredAuths        []string `json:"required_auths"`
+	RequiredPostingAuths []string `json:"required_posting_auths"`
+	ID                   string   `json:"id"`
+	JSON                 string   `json:"json"`
+}
+
+// parseOp decodes a ["type", {body}] operation of the given type.
+func parseOp(rawOp json.RawMessage, wantType string, body any) bool {
+	var tuple []json.RawMessage
+	if err := json.Unmarshal(rawOp, &tuple); err != nil || len(tuple) != 2 {
+		return false
+	}
+	var opType string
+	if err := json.Unmarshal(tuple[0], &opType); err != nil || opType != wantType {
+		return false
+	}
+	return json.Unmarshal(tuple[1], body) == nil
+}
+
+// ParsePayoutLink returns the withdrawal a custom_json operation names, if it is
+// exactly a payout link signed by the gateway's active authority alone.
+func ParsePayoutLink(rawOp json.RawMessage, gateway string) (uint64, bool) {
+	var c customJSONOp
+	if !parseOp(rawOp, "custom_json", &c) {
+		return 0, false
+	}
+	if c.ID != PayoutLinkID || len(c.RequiredAuths) != 1 || c.RequiredAuths[0] != gateway || len(c.RequiredPostingAuths) != 0 {
+		return 0, false
+	}
+	m := payoutLinkRe.FindStringSubmatch(c.JSON)
+	if m == nil {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(m[1], 10, 64)
+	return id, err == nil
+}
+
+// ExtractGatewayPayouts returns the withdrawal payouts in a block.
 func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway, steemSymbol, sbdSymbol string) []Payout {
 	if block == nil {
 		return nil
@@ -263,55 +319,44 @@ func ExtractGatewayPayouts(blockNum uint64, block *steemBlock, gateway, steemSym
 		if txid == "" && txNum < len(block.TransactionIds) {
 			txid = block.TransactionIds[txNum]
 		}
-		if txid == "" {
+		if txid == "" || len(tx.Operations) != 2 {
 			continue
 		}
 
-		for opIndex, rawOp := range tx.Operations {
-			var tuple []json.RawMessage
-			if err := json.Unmarshal(rawOp, &tuple); err != nil || len(tuple) != 2 {
-				continue
-			}
-			var opType string
-			if err := json.Unmarshal(tuple[0], &opType); err != nil || opType != "transfer" {
-				continue
-			}
-			var op transferOp
-			if err := json.Unmarshal(tuple[1], &op); err != nil {
-				continue
-			}
-			if op.From != gateway {
-				continue
-			}
-			id, ok := ParseWithdrawalMemo(op.Memo)
+		var op transferOp
+		if !parseOp(tx.Operations[0], "transfer", &op) || op.From != gateway {
+			continue
+		}
+		id, ok := ParsePayoutLink(tx.Operations[1], gateway)
+		if !ok {
+			continue
+		}
+
+		var amount uint64
+		var asset steembridgetypes.BridgeAsset
+		if a, ok := ParseSteemAmount(op.Amount, steemSymbol); ok {
+			amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_STEEM
+		} else if sbdSymbol != "" {
+			a, ok := ParseSteemAmount(op.Amount, sbdSymbol)
 			if !ok {
 				continue
 			}
-
-			var amount uint64
-			var asset steembridgetypes.BridgeAsset
-			if a, ok := ParseSteemAmount(op.Amount, steemSymbol); ok {
-				amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_STEEM
-			} else if sbdSymbol != "" {
-				a, ok := ParseSteemAmount(op.Amount, sbdSymbol)
-				if !ok {
-					continue
-				}
-				amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_SBD
-			} else {
-				continue
-			}
-
-			payouts = append(payouts, Payout{
-				WithdrawalID:     id,
-				Txid:             txid,
-				OpIndex:          uint32(opIndex), //nolint:gosec // ops per tx are tiny
-				SteemBlock:       blockNum,
-				SteemTimestamp:   block.Timestamp,
-				AmountMillisteem: amount,
-				Asset:            asset,
-			})
+			amount, asset = a, steembridgetypes.BridgeAsset_BRIDGE_ASSET_SBD
+		} else {
+			continue
 		}
+
+		payouts = append(payouts, Payout{
+			WithdrawalID:     id,
+			Txid:             txid,
+			OpIndex:          0,
+			SteemBlock:       blockNum,
+			SteemTimestamp:   block.Timestamp,
+			Destination:      op.To,
+			Memo:             op.Memo,
+			AmountMillisteem: amount,
+			Asset:            asset,
+		})
 	}
 	return payouts
 }
@@ -372,22 +417,6 @@ func parseAssetAmountDec(amount, symbol string) (math.LegacyDec, error) {
 		return math.LegacyDec{}, fmt.Errorf("expected a %q amount, got %q", symbol, amount)
 	}
 	return math.LegacyNewDecFromStr(parts[0])
-}
-
-// ParseWithdrawalMemo parses a gateway payout memo "svm-withdrawal <id>" into
-// the withdrawal id. The prefix must be a whole token and the id a plain base-10
-// uint64; anything else (a human note, a wrong format) returns ok=false so the
-// relayer ignores it.
-func ParseWithdrawalMemo(memo string) (uint64, bool) {
-	fields := strings.Fields(strings.TrimSpace(memo))
-	if len(fields) != 2 || fields[0] != "svm-withdrawal" {
-		return 0, false
-	}
-	id, err := strconv.ParseUint(fields[1], 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return id, true
 }
 
 // ParseSteemAmount converts a Steem asset string like "70.561 STEEM" into

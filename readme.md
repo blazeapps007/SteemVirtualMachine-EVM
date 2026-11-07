@@ -26,8 +26,8 @@ providing a full Ethereum execution layer (JSON-RPC, ERC-20, EIP-1559 fee market
 
 | | |
 |---|---|
-| Cosmos chain ID | `steemvm` |
-| EVM chain ID | `8163` |
+| Cosmos chain ID | `SteemVM-Manaslu-81630` |
+| EVM chain ID | `81630` |
 | Address prefix | `steem` (e.g. `steem1…`, operators `steemvaloper1…`) |
 | Native denom | `asteem` — 18 decimals, atto-denominated (`1 STEEM = 10^18 asteem`) |
 | Key type | `eth_secp256k1` at BIP44 coin type 60 — **MetaMask-compatible** |
@@ -56,9 +56,10 @@ account has gas to confirm with.
 **Validator identity** — whenever the name service is enabled, a validator's
 `moniker` must be a registered, ACTIVE Steem username **owned by that
 validator's own account**, and its `details` field must carry the account's
-`owner`/`active`/`posting` public keys. This is enforced in the ante handler:
-`create-validator` and `edit-validator` are rejected otherwise, and the identity
-cannot be stripped after the fact.
+`owner`/`active`/`posting` public keys. This is enforced in the staking message
+server (`app/stakinggate`), so it holds on every route: `create-validator` and
+`edit-validator` are rejected otherwise, and the identity cannot be stripped after
+the fact.
 
 **Choice of oracle client** — a separate container (never the chain binary
 itself) watches Steem and feeds both the bridge and the price feed. Point it at
@@ -89,7 +90,7 @@ identical on any chain built on it:
 |---|---|---|
 | `0x…0100` | p256 | Verifies secp256r1 (P-256) signatures on-chain — e.g. passkey/WebAuthn-style auth |
 | `0x…0400` | bech32 | Converts between `steem1…` (bech32) and `0x…` (hex) address forms |
-| `0x…0800` | staking | Delegate, undelegate, redelegate, and query staking state from Solidity |
+| `0x…0800` | staking | Delegate, undelegate, redelegate, and query staking state from Solidity. `createValidator`/`editValidator` enforce the same Steem-identity rule as Cosmos txs (from v0.0.5) |
 | `0x…0801` | distribution | Claim/query staking rewards from Solidity |
 | `0x…0802` | ics20 | IBC fungible-token transfers initiated from Solidity |
 | `0x…0804` | bank | Query and transfer any bank denom (not just `asteem`) from Solidity |
@@ -109,6 +110,19 @@ identical on any chain built on it:
 
 ## Running a node / becoming a validator
 
+[![Run a SteemVM validator on DigitalOcean](https://img.shields.io/badge/DigitalOcean-Run%20a%20validator-0080FF?style=for-the-badge&logo=digitalocean&logoColor=white)](https://m.do.co/c/ca4fa7f3ca18)
+
+**One command on a fresh Ubuntu server** (e.g. a DigitalOcean Droplet; the
+button above is a referral link that signs you up). It asks only for your
+Steem username and Steem active key, then installs Docker and runs the whole
+validator setup:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.6/install.sh | sudo bash
+```
+
+Step by step: [One-click validator on DigitalOcean](Instructions/README.md#one-click-validator-on-digitalocean).
+
 **→ See [`Instructions/README.md`](Instructions/README.md).**
 
 That guide is the authoritative path and covers all three ways to run a node:
@@ -116,7 +130,7 @@ the automated `new-validator.sh` script (recommended for most people), a
 manual Docker Compose walkthrough for anyone who wants control over each
 step, and building/running `steemvmd` from source without Docker. All three
 converge on the same validator-onboarding steps: creating a key, linking and
-confirming your Steem name, getting faucet coins, building `validator.json`,
+confirming your Steem name, bridging in your stake, building `validator.json`,
 staking, and attesting transfers. The `Instructions/` directory also holds
 the canonical node configuration (`app.toml`, `config.toml`, `client.toml`,
 `genesis.json`) that the Docker setup copies into the node home on every

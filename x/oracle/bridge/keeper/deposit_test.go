@@ -84,7 +84,12 @@ func TestAttestDeposit_DuplicateConfirmationIsBenignNoOp(t *testing.T) {
 	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 1, "duplicate confirmation must not be recorded twice")
 }
 
-func TestAttestDeposit_MismatchLeavesDepositUntouched(t *testing.T) {
+// TestAttestDeposit_DifferingFactsBecomeASeparateCandidate verifies the
+// per-fact-set tally: two validators (50% each) attest the same (txid,
+// op-index) with conflicting facts. Each vote is recorded under its own
+// fact-set candidate, the record's provisional facts are left as the first
+// attester's, and — because neither candidate reaches 2/3 — nothing mints.
+func TestAttestDeposit_DifferingFactsBecomeASeparateCandidate(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
 	ms := keeper.NewMsgServerImpl(f.keeper)
@@ -100,17 +105,18 @@ func TestAttestDeposit_MismatchLeavesDepositUntouched(t *testing.T) {
 	require.NoError(t, err)
 
 	msg2 := baseDepositMsg(v2, txid, 0)
-	msg2.AmountMillisteem = 9999 // conflicting raw fact
+	msg2.AmountMillisteem = 9999 // conflicting raw fact -> its own candidate
 
 	resp, err := ms.AttestDeposit(f.ctx, msg2)
-	require.NoError(t, err, "a mismatch is a benign no-op, not a tx error")
+	require.NoError(t, err, "a differing-facts attestation is a valid candidate vote, not an error")
 	require.NotNil(t, resp)
 
 	genesis, err := f.keeper.ExportGenesis(f.ctx)
 	require.NoError(t, err)
 	require.Len(t, genesis.DepositList, 1)
-	require.Equal(t, uint64(1000), genesis.DepositList[0].AmountMillisteem, "original pending deposit must survive unchanged")
-	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 1, "the mismatching validator's confirmation must not be recorded")
+	require.Equal(t, uint64(1000), genesis.DepositList[0].AmountMillisteem, "provisional facts stay the first attester's until a candidate wins")
+	require.False(t, genesis.DepositList[0].Minted, "neither 50% candidate reaches 2/3")
+	require.Len(t, genesis.DepositList[0].ValidatorConfirmations, 2, "both attesters are recorded for audit/participation")
 }
 
 func TestAttestDeposit_ThresholdMintsToDerivedDestination(t *testing.T) {
@@ -161,8 +167,11 @@ func TestAttestDeposit_ThresholdMintsToDerivedDestination(t *testing.T) {
 }
 
 // TestAttestDeposit_FinalizationReportsToOracle verifies the unified-slashing
-// reporting: a deposit reports its attester set to the parent oracle engine
-// exactly once, the moment it finalizes — and not before.
+// reporting: a finalized deposit is reported to the parent oracle engine
+// exactly once, by the EndBlocker drain (FlushBridgeDuty), with the FULL set
+// of validators that attested during the block — including one whose
+// attestation lands in the same block but after the 2/3 threshold was already
+// crossed. Nothing is reported before the EndBlocker runs.
 func TestAttestDeposit_FinalizationReportsToOracle(t *testing.T) {
 	f := initFixtureWithFakes(t)
 	enableBridge(t, f)
@@ -170,43 +179,45 @@ func TestAttestDeposit_FinalizationReportsToOracle(t *testing.T) {
 
 	v1 := newTestValidator(t, 1)
 	v2 := newTestValidator(t, 2)
-	// total bonded = 250; v1 alone (40%) is under 2/3, v1+v2 (100%) is over.
+	v3 := newTestValidator(t, 3)
+	// total bonded = 300; v1 alone (33%) is under 2/3, v1+v2 (83%) is over.
 	f.stakingKeeper.setValidator(v1.ValAddr, 100, true)
 	f.stakingKeeper.setValidator(v2.ValAddr, 150, true)
+	f.stakingKeeper.setValidator(v3.ValAddr, 50, true)
 
 	dest := sdk.AccAddress([]byte("destination_20_bytes")[:20])
 	txid := "eeee000000000000000000000000000000000000"
 
-	msg1 := baseDepositMsg(v1, txid, 0)
-	msg1.Memo = dest.String()
-	_, err := ms.AttestDeposit(f.ctx, msg1)
+	for _, v := range []testValidator{v1, v2} {
+		msg := baseDepositMsg(v, txid, 0)
+		msg.Memo = dest.String()
+		_, err := ms.AttestDeposit(f.ctx, msg)
+		require.NoError(t, err)
+	}
+	// v3 attests the SAME deposit a moment later, after it already crossed 2/3.
+	msg3 := baseDepositMsg(v3, txid, 0)
+	msg3.Memo = dest.String()
+	_, err := ms.AttestDeposit(f.ctx, msg3)
 	require.NoError(t, err)
-	require.Empty(t, f.oracleKeeper.reported, "not finalized yet -> nothing reported")
 
-	msg2 := baseDepositMsg(v2, txid, 0)
-	msg2.Memo = dest.String()
-	_, err = ms.AttestDeposit(f.ctx, msg2)
-	require.NoError(t, err)
+	require.Empty(t, f.oracleKeeper.reported, "nothing is reported until the EndBlocker drains the duty queue")
 
-	require.Len(t, f.oracleKeeper.reported, 1, "finalization reports exactly one bridge event")
+	require.NoError(t, f.keeper.FlushBridgeDuty(f.ctx))
+	require.Len(t, f.oracleKeeper.reported, 1, "the EndBlocker reports exactly one bridge event")
 	got := f.oracleKeeper.reported[0]
-	require.Len(t, got, 2, "both confirming validators are reported as attesters")
+	require.Len(t, got, 3, "all three same-block attesters are credited, including the post-threshold one")
 	want := map[string]bool{
 		string(v1.ValAddr.Bytes()): true,
 		string(v2.ValAddr.Bytes()): true,
+		string(v3.ValAddr.Bytes()): true,
 	}
 	for _, a := range got {
 		require.True(t, want[string(a)], "reported attester must be one of the confirmers")
 	}
 
-	// A later attestation against the already-finalized deposit does not re-report.
-	v3 := newTestValidator(t, 3)
-	f.stakingKeeper.setValidator(v3.ValAddr, 50, true)
-	msg3 := baseDepositMsg(v3, txid, 0)
-	msg3.Memo = dest.String()
-	_, err = ms.AttestDeposit(f.ctx, msg3)
-	require.NoError(t, err)
-	require.Len(t, f.oracleKeeper.reported, 1, "post-finalization attestation must not re-report")
+	// Draining again in a later block with no new finalizations reports nothing.
+	require.NoError(t, f.keeper.FlushBridgeDuty(f.ctx))
+	require.Len(t, f.oracleKeeper.reported, 1, "an empty duty queue reports nothing")
 }
 
 // lastConfirmedRatio returns the confirmed_ratio attribute of the most

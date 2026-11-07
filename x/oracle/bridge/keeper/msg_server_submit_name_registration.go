@@ -104,12 +104,10 @@ func (k msgServer) SubmitNameRegistration(ctx context.Context, msg *types.MsgSub
 		}
 
 		if !matchesPendingRegistration(registration, msg) {
-			// The submission is rejected but the pending registration is left
-			// completely untouched. This is deliberately a benign (non-error)
-			// message outcome, not a failed tx, so the mismatch event below
-			// is actually committed and observable on-chain for auditing —
-			// an erroring message would revert its own events along with
-			// everything else in the tx.
+			// This attestation reports different facts than the record's
+			// provisional ones. It is NOT rejected: it votes for its own
+			// fact-set candidate below and may yet win the tally. The event is
+			// informational for auditing which facts differ.
 			sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
 				types.EventTypeNameRegistrationMismatch,
 				sdk.NewAttribute(types.AttributeKeyRegistrationID, strconv.FormatUint(registrationID, 10)),
@@ -126,11 +124,18 @@ func (k msgServer) SubmitNameRegistration(ctx context.Context, msg *types.MsgSub
 				sdk.NewAttribute(types.AttributeKeyStoredMemo, registration.Memo),
 				sdk.NewAttribute(types.AttributeKeySubmittedMemo, msg.Memo),
 			))
-			return &types.MsgSubmitNameRegistrationResponse{}, nil
 		}
 	}
 
 	if err := k.NameRegistrationConfirmedBy.Set(ctx, collections.Join3(msg.Txid, msg.OpIndex, validatorAddr)); err != nil {
+		return nil, err
+	}
+	// Record this validator's vote for the exact fact-set it observed and tally
+	// per fact-set, mirroring the deposit flow: the registration resolves to
+	// whichever fact-set reaches the threshold.
+	factsHash := types.NameFactsHash(msg.SteemBlock, msg.SteemTimestamp, msg.SteemAccount, msg.GatewayAccount, msg.AmountMillisteem, msg.Memo)
+	dedup := dedupKeyString(msg.Txid, msg.OpIndex)
+	if err := k.NameRegistrationFactsVote.Set(ctx, collections.Join3(dedup, factsHash, validatorAddr)); err != nil {
 		return nil, err
 	}
 
@@ -140,7 +145,7 @@ func (k msgServer) SubmitNameRegistration(ctx context.Context, msg *types.MsgSub
 		Timestamp:        sdkCtx.BlockTime().Unix(),
 	})
 
-	ratio, err := k.confirmedPowerRatio(ctx, registration.ValidatorConfirmations)
+	ratio, err := k.factsCandidateRatio(ctx, k.NameRegistrationFactsVote, dedup, factsHash)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +157,27 @@ func (k msgServer) SubmitNameRegistration(ctx context.Context, msg *types.MsgSub
 		sdk.NewAttribute(types.AttributeKeyConfirmedRatio, ratio.String()),
 	))
 
-	if ratio.GTE(params.BridgeConfirmationThreshold) {
+	// Resolve the first time ONE fact-set crosses the threshold, adopting that
+	// fact-set's facts as the registration's canonical facts.
+	if registration.Status == types.NameRegistrationStatus_NAME_REGISTRATION_STATUS_PENDING && ratio.GTE(params.BridgeConfirmationThreshold) {
+		// If the winning fact-set names a different Steem account than the
+		// provisional (first-attester) one, move the permanent by-account
+		// history index to the winning account so it stays consistent with the
+		// record's canonical facts.
+		if registration.SteemAccount != msg.SteemAccount {
+			if err := k.NameRegistrationByAccount.Remove(ctx, collections.Join(registration.SteemAccount, registrationID)); err != nil {
+				return nil, err
+			}
+			if err := k.NameRegistrationByAccount.Set(ctx, collections.Join(msg.SteemAccount, registrationID)); err != nil {
+				return nil, err
+			}
+		}
+		registration.SteemBlock = msg.SteemBlock
+		registration.SteemTimestamp = msg.SteemTimestamp
+		registration.SteemAccount = msg.SteemAccount
+		registration.GatewayAccount = msg.GatewayAccount
+		registration.AmountMillisteem = msg.AmountMillisteem
+		registration.Memo = msg.Memo
 		if err := k.resolveNameRegistration(ctx, &registration, params); err != nil {
 			return nil, err
 		}

@@ -27,6 +27,10 @@
 //	ORACLE_CMC_BASE_URL   CoinMarketCap API base URL (default the production API)
 //	ORACLE_GAS_PRICES     price-feed txs are NOT fee-exempt, unlike bridge attestations
 //	                      (default "1000000000asteem"; see oracle/PROTOCOL.md §3)
+//
+// With ORACLE_MULTISIG_ENABLED=true it also runs the svm.bank multisig signer
+// (its ORACLE_MULTISIG_* / ORACLE_STEEM_ACTIVE_WIF variables are listed in
+// multisig.go and oracle/PROTOCOL.md §11).
 package main
 
 import (
@@ -193,6 +197,12 @@ func run(logger log.Logger) error {
 	// Cancel cleanly on SIGINT/SIGTERM so the container stops promptly.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// The svm.bank multisig signer (opt-in) runs beside the relayer in its own
+	// goroutine; see multisig.go.
+	if err := startMultisig(ctx, logger, clientCtx, addr, nodeRPC, steemRPC, stateDir); err != nil {
+		return err
+	}
 
 	return relayer.Run(ctx, logger, clientCtx, nodeRPC, cfg, stateDir, priceSource, gasPrices)
 }

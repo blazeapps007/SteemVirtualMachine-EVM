@@ -10,6 +10,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/server"
 
+	"steemvm/app"
 	oracledataprecompile "steemvm/precompiles/oracledata"
 	steembridgeprecompile "steemvm/precompiles/steembridge"
 )
@@ -25,7 +26,7 @@ import (
 var defaultActiveStaticPrecompiles = []string{
 	"0x0000000000000000000000000000000000000100", // p256
 	"0x0000000000000000000000000000000000000400", // bech32
-	"0x0000000000000000000000000000000000000800", // staking
+	app.StakingPrecompileAddress,                 // staking — identity-gated, see app/staking_identity_precompile.go
 	"0x0000000000000000000000000000000000000801", // distribution
 	"0x0000000000000000000000000000000000000802", // ics20
 	"0x0000000000000000000000000000000000000804", // bank
@@ -95,6 +96,9 @@ func applyChainDefaultsToGenesis(cmd *cobra.Command) error {
 	}
 	if err := patchMintDefaults(appState); err != nil {
 		return fmt.Errorf("applying chain defaults to genesis (mint): %w", err)
+	}
+	if err := patchFeemarketDefaults(appState); err != nil {
+		return fmt.Errorf("applying chain defaults to genesis (feemarket): %w", err)
 	}
 
 	newAppState, err := json.Marshal(appState)
@@ -271,6 +275,44 @@ func patchMintDefaults(appState map[string]json.RawMessage) error {
 		return err
 	}
 	appState["mint"] = patched
+	return nil
+}
+
+// patchFeemarketDefaults sets the EIP-1559 floor (min_gas_price) and the
+// starting base_fee to app.EVMGasFloor (1 gwei) — cosmos/evm's own default
+// leaves the floor at 0. See app.EVMGasFloor for why the floor matters and
+// why it must not exceed 1 gwei.
+func patchFeemarketDefaults(appState map[string]json.RawMessage) error {
+	raw, ok := appState["feemarket"]
+	if !ok {
+		return nil
+	}
+	var feemarket map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &feemarket); err != nil {
+		return err
+	}
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(feemarket["params"], &params); err != nil {
+		return err
+	}
+
+	// LegacyDec.String() yields the 18-decimal plain-JSON form genesis uses
+	// ("1000000000.000000000000000000").
+	floorJSON := json.RawMessage(`"` + app.EVMGasFloor.String() + `"`)
+	params["min_gas_price"] = floorJSON
+	params["base_fee"] = floorJSON
+
+	patchedParams, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	feemarket["params"] = patchedParams
+
+	patched, err := json.Marshal(feemarket)
+	if err != nil {
+		return err
+	}
+	appState["feemarket"] = patched
 	return nil
 }
 

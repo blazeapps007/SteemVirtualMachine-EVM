@@ -1,5 +1,5 @@
 broadcast-mode = "sync"
-chain-id = "steemvm"
+chain-id = "steemvm-2"
 keyring-backend = "test"
 keyring-default-keyname = ""
 node = "tcp://localhost:26657"

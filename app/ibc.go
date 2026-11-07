@@ -2,10 +2,10 @@ package app
 
 import (
 	"cosmossdk.io/core/appmodule"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
@@ -83,6 +83,9 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 	// Create interchain account keepers. Both now return pointers and drop
 	// the legacy subspace + duplicate ICS4Wrapper/channelKeeper params, same
 	// shape as the transfer keeper above.
+	// The host executes interchain-account messages via this router, bypassing
+	// the ante handler. The router's x/staking server enforces the validator
+	// identity rule itself (see app/stakinggate).
 	app.ICAHostKeeper = icahostkeeper.NewKeeper(
 		app.appCodec,
 		runtime.NewKVStoreService(app.GetKey(icahosttypes.StoreKey)),

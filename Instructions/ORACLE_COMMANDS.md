@@ -12,7 +12,7 @@ All examples assume the node container and flags used throughout
 ```sh
 docker exec -it steemvm-node /root/go/bin/steemvmd <command> \
   --from <your-key-name> --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 \
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 \
   --gas-prices 1000000000asteem -y
 ```
 
@@ -49,26 +49,35 @@ docker exec -it steemvm-node /root/go/bin/steemvmd tx steembridge attest-deposit
   bce1dd3184e39bcd9bdd7886b22681268a708e03 0 95000000 2026-07-10T08:00:00 alice svm.bank \
   1000000 0x9b379Dfd7d22eA756eA79a19B3336192d64DcD1a BRIDGE_ASSET_STEEM \
   --from blazed007 --keyring-backend test --home /root/.steemvm \
-  --chain-id steemvm --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y
+  --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y
 ```
 
 ### `attest-withdrawal-payout` — bridge-out payout attestation
 
 Confirms a gateway payout you (or another validator) already sent on Steem for a `bridge-out`
-request, memoed `svm-withdrawal <id>`.
+request. The payout is one Steem transaction: the transfer, carrying the user's own memo, then a
+`custom_json` naming the withdrawal (`oracle/PROTOCOL.md` §11.4). A wallet's plain transfer can't do
+that, so payouts go through the multisig signer.
 
 ```sh
 tx steembridge attest-withdrawal-payout [withdrawal-id] [steem-txid] [op-index] \
-  [steem-block] [steem-timestamp]
+  [steem-block] [steem-timestamp] [destination-steem-account] [memo] \
+  --amount-millisteem [amount] --asset [asset]
 ```
 
 | Arg | Meaning |
 |---|---|
 | `withdrawal-id` | The on-chain `Withdrawal` record ID (from `bridge-out`, or `query steembridge requested-withdrawals`) |
 | `steem-txid` | The Steem transaction ID of the gateway's payout |
-| `op-index` | Index of the payout transfer operation |
+| `op-index` | Index of the payout transfer operation (0) |
 | `steem-block` | Steem block number the payout was included in |
 | `steem-timestamp` | The Steem block timestamp |
+| `destination-steem-account` | The recipient you saw on the Steem transfer |
+| `memo` | The memo you saw on the Steem transfer (`""` if none) |
+| `--amount-millisteem`, `--asset` | The amount and asset you saw on the Steem transfer |
+
+Report what is on Steem, not what the withdrawal expects: the chain compares them, and a payout that
+differs in recipient, memo, amount or asset doesn't count.
 
 **Deadline — pay this out within `withdrawal_timeout_blocks` (default: 3.5 days) or the chain
 auto-refunds it.** If no payout attestation reaches 2/3 within that window, `Keeper.

@@ -12,6 +12,22 @@ jobs:
         with:
           go-version: "stable"
           check-latest: true
+      - name: Vet
+        run: make govet
       - name: Tests
+        run: make test-unit
+  # Reports known vulnerabilities as a warning without blocking the PR: some
+  # findings have no upstream fix yet. Read this job's log and triage what it finds.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+          check-latest: true
+      - name: Check for known vulnerabilities
         run: |
-          make test
+          make govulncheck || echo "::warning title=govulncheck::Known vulnerabilities reported. See this job's log."

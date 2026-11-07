@@ -12,8 +12,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	oracledatatypes "steemvm/x/oracle/data/types"
 	"steemvm/x/oracle/bridge/types"
+	oracledatatypes "steemvm/x/oracle/data/types"
 )
 
 // Run drives the Steem relayer loop until ctx is canceled. It is a pure
@@ -43,7 +43,7 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 	valoperAddr := sdk.ValAddress(signerAddr).String()
 
 	// Connect to the SteemVM node RPC (broadcast + ABCI queries route through it).
-	rpcClient, err := rpchttp.New(nodeRPC, "/websocket")
+	rpcClient, err := NewNodeRPC(nodeRPC)
 	if err != nil {
 		return fmt.Errorf("cannot create node RPC client for %q: %w", nodeRPC, err)
 	}
@@ -89,6 +89,7 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	notBondedLogged := false
+	var anchor steemAnchor
 	// Heartbeat: "idle"/"waiting" states below are debug-level (filtered out
 	// by default), so without this, a quiet cycle — no new transfers to
 	// attest, which is most cycles most of the time — produces zero output
@@ -104,7 +105,7 @@ func Run(ctx context.Context, logger cycleLogger, clientCtx client.Context, node
 		case <-ticker.C:
 		}
 
-		if err := runCycle(ctx, logger, cfg, clientCtx, steem, bridgeQuery, stakingQuery, signerAddr, valoperAddr, stateDir, &state, &notBondedLogged); err != nil {
+		if err := runCycle(ctx, logger, cfg, clientCtx, steem, bridgeQuery, stakingQuery, signerAddr, valoperAddr, stateDir, &state, &notBondedLogged, &anchor); err != nil {
 			logger.Error("steem oracle cycle failed", "err", err)
 		}
 
@@ -239,6 +240,7 @@ func runCycle(
 	stateDir string,
 	state *State,
 	notBondedLogged *bool,
+	anchor *steemAnchor,
 ) error {
 	params, err := bridgeQuery.Params(ctx, &types.QueryParamsRequest{})
 	if err != nil {
@@ -265,6 +267,13 @@ func runCycle(
 	}
 	*notBondedLogged = false
 
+	// The chain's Steem anchor (genesis): this oracle's Steem node must agree
+	// on the anchor block's ID before anything it reports is attested.
+	chainStart := params.Params.RelayerStartBlock
+	if err := anchor.verify(steem, chainStart, params.Params.RelayerStartBlockId); err != nil {
+		return err
+	}
+
 	lib, err := steem.LastIrreversibleBlock()
 	if err != nil {
 		return err
@@ -273,12 +282,21 @@ func runCycle(
 	// First run: establish the cursor. Precedence: the node's local
 	// start-block override, then the chain-wide relayer_start_block param
 	// (the shared anchor recorded at launch so every validator scans the
-	// same range regardless of when it first starts), then the current LIB.
+	// same range regardless of when it first starts), then the current LIB —
+	// never below the anchor.
 	if state.LastScannedBlock == 0 {
-		state.LastScannedBlock = initialCursor(cfg.StartBlock, params.Params.RelayerStartBlock, lib)
+		state.LastScannedBlock = anchoredCursor(initialCursor(cfg.StartBlock, chainStart, lib), chainStart)
 		logger.Info("steem relayer cursor initialized",
 			"cursor", state.LastScannedBlock,
-			"source", cursorSource(cfg.StartBlock, params.Params.RelayerStartBlock))
+			"source", cursorSource(cfg.StartBlock, chainStart))
+		return SaveState(stateDir, *state)
+	}
+	// A saved cursor from before the anchor (e.g. a state volume kept from a
+	// previous chain) jumps up to it: that history predates this chain.
+	if c := anchoredCursor(state.LastScannedBlock, chainStart); c != state.LastScannedBlock {
+		logger.Info("steem relayer cursor moved up to the chain's steem anchor",
+			"from", state.LastScannedBlock, "to", c, "anchor", chainStart)
+		state.LastScannedBlock = c
 		return SaveState(stateDir, *state)
 	}
 
@@ -333,22 +351,35 @@ func runCycle(
 				"intent", intentLabel, "txid", transfer.Txid, "op_index", transfer.OpIndex,
 				"from", transfer.From, "amount_millisteem", transfer.AmountMillisteem, "memo", transfer.Memo)
 		}
-		// Withdrawal payouts: gateway→user transfers memoed "svm-withdrawal <id>".
-		// Optimistic — every payout seen is attested once (the cursor scans each
-		// block exactly once); the chain benign-no-ops duplicates and finalizes the
-		// withdrawal REQUESTED→PROCESSED at 2/3, so no per-validator dedup query is
-		// needed here. Gated on bridge-out being enabled (the v0.0.3 payout path).
+		// Withdrawal payouts: gateway→user transfers linked to their withdrawal by
+		// a custom_json in the same transaction. Every payout seen is attested once
+		// (the cursor scans each block exactly once); the chain benign-no-ops
+		// duplicates and finalizes the withdrawal REQUESTED→PROCESSED at 2/3, so no
+		// per-validator dedup query is needed here. A payout that doesn't match the
+		// withdrawal is logged and skipped: the chain would refuse it anyway.
+		// Gated on bridge-out being enabled (the v0.0.3 payout path).
 		if params.Params.BridgeOutEnabled {
 			for _, payout := range ExtractGatewayPayouts(nb.Num, nb.Block, gateway, cfg.SteemSymbol, cfg.SbdSymbol) {
+				matches, why, err := payoutMatchesWithdrawal(ctx, bridgeQuery, payout)
+				if err != nil {
+					return err // cursor untouched; the same blocks are rescanned next cycle
+				}
+				if !matches {
+					logger.Error("not attesting a payout that doesn't match its withdrawal",
+						"withdrawal_id", payout.WithdrawalID, "steem_txid", payout.Txid, "reason", why)
+					continue
+				}
 				blockMsgs = append(blockMsgs, &types.MsgAttestWithdrawalPayout{
-					Validator:        signerAddr.String(),
-					WithdrawalId:     payout.WithdrawalID,
-					SteemTxid:        payout.Txid,
-					OpIndex:          payout.OpIndex,
-					SteemBlock:       payout.SteemBlock,
-					SteemTimestamp:   payout.SteemTimestamp,
-					AmountMillisteem: payout.AmountMillisteem,
-					Asset:            payout.Asset,
+					Validator:               signerAddr.String(),
+					WithdrawalId:            payout.WithdrawalID,
+					SteemTxid:               payout.Txid,
+					OpIndex:                 payout.OpIndex,
+					SteemBlock:              payout.SteemBlock,
+					SteemTimestamp:          payout.SteemTimestamp,
+					AmountMillisteem:        payout.AmountMillisteem,
+					Asset:                   payout.Asset,
+					DestinationSteemAccount: payout.Destination,
+					Memo:                    payout.Memo,
 				})
 				logger.Info("attesting withdrawal payout",
 					"withdrawal_id", payout.WithdrawalID, "steem_txid", payout.Txid, "op_index", payout.OpIndex)
@@ -401,6 +432,37 @@ func cursorSource(localStart, chainStart uint64) string {
 	default:
 		return "current steem last irreversible block"
 	}
+}
+
+// payoutMatchesWithdrawal compares an observed payout with the withdrawal it
+// names, the same comparison the chain makes. A withdrawal this chain has never
+// heard of doesn't match; only a failed query is an error.
+func payoutMatchesWithdrawal(ctx context.Context, q types.QueryClient, p Payout) (bool, string, error) {
+	res, err := q.GetWithdrawal(ctx, &types.QueryGetWithdrawalRequest{Id: p.WithdrawalID})
+	if err != nil {
+		// The bridge queries' sdkerrors.ErrKeyNotFound, as it arrives over ABCI
+		// query, and nothing broader: a transport error must stay an error.
+		if strings.Contains(err.Error(), "key not found") {
+			return false, "no such withdrawal", nil
+		}
+		return false, "", err
+	}
+	matches, why := comparePayout(p, res.Withdrawal)
+	return matches, why, nil
+}
+
+func comparePayout(p Payout, w types.Withdrawal) (bool, string) {
+	switch {
+	case p.Destination != w.DestinationSteemAccount:
+		return false, "recipient differs"
+	case p.Memo != w.Memo:
+		return false, "memo differs"
+	case p.AmountMillisteem != w.AmountMillisteem:
+		return false, "amount differs"
+	case p.Asset != w.Asset:
+		return false, "asset differs"
+	}
+	return true, ""
 }
 
 // alreadyAttested reports whether this validator has already confirmed the

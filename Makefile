@@ -14,7 +14,7 @@ ifeq (,$(VERSION))
   # "v0.0.3-Beta-2") produces a double-"v" directory that can never match an
   # on-chain x/upgrade Plan.Name — found while wiring the first real
   # coordinated upgrade this chain has attempted.
-  VERSION := 0.0.4
+  VERSION := 0.0.8
 endif
 
 # Update the ldflags with the app, client & server names
@@ -105,8 +105,7 @@ govet:
 
 govulncheck:
 	@echo Running govulncheck...
-	@go tool golang.org/x/vuln/cmd/govulncheck@latest
-	@govulncheck ./...
+	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 .PHONY: govet govulncheck
 

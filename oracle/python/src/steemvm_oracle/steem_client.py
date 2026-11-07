@@ -8,6 +8,7 @@ mirrors the Go client's choice to avoid a full Steem SDK dependency.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Optional
@@ -38,11 +39,13 @@ class Transfer:
 
 @dataclass(frozen=True)
 class Payout:
-    """A gateway->user payout of a bridge-out on Steem, identified by its
-    "svm-withdrawal <id>" memo. amount_millisteem/asset are what was ACTUALLY
-    observed paid out on Steem (not the expected value from the on-chain
-    Withdrawal record) -- the chain cross-checks these against its own record,
-    so a manual relay that sent the wrong asset or amount can't be confirmed
+    """A gateway->user payout of a bridge-out on Steem: one transaction with
+    exactly two operations, the transfer and then a custom_json only the
+    gateway's active authority can sign, naming the withdrawal. The transfer's
+    memo is the user's own and means nothing here. Every other field is what was
+    ACTUALLY observed on Steem (not the expected value from the on-chain
+    Withdrawal record) -- the chain cross-checks them against its own record, so
+    a payout with the wrong recipient, memo, asset or amount can't be confirmed
     as a valid payout."""
 
     withdrawal_id: int
@@ -50,6 +53,8 @@ class Payout:
     op_index: int
     steem_block: int
     steem_timestamp: str
+    destination: str
+    memo: str
     amount_millisteem: int
     asset: str  # ASSET_STEEM or ASSET_SBD
 
@@ -82,6 +87,14 @@ class SteemClient:
         if lib == 0:
             raise SteemRpcError("steem rpc: zero last irreversible block")
         return lib
+
+    def block_id(self, num: int) -> str:
+        """The ID of Steem block num (its first 8 hex chars are the block
+        number), used to verify the chain's Steem anchor."""
+        block = self._call("condenser_api.get_block", [num])
+        if not block or not block.get("block_id"):
+            raise SteemRpcError(f"steem rpc returned no data for block {num}")
+        return str(block["block_id"])
 
     def fetch_blocks(self, from_num: int, to_num: int) -> list[tuple[int, dict]]:
         """Returns [(block_num, block_dict), ...] for from_num..to_num
@@ -158,16 +171,25 @@ def parse_steem_amount(amount: str, symbol: str) -> Optional[int]:
     return int(digits)
 
 
-def parse_withdrawal_memo(memo: str) -> Optional[int]:
-    """Parses a gateway payout memo "svm-withdrawal <id>" into the
-    withdrawal id, or None if the memo doesn't match."""
-    fields = memo.strip().split()
-    if len(fields) != 2 or fields[0] != "svm-withdrawal":
+PAYOUT_LINK_ID = "svm-withdrawal"
+_PAYOUT_LINK_RE = re.compile(r'\{"withdrawal_id":"(0|[1-9][0-9]*)"\}')
+
+
+def parse_payout_link(op: Any, gateway: str) -> Optional[int]:
+    """The withdrawal a custom_json operation names, if it is exactly a payout
+    link signed by the gateway's active authority alone."""
+    if not (isinstance(op, list) and len(op) == 2) or op[0] != "custom_json" or not isinstance(op[1], dict):
         return None
-    try:
-        return int(fields[1], 10)
-    except ValueError:
+    body = op[1]
+    if body.get("id") != PAYOUT_LINK_ID or body.get("required_auths") != [gateway] or body.get("required_posting_auths"):
         return None
+    if not isinstance(body.get("json"), str):
+        return None
+    m = _PAYOUT_LINK_RE.fullmatch(body["json"])
+    if m is None:
+        return None
+    wid = int(m.group(1))
+    return wid if wid < 1 << 64 else None
 
 
 def _op_transfer_payload(op: Any) -> Optional[dict]:
@@ -208,7 +230,9 @@ def extract_gateway_transfers(
             body = _op_transfer_payload(raw_op)
             if body is None:
                 continue
-            if body.get("to") != gateway:
+            # A gateway->gateway transfer is never a deposit: a payout's memo is
+            # chosen by the user who bridged out.
+            if body.get("to") != gateway or body.get("from") == gateway:
                 continue
 
             amount_str = body.get("amount", "")
@@ -245,14 +269,11 @@ def extract_gateway_payouts(
     steem_symbol: str,
     sbd_symbol: str,
 ) -> list[Payout]:
-    """Scans a block for transfer operations sent FROM the gateway account
-    whose memo is "svm-withdrawal <id>" -- the gateway's on-Steem payout of
-    bridge-out #id. The observed amount/asset ARE parsed and reported (unlike
-    the chain's own knowledge of the expected payout, this is what lets the
-    keeper's on-chain check catch a wrong-asset/wrong-amount manual relay
-    instead of trusting txid/op_index alone). An operation whose amount
-    doesn't parse as either configured symbol is skipped -- a payout the
-    oracle can't identify the asset of isn't reported as a fact. Mirrors
+    """Scans a block for withdrawal payouts: transactions with exactly two
+    operations, a transfer FROM the gateway and the custom_json naming the
+    withdrawal. A memo alone never counts. An operation whose amount doesn't parse
+    as either configured symbol is skipped -- a payout the oracle can't identify
+    the asset of isn't reported as a fact. Mirrors
     oracle/go/relayer/steem.go's ExtractGatewayPayouts."""
     if not block:
         return []
@@ -264,40 +285,40 @@ def extract_gateway_payouts(
     payouts: list[Payout] = []
     for tx_num, tx in enumerate(transactions):
         txid = tx.get("transaction_id") or (transaction_ids[tx_num] if tx_num < len(transaction_ids) else "")
-        if not txid:
+        ops = tx.get("operations") or []
+        if not txid or len(ops) != 2:
             continue
 
-        for op_index, raw_op in enumerate(tx.get("operations") or []):
-            body = _op_transfer_payload(raw_op)
-            if body is None:
-                continue
-            if body.get("from") != gateway:
-                continue
-            withdrawal_id = parse_withdrawal_memo(body.get("memo", ""))
-            if withdrawal_id is None:
-                continue
+        body = _op_transfer_payload(ops[0])
+        if body is None or body.get("from") != gateway:
+            continue
+        withdrawal_id = parse_payout_link(ops[1], gateway)
+        if withdrawal_id is None:
+            continue
 
-            amount_str = body.get("amount", "")
-            amount = parse_steem_amount(amount_str, steem_symbol)
-            if amount is not None:
-                asset = ASSET_STEEM
-            elif sbd_symbol:
-                amount = parse_steem_amount(amount_str, sbd_symbol)
-                if amount is None:
-                    continue
-                asset = ASSET_SBD
-            else:
+        amount_str = body.get("amount", "")
+        amount = parse_steem_amount(amount_str, steem_symbol)
+        if amount is not None:
+            asset = ASSET_STEEM
+        elif sbd_symbol:
+            amount = parse_steem_amount(amount_str, sbd_symbol)
+            if amount is None:
                 continue
+            asset = ASSET_SBD
+        else:
+            continue
 
-            payouts.append(
-                Payout(
-                    withdrawal_id=withdrawal_id,
-                    txid=txid,
-                    op_index=op_index,
-                    steem_block=block_num,
-                    steem_timestamp=timestamp,
-                    amount_millisteem=amount,
-                    asset=asset,
-                )
+        payouts.append(
+            Payout(
+                withdrawal_id=withdrawal_id,
+                txid=txid,
+                op_index=0,
+                steem_block=block_num,
+                steem_timestamp=timestamp,
+                destination=str(body.get("to", "")),
+                memo=str(body.get("memo", "")),
+                amount_millisteem=amount,
+                asset=asset,
             )
+        )
     return payouts

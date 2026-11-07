@@ -39,6 +39,9 @@ type Keeper struct {
 	// given (txid, opIndex), independent of the embedded audit list on the
 	// Deposit record itself, so a duplicate-confirmation check is O(1).
 	DepositConfirmedBy collections.KeySet[collections.Triple[string, uint32, []byte]]
+	// DepositFactsVote records (dedupKey, factsHash, validator) for the
+	// per-fact-set deposit tally (see DepositFactsVoteKey).
+	DepositFactsVote collections.KeySet[collections.Triple[string, string, []byte]]
 	// DepositByStatus / WithdrawalByStatus index (status, id) so status-filtered
 	// queries (PendingDeposits, MintedDeposits, RequestedWithdrawals) and the
 	// expiry sweep are ordered prefix scans instead of full-table filters.
@@ -47,6 +50,9 @@ type Keeper struct {
 	// WithdrawalConfirmedBy records which validators have already attested a
 	// given withdrawal's Steem payout (dedup for MsgAttestWithdrawalPayout).
 	WithdrawalConfirmedBy collections.KeySet[collections.Pair[uint64, []byte]]
+	// WithdrawalPayoutVote records (withdrawalID, payoutKey, validator) for the
+	// per-candidate payout tally (see WithdrawalPayoutVoteKey).
+	WithdrawalPayoutVote collections.KeySet[collections.Triple[uint64, string, []byte]]
 
 	// Totals holds cumulative mint/burn statistics for the BridgeStatistics query.
 	Totals collections.Item[types.BridgeTotals]
@@ -55,6 +61,10 @@ type Keeper struct {
 	// cap on fee-exempt validator attestations (MsgAttestDeposit and
 	// MsgSubmitNameRegistration share this single budget).
 	FreeDepositCounter collections.Map[[]byte, types.FreeDepositCounter]
+
+	// BridgeDutyQueue collects (kind, id) of bridge events finalized this
+	// block, drained by the module EndBlocker (see BridgeDutyQueueKey).
+	BridgeDutyQueue collections.KeySet[collections.Pair[int32, uint64]]
 
 	NameRegistrationSeq collections.Sequence
 	NameRegistration    collections.Map[uint64, types.NameRegistration]
@@ -65,6 +75,9 @@ type Keeper struct {
 	// NameRegistrationConfirmedBy records which validators have already
 	// attested a given (txid, opIndex) registration key.
 	NameRegistrationConfirmedBy collections.KeySet[collections.Triple[string, uint32, []byte]]
+	// NameRegistrationFactsVote records (dedupKey, factsHash, validator) for the
+	// per-fact-set name-registration tally (see NameRegistrationFactsVoteKey).
+	NameRegistrationFactsVote collections.KeySet[collections.Triple[string, string, []byte]]
 	// NameRegistrationByStatus indexes (status, id) for status queries and expiry.
 	NameRegistrationByStatus collections.KeySet[collections.Pair[int32, uint64]]
 	// NameRegistrationByAccount indexes (steemAccount, id) — permanent history.
@@ -123,6 +136,10 @@ func NewKeeper(
 			sb, types.DepositConfirmedByKey, "deposit_confirmed_by",
 			collections.TripleKeyCodec(collections.StringKey, collections.Uint32Key, collections.BytesKey),
 		),
+		DepositFactsVote: collections.NewKeySet(
+			sb, types.DepositFactsVoteKey, "deposit_facts_vote",
+			collections.TripleKeyCodec(collections.StringKey, collections.StringKey, collections.BytesKey),
+		),
 		DepositByStatus: collections.NewKeySet(
 			sb, types.DepositByStatusKey, "deposit_by_status",
 			collections.PairKeyCodec(collections.Int32Key, collections.Uint64Key),
@@ -135,10 +152,18 @@ func NewKeeper(
 			sb, types.WithdrawalConfirmedByKey, "withdrawal_confirmed_by",
 			collections.PairKeyCodec(collections.Uint64Key, collections.BytesKey),
 		),
+		WithdrawalPayoutVote: collections.NewKeySet(
+			sb, types.WithdrawalPayoutVoteKey, "withdrawal_payout_vote",
+			collections.TripleKeyCodec(collections.Uint64Key, collections.StringKey, collections.BytesKey),
+		),
 		Totals: collections.NewItem(sb, types.TotalsKey, "totals", codec.CollValue[types.BridgeTotals](cdc)),
 		FreeDepositCounter: collections.NewMap(
 			sb, types.FreeDepositCounterKey, "free_deposit_counter",
 			collections.BytesKey, codec.CollValue[types.FreeDepositCounter](cdc),
+		),
+		BridgeDutyQueue: collections.NewKeySet(
+			sb, types.BridgeDutyQueueKey, "bridge_duty_queue",
+			collections.PairKeyCodec(collections.Int32Key, collections.Uint64Key),
 		),
 
 		NameRegistration:    collections.NewMap(sb, types.NameRegistrationKey, "name_registration", collections.Uint64Key, codec.CollValue[types.NameRegistration](cdc)),
@@ -151,6 +176,10 @@ func NewKeeper(
 		NameRegistrationConfirmedBy: collections.NewKeySet(
 			sb, types.NameRegistrationConfirmedByKey, "name_registration_confirmed_by",
 			collections.TripleKeyCodec(collections.StringKey, collections.Uint32Key, collections.BytesKey),
+		),
+		NameRegistrationFactsVote: collections.NewKeySet(
+			sb, types.NameRegistrationFactsVoteKey, "name_registration_facts_vote",
+			collections.TripleKeyCodec(collections.StringKey, collections.StringKey, collections.BytesKey),
 		),
 		NameRegistrationByStatus: collections.NewKeySet(
 			sb, types.NameRegistrationByStatusKey, "name_registration_by_status",

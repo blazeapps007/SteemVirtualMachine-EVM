@@ -27,6 +27,19 @@ Configuration is entirely from environment variables (see ``oracle/.env.example`
                                 https://pro-api.coingecko.com for a pro-tier key)
     ORACLE_GAS_PRICES     price-feed txs are NOT fee-exempt, unlike bridge attestations
                            (default "1000000000asteem"; see oracle/PROTOCOL.md SS3)
+
+The svm.bank multisig signer (opt-in; runs in its own thread beside the relay):
+
+    ORACLE_MULTISIG_ENABLED              "true" to run the signer (default false)
+    ORACLE_STEEM_ACTIVE_WIF              the validator's Steem ACTIVE key -- the only Steem secret
+    ORACLE_STEEM_RPCS                    comma-separated Steem nodes, own node first (default ORACLE_STEEM_RPC)
+    ORACLE_MULTISIG_INTERVAL             pass interval (default 10s)
+    ORACLE_MULTISIG_THRESHOLD_PERCENT    svm.bank threshold, percent of 10000 (default 75)
+    ORACLE_MULTISIG_REWEIGHT_TOLERANCE   weight points before a reweight is proposed (default 50)
+    ORACLE_MULTISIG_PAYOUT_MARGIN_BLOCKS never pay this close to the SVM refund (default 14400)
+    ORACLE_MULTISIG_PROPOSE / _EXECUTE   "false" to only vote (default true)
+    ORACLE_MULTISIG_DRY_RUN              "true" to log decisions without publishing (default false)
+    ORACLE_MULTISIG_MAX_PER_TX_STEEM/SBD optional per-payout cap, e.g. "500.000" (default none)
 """
 
 from __future__ import annotations
@@ -39,8 +52,11 @@ from types import FrameType
 from typing import Optional
 
 from . import _protopath  # noqa: F401
+from .broadcast import RestClient
 from .config import Config, parse_duration_seconds
 from .keys import Keypair, from_mnemonic, from_private_key_hex
+from .multisig.signer import Signer, SignerConfigError, build_signer_config
+from .multisig.svm import RestSVM
 from .pricefeeder import CompositePriceSource
 from .pricesources.cmc import CMCClient
 from .pricesources.coingecko import CoinGeckoClient
@@ -154,6 +170,24 @@ def build_price_source(env: dict, steem_rpc: str) -> tuple[Optional[CompositePri
     return CompositePriceSource(external=external, steem=steem_source), gas_prices
 
 
+def build_multisig_signer(env: dict, steem_rpc: str, node_rest: str, state_dir: str,
+                          keypair: Keypair) -> Optional[Signer]:
+    """The svm.bank signer when ORACLE_MULTISIG_ENABLED is true, else None. A
+    misconfiguration (a forbidden owner/posting key variable, a bad active key,
+    a failed conformance selftest) stops the oracle rather than running
+    half-armed."""
+    try:
+        cfg = build_signer_config(env, steem_rpc, state_dir)
+        if cfg is None:
+            return None
+        signer = Signer(cfg, RestSVM(RestClient(node_rest), keypair.valoper_address), env=env)
+    except SignerConfigError as exc:
+        raise SystemExit(str(exc)) from exc
+    logger.info("svm.bank multisig signer enabled: nodes=%d interval=%ss threshold_percent=%d dry_run=%s",
+                len(cfg.nodes), cfg.interval, cfg.policy.threshold_percent, cfg.dry_run)
+    return signer
+
+
 def main() -> None:
     import os
 
@@ -165,9 +199,12 @@ def main() -> None:
     logger.info("oracle key loaded: address=%s node_rest=%s steem_rpc=%s", keypair.address, node_rest, steem_rpc)
 
     price_source, gas_prices = build_price_source(env, steem_rpc)
+    signer = build_multisig_signer(env, steem_rpc, node_rest, state_dir, keypair)
 
     # Cancel cleanly on SIGINT/SIGTERM so the container stops promptly.
     stop = threading.Event()
+    if signer is not None:
+        threading.Thread(target=signer.run, args=(stop,), name="svm-bank-signer", daemon=True).start()
 
     def _handle_signal(signum: int, frame: Optional[FrameType]) -> None:  # noqa: ARG001
         logger.info("received signal %s, shutting down", signum)

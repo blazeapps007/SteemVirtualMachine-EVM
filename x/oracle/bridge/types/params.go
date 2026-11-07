@@ -1,6 +1,8 @@
 package types
 
 import (
+	"strconv"
+
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
 	errortypes "github.com/cosmos/cosmos-sdk/types/errors"
@@ -165,6 +167,40 @@ func (p Params) Validate() error {
 		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "withdrawal timeout blocks must be positive while bridge out is enabled")
 	}
 
+	return validateSteemAnchor(p.RelayerStartBlock, p.RelayerStartBlockId)
+}
+
+// validateSteemAnchor checks the Steem anchor: either no anchor (block 0, no
+// ID) or a block number with its 40-hex Steem block ID. A Steem block ID's
+// first 4 bytes are the block number (big-endian), so a mistyped number or ID
+// is caught here rather than discovered by relayers after launch.
+func validateSteemAnchor(block uint64, id string) error {
+	if id == "" {
+		return nil // no recorded ID: a bare relayer_start_block (or none)
+	}
+	if block == 0 {
+		return errorsmod.Wrap(errortypes.ErrInvalidRequest, "relayer_start_block_id is set but relayer_start_block is 0")
+	}
+	if len(id) != 40 {
+		return errorsmod.Wrapf(errortypes.ErrInvalidRequest, "relayer_start_block_id must be 40 hex chars, got %d", len(id))
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return errorsmod.Wrap(errortypes.ErrInvalidRequest, "relayer_start_block_id must be lowercase hex")
+		}
+	}
+	if num, err := strconv.ParseUint(id[:8], 16, 32); err != nil || num != block {
+		return errorsmod.Wrapf(errortypes.ErrInvalidRequest, "relayer_start_block_id %s is not the ID of Steem block %d", id, block)
+	}
+	return nil
+}
+
+// CheckSteemBlock rejects an attestation of a Steem block from before the
+// Steem anchor (relayer_start_block): that history predates this chain.
+func (p Params) CheckSteemBlock(steemBlock uint64) error {
+	if p.RelayerStartBlock > 0 && steemBlock < p.RelayerStartBlock {
+		return errorsmod.Wrapf(ErrSteemBlockBeforeAnchor, "steem block %d is before this chain's Steem anchor %d", steemBlock, p.RelayerStartBlock)
+	}
 	return nil
 }
 

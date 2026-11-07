@@ -35,6 +35,63 @@ const UpgradeName = "v0.0.3"
 // the governance MsgSoftwareUpgrade proposal that schedules it.
 const UpgradeNameV004 = "v0.0.4"
 
+// UpgradeNameV005 closes the remaining routes around the validator identity
+// gate and makes the EVM gas floor part of the chain:
+//   - authz: MsgCreateValidator/MsgEditValidator can no longer be wrapped in
+//     MsgExec or authorized via MsgGrant (ante_steembridge.go's limiter);
+//   - ICA host: interchain-account validator create/edit now runs the same
+//     identity check (ica_identity_router.go);
+//   - EVM: the staking precompile is registered wrapped in the same identity
+//     check (staking_identity_precompile.go), so it can be active again;
+//   - state: the handler enforces the 1 gwei EVM gas floor and switches the
+//     (now gated) staking precompile back on (enforceEVMPolicy). Governance
+//     proposal 3 had switched it off on the live chain until this binary.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV005 = "v0.0.5"
+
+// UpgradeNameV006 moves the chain to the latest stable releases compatible
+// with cosmos/evm (which pins the SDK line; SDK v0.55 needs a cosmos/evm
+// release that does not exist yet):
+//   - cosmos/evm v0.7.3: state-breaking security release — the EVM StateDB
+//     commit is now atomic when precompiles ran, and AddBalance rejects
+//     uint256 overflow instead of wrapping;
+//   - ibc-go v11.2.0: extra ICS-20 v2 / GMP validation (the new optional
+//     packet-forward and rate-limit middlewares are not wired);
+//   - cosmos/go-ethereum v1.17.2-cosmos-1: EIP-712 encodeType fix for empty
+//     struct types.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV006 = "v0.0.6"
+
+// UpgradeNameV007 blocks every module account in x/bank (the SDK default; an
+// app-config override had left steemblackhole, bridge_reward, gov and others
+// unblocked). cosmos/evm mirrors a precompile's bank transfers into the EVM
+// state except for blocked addresses and refuses to write a module account's
+// balance, so bridgeOut through the 0x…0900 precompile failed with "is not
+// allowed to receive funds". Logic-only: no store or parameter changes.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV007 = "v0.0.7"
+
+// UpgradeNameV008 closes the last route around the validator identity rule and
+// changes how withdrawal payouts are paid and verified:
+//   - identity: the rule now lives in x/staking's MsgServer, and the ante handler
+//     no longer sends dynamic-fee Cosmos txs to upstream's unguarded chain;
+//   - payouts: MsgAttestWithdrawalPayout carries the observed recipient and
+//     memo, both checked against the withdrawal, and a bridge-out to the gateway
+//     or with a memo over 256 bytes is refused.
+//
+// Oracle clients must move with the chain: the Steem payout format changes too
+// (oracle/PROTOCOL.md §11.4), and the attestation has new fields.
+//
+// Same naming contract as UpgradeNameV004: MUST match the Makefile's VERSION
+// and the Plan.Name of the governance MsgSoftwareUpgrade.
+const UpgradeNameV008 = "v0.0.8"
+
 // RegisterUpgradeHandlers wires the v0.0.3 upgrade handler and store loader. On
 // the IN-PLACE upgrade path this: runs module migrations, registers the native
 // SBD coin (bank metadata + ERC20 precompile, via the same registerSBD helper the
@@ -87,6 +144,45 @@ func (app *App) RegisterUpgradeHandlers() {
 	// needed for this name (unlike v0.0.3 above).
 	app.UpgradeKeeper.SetUpgradeHandler(
 		UpgradeNameV004,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+		},
+	)
+
+	// v0.0.5: validator-identity hardening + EVM gas floor. No new store keys.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV005,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			vm, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return vm, err
+			}
+			return vm, app.enforceEVMPolicy(sdk.UnwrapSDKContext(ctx))
+		},
+	)
+
+	// v0.0.6: dependency security upgrade (see UpgradeNameV006). No new store
+	// keys and no parameter changes.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV006,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+		},
+	)
+
+	// v0.0.7: every module account blocked in x/bank (see UpgradeNameV007).
+	// No new store keys and no parameter changes.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV007,
+		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+		},
+	)
+
+	// v0.0.8: identity gate and payout checks (see UpgradeNameV008). No new store
+	// keys and no parameter changes.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		UpgradeNameV008,
 		func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			return app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 		},

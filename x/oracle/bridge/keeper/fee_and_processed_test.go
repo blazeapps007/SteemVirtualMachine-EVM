@@ -100,6 +100,9 @@ func TestAttestWithdrawalPayout_MarksProcessed(t *testing.T) {
 		SteemTimestamp:   "2026-01-01T00:00:00",
 		AmountMillisteem: 1000,
 		Asset:            types.BridgeAsset_BRIDGE_ASSET_STEEM,
+
+		DestinationSteemAccount: "alice",
+		Memo:                    "svm-out",
 	})
 	require.NoError(t, err)
 
@@ -143,6 +146,9 @@ func TestAttestWithdrawalPayout_AmountMismatch(t *testing.T) {
 		SteemTimestamp:   "2026-01-01T00:00:00",
 		AmountMillisteem: 1, // wrong: withdrawal expects 1000
 		Asset:            types.BridgeAsset_BRIDGE_ASSET_STEEM,
+
+		DestinationSteemAccount: "alice",
+		Memo:                    "svm-out",
 	})
 	require.NoError(t, err, "a mismatch is a benign no-op for the tx, not a hard failure")
 
@@ -185,6 +191,9 @@ func TestAttestWithdrawalPayout_AssetMismatch(t *testing.T) {
 		SteemTimestamp:   "2026-01-01T00:00:00",
 		AmountMillisteem: 1000,
 		Asset:            types.BridgeAsset_BRIDGE_ASSET_SBD, // wrong: withdrawal expects STEEM
+
+		DestinationSteemAccount: "alice",
+		Memo:                    "svm-out",
 	})
 	require.NoError(t, err, "a mismatch is a benign no-op for the tx, not a hard failure")
 
