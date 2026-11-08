@@ -215,7 +215,7 @@ if [ "$BARE_METAL" = "1" ]; then
     if SDPID="$(host_steemvmd_pid)" && ! host_cosmovisor_pid >/dev/null; then
       DIRECT=1
     else
-      die "$CV/current/bin/steemvmd not found, and no steemvmd process is running on this host — DAEMON_HOME is probably wrong (set it to the node's --home). If your node runs steemvmd directly and has halted at the upgrade height, follow Instructions/UPGRADE_v0.0.5.md, 'Bare metal without cosmovisor'. Nothing was changed."
+      die "$CV/current/bin/steemvmd not found, and no steemvmd process is running on this host — DAEMON_HOME is probably wrong (set it to the node's --home). If your node runs steemvmd directly and has halted at the upgrade height, follow 'Fully manual (no cosmovisor)' in Instructions/README.md. Nothing was changed."
     fi
   fi
 

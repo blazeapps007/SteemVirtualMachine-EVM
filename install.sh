@@ -3,7 +3,7 @@
 # install.sh — one-command SteemVM validator setup on a fresh Ubuntu/Debian
 # server, e.g. a DigitalOcean Droplet. Paste this into the server's console:
 #
-#   curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.6/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.8/install.sh | sudo bash
 #
 # It installs Docker (with the compose plugin), git, curl and jq, opens the p2p
 # port if ufw is active, clones this repository to /opt/steemvm, asks for your
@@ -23,7 +23,7 @@ fi
 set -euo pipefail
 
 STEEMVM_REPO="${STEEMVM_REPO:-https://github.com/blazeapps007/SteemVirtualMachine-EVM.git}"
-STEEMVM_REF="${STEEMVM_REF:-release/v0.0.6}"
+STEEMVM_REF="${STEEMVM_REF:-release/v0.0.8}"
 STEEMVM_DIR="${STEEMVM_DIR:-/opt/steemvm}"
 STEEM_RPC="${STEEM_RPC:-https://api.steemit.com}"
 

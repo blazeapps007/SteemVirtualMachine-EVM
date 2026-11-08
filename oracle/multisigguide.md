@@ -34,26 +34,21 @@ Everything byte-level in this guide (operation IDs, encodings, signature rules, 
 
 @svm.bank has no keys of its own. Its owner, active and posting authorities each contain only **account authorities**: a list of validator accounts with a weight, plus a threshold. A transaction from svm.bank is valid when it carries signatures from validators whose weights add up to at least the threshold.
 
-On 2026-10-14 the authority was:
+On 2026-11-09 (mainnet, 22,266.6 STEEM bonded) the owner, active and posting authorities were identical:
 
 | Validator | Weight | Share |
 |---|---:|---:|
-| blazed007 | 6,980 | 69.78% |
-| svm-deployer | 312 | 3.12% |
-| blaze.apps | 309 | 3.09% |
-| cur8 | 309 | 3.09% |
-| dhaka.witness | 309 | 3.09% |
-| xpilar.witness | 306 | 3.06% |
-| yasu | 306 | 3.06% |
-| happycapital | 303 | 3.03% |
-| steem-agora | 303 | 3.03% |
-| steem-space | 300 | 3.00% |
-| upex | 266 | 2.66% |
-| **Threshold** | **7,503 of 10,003** | **75%** |
+| blaze.apps | 3,338 | 33.38% |
+| xpilar.witness | 3,272 | 32.72% |
+| h4lab.svm | 674 | 6.74% |
+| steem-agora | 674 | 6.74% |
+| yasu | 673 | 6.73% |
+| upex | 561 | 5.61% |
+| cur8.svm | 516 | 5.16% |
+| steem-space | 292 | 2.92% |
+| **Threshold** | **7,500 of 10,000** | **75%** |
 
-Always read the live values from the chain; never hard-code them. The weights follow each validator's stake in the SVM network (section 5.6).
-
-The weights above add up to 10,003, not 10,000, because each weight was rounded separately. The automated signers apportion with exact integer arithmetic (section 5.6), so their first validator-set sync moves the authority to exactly 10,000 with threshold 7,500. That first sync still needs approvals reaching the current threshold of 7,503: blazed007 plus at least two others.
+Always read the live values from the chain; never hard-code them. The weights follow each validator's stake in the SVM network: the automated signers apportion them with exact integer arithmetic (section 5.6), so they always sum to exactly 10,000, and reweight svm.bank whenever stake moves by more than the tolerance.
 
 ### 1.2 Who signs
 
@@ -238,7 +233,7 @@ One `account_update` sets the new validator set and threshold on all three autho
 ```json
 ["account_update", {
   "account": "svm.bank",
-  "owner":   { "weight_threshold": 7503, "account_auths": [["blaze.apps", 309], ["blazed007", 6980], …], "key_auths": [] },
+  "owner":   { "weight_threshold": 7500, "account_auths": [["blaze.apps", 3338], ["cur8.svm", 516], …], "key_auths": [] },
   "active":  { …same as owner… },
   "posting": { …same as owner… },
   "memo_key": "STM8LWVtBAjP9Hq8vXQfw15nfnnaNMSiZmvEpLEy6G3jjPFPxerAS",
@@ -1386,7 +1381,7 @@ A typical setup: most validators run the Go signer for routine payouts and valid
 
 A proposal must reach the threshold within 58 minutes. With automated signers that usually takes seconds. Without them, validators have to be online together. To keep things moving:
 
-- Keep enough validators running signers that together they hold more than the threshold. With today's weights that means **blazed007 plus at least two others**, because the other ten together hold 30.2%.
+- Keep enough validators running signers that together they hold more than the threshold. With the weights in section 1.1 that means **both blaze.apps and xpilar.witness plus at least two others** holding at least 890 between them (any two, except steem-space paired with cur8.svm or upex). Neither of the two largest can be left out: everyone else together holds less than 75%.
 - Alert when your signer abstains on a proposal, so a person can review it within the window.
 - Monitor your RC. A signer without RC can't publish votes.
 

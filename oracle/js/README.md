@@ -1,8 +1,10 @@
 # SteemVM oracle — JS / TypeScript client
 
 A functionally-equivalent port of [`oracle/go`](../go/): watches Steem for gateway transfers and
-payouts and attests them to SteemVM, and (once `ORACLE_GAS_PRICES` is set) runs the commit-reveal
-price feed against `x/oracle/data`. Reads the same shared config as the other two clients —
+payouts and attests them to SteemVM, runs the commit-reveal price feed against `x/oracle/data`
+(on by default, paying `ORACLE_GAS_PRICES`, default `1000000000asteem`), and with
+`ORACLE_MULTISIG_ENABLED=true` runs the svm.bank multisig signer. Reads the same shared config as
+the other two clients —
 [`oracle/.env.example`](../.env.example) — so a validator can switch language without losing
 progress (state-file schema parity, see [`../PROTOCOL.md`](../PROTOCOL.md) §8).
 
@@ -21,16 +23,23 @@ src/
   steemClient.ts             condenser_api JSON-RPC client + transfer/payout extraction
   router.ts                    memo classification -> attestation message
   relayer.ts                     main scan/attest + price-feeder loop
+  steemAnchor.ts                   Steem anchor check (PROTOCOL.md §12)
+  validatorGate.ts                 bonded-and-not-jailed duty gate (PROTOCOL.md §10)
   priceFeeder.ts                   commit-reveal state machine
   priceSources/{cmc,coingecko,steemPrices}.ts  price sourcing
   decimalFmt.ts                       LegacyDec.String()-compatible decimal formatter (highest-risk piece)
   state.ts                              JSON state-file load/save (atomic writes)
+  multisig/                             svm.bank signer (PROTOCOL.md §11): steemTx (Steem tx
+                                          serialization + signing), apportion, policy, ballot,
+                                          chain (history index), journal, svm, view, vectors
   proto/                                   ts-proto generated types (committed, not gitignored)
 test/
   decimalFmt.test.ts        unit tests against PROTOCOL.md §7's worked examples
   signingVectors.test.ts      offline signing/encoding vectors (address derivation, 65-byte
                                 sig shape, low-S, pubkey Any encoding) — reproducible without a
                                 live chain, built from a well-known test private key (value 1)
+  steemAnchor / validatorGate / payoutRelay / coingecko .test.ts   duty-specific tests
+  multisig*.test.ts           signer tests, including oracle/multisig/vectors.json
 ```
 
 ## The signing stack
@@ -72,15 +81,20 @@ cp ../.env.example ../.env    # then edit oracle/.env with your validator key
 docker compose --profile js up -d   # from the repo root
 ```
 
+This pulls `steemblazer/steemvm-oracle-js:v0.0.8`. To build it yourself, build from `oracle/` so
+the image includes `multisig/vectors.json`: `docker build -f oracle/js/Dockerfile oracle`.
+
 ## Local development (no local Node/Go needed — everything runs via Docker)
+
+Run these from the repository root (the multisig tests read `oracle/multisig/vectors.json`):
 
 ```sh
 # install deps
-docker run --rm -v "$PWD:/workspace" -w /workspace/oracle/js node:22-slim npm install
+docker run --rm -v "$PWD:/workspace" -w /workspace/oracle/js node:22-trixie-slim npm install
 
 # type-check
-docker run --rm -v "$PWD:/workspace" -w /workspace/oracle/js node:22-slim npm run build
+docker run --rm -v "$PWD:/workspace" -w /workspace/oracle/js node:22-trixie-slim npm run build
 
 # tests
-docker run --rm -v "$PWD:/workspace" -w /workspace/oracle/js node:22-slim node --import tsx --test test/*.test.ts
+docker run --rm -v "$PWD:/workspace" -w /workspace/oracle/js node:22-trixie-slim npm test
 ```

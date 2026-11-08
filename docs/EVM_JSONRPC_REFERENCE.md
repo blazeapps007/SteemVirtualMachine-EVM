@@ -1,9 +1,9 @@
 # SteemVM EVM JSON-RPC Reference
 
 SteemVM exposes a go-ethereum-compatible JSON-RPC interface over the Cosmos SDK
-v0.54 + cosmos/evm v0.7.1 EVM layer. This document is a from-source reference for:
+v0.54 + cosmos/evm v0.7.3 EVM layer. This document is a from-source reference for:
 
-1. every JSON-RPC namespace/method actually wired up by `cosmos/evm@v0.7.1` and
+1. every JSON-RPC namespace/method actually wired up by `cosmos/evm@v0.7.3` and
    which of them are live on this chain's deployment,
 2. this chain's two custom static precompiles (`steembridge`, `oracledata`) plus
    the dynamically-registered SBD ERC20, with full ABIs, and
@@ -12,7 +12,7 @@ v0.54 + cosmos/evm v0.7.1 EVM layer. This document is a from-source reference fo
 All facts below were verified against this repository's source
 (`app/evm.go`, `app/register_sbd.go`, `cmd/steemvmd/cmd/config.go`,
 `docker-compose.yml`, `Instructions/genesis.json`, `precompiles/**`) and the
-vendored `github.com/cosmos/evm@v0.7.1` module (`rpc/apis.go`,
+vendored `github.com/cosmos/evm@v0.7.3` module (`rpc/apis.go`,
 `rpc/namespaces/ethereum/**`, `server/config/config.go`). Anything that could
 not be confirmed from source is called out explicitly rather than guessed.
 
@@ -20,8 +20,11 @@ not be confirmed from source is called out explicitly rather than guessed.
 
 | | |
 |---|---|
-| Cosmos chain-id | `steemvm` |
+| Cosmos chain-id | `SteemVM-Manaslu-81630` |
 | EVM chain-id | `81630` (`0x13ede`) |
+| Gas price floor | 1 gwei (feemarket `min_gas_price`; base fee never drops below it) |
+| Public JSON-RPC | `https://evm.steemvmscan.com` |
+| EVM explorer | `https://evmscan.steemvmscan.com` |
 | Native/gas denom | `asteem` (18 decimals) — the EVM's native value/gas unit; 1 `asteem` = 1 wei-equivalent at the EVM layer |
 | Bridged stablecoin | `asbd` (18 decimals on the EVM side; native bank denom `asbd`, display `sbd`) |
 | Currency symbol (wallets) | `STEEM` |
@@ -35,11 +38,13 @@ not be confirmed from source is called out explicitly rather than guessed.
 | Field | Value |
 |---|---|
 | Network name | SteemVM (or any label you like) |
-| New RPC URL | `http://<host>:8545` |
+| New RPC URL | `https://evm.steemvmscan.com` (or your own node's `http://<host>:8545`) |
 | Chain ID | `81630` |
 | Currency symbol | `STEEM` |
 | Currency decimals | `18` |
-| Block explorer URL | *(none known to exist for this chain yet — leave blank, or fill in once one is deployed)* |
+| Block explorer URL | `https://evmscan.steemvmscan.com` |
+
+The chain is also submitted to Chainlist and the Keplr and Cosmos chain registries.
 
 ### `cast` (Foundry) quickstart
 
@@ -59,7 +64,7 @@ cast balance 0xYourAddress --rpc-url http://localhost:8545 --ether
 
 ## Operational note: which namespaces are actually live
 
-`cosmos/evm@v0.7.1`'s library default (`server/config.GetDefaultAPINamespaces()`,
+`cosmos/evm@v0.7.3`'s library default (`server/config.GetDefaultAPINamespaces()`,
 `server/config/config.go`) is:
 
 ```go
@@ -73,17 +78,17 @@ that default — it just calls `cosmosevmserverconfig.DefaultJSONRPCConfig()`
 as-is — and the checked-in `Instructions/app.toml.example` correspondingly ships
 `api = "eth,net,web3"`.
 
-**However**, the actual node-launch command in `docker-compose.yml` (the `steemvm`
-service's `command:` block) passes an explicit CLI flag that overrides the
-config-file value:
+**However**, the node image's `docker-entrypoint.sh` (which `docker compose up`
+runs) starts the node with explicit CLI flags that override the config-file
+values:
 
 ```
-exec /root/go/bin/cosmovisor run start \
-  --home /root/.steemvm \
-  --json-rpc.enable \
-  --json-rpc.address "0.0.0.0:8545" \
-  --json-rpc.api "eth,net,web3,txpool,debug" \
-  --json-rpc.enable-indexer
+--api.enable \
+--json-rpc.enable \
+--json-rpc.address "0.0.0.0:8545" \
+--json-rpc.ws-address "0.0.0.0:8546" \
+--json-rpc.api "eth,net,web3,txpool,debug" \
+--json-rpc.enable-indexer
 ```
 
 So **as actually deployed via `docker compose up`, five namespaces are enabled:
@@ -96,19 +101,14 @@ api` value, you get back to the library default of `eth,net,web3` only, and
 Two more namespaces exist in the vendored code (`personal`, `miner` — see
 `rpc/apis.go`'s `apiCreators` map and `server/config.GetAPINamespaces()`, which
 lists all seven available namespaces: `web3, eth, personal, net, txpool, debug,
-miner`) but are **not** passed by `docker-compose.yml` and are not enabled on
+miner`) but are **not** passed by the entrypoint and are not enabled on
 this chain. They are omitted from the method tables below; enable them the same
 way (`--json-rpc.api eth,net,web3,txpool,debug,personal,miner`) if needed.
 
-Also note: the compose command only overrides `--json-rpc.address` (HTTP,
-`0.0.0.0:8545`, matching the `8545:8545` port mapping). It does **not** pass a
-`--json-rpc.ws-address` flag, so the WebSocket bind address falls back to
-whatever `app.toml`'s `[json-rpc] ws-address` says — `127.0.0.1:8546` in the
-checked-in `Instructions/app.toml.example` template. A loopback bind inside the
-container is not reachable through the `8546:8546` Docker port mapping from
-outside the container. If `ws://<host>:8546` doesn't connect, check that the
-running node's `app.toml` sets `ws-address = "0.0.0.0:8546"` (edit
-`Instructions/app.toml` — see the compose file's seeding comment — and restart).
+Both JSON-RPC listeners bind `0.0.0.0` inside the container, and
+`docker-compose.yml` publishes them on the host's `127.0.0.1:8545` / `127.0.0.1:8546`
+only. To serve them publicly, put a TLS proxy in front (`Instructions/nginx.conf`,
+section 12 of `Instructions/README.md`).
 
 ## Namespace: `eth` (enabled by default)
 
@@ -353,7 +353,7 @@ name still `steembridge`).
 | Function | Inputs | Outputs | Type | Description |
 |---|---|---|---|---|
 | `confirmName(uint64 registrationId)` | `registrationId` | `bool success` | **tx** (nonpayable) | Confirms a name registration that reached validator-attestation threshold. `msg.sender` must be the registration's memo-derived destination address or it reverts. Equivalent to `MsgConfirmName`, but note: the Cosmos tx path is fee-exempt, this EVM path is **not** — it costs normal gas. |
-| `bridgeOut(string destinationSteemAccount, uint256 amountAsteem, string memo)` | destination Steem account, amount in `asteem` (18 dec), memo | `bool success` | **tx** (nonpayable) | Burns `asteem` from `msg.sender` and records a `Withdrawal` for validators to relay to Steem. Amount must be a positive multiple of `10^15` asteem (one millisteem). Destination `"null"` is the provable-burn path. Equivalent to `MsgBridgeOut`. |
+| `bridgeOut(string destinationSteemAccount, uint256 amountAsteem, string memo)` | destination Steem account, amount in `asteem` (18 dec), memo | `bool success` | **tx** (nonpayable) | Burns `asteem` from `msg.sender` and records a `REQUESTED` `Withdrawal` (STEEM only — SBD goes through `MsgBridgeOut` with `BRIDGE_ASSET_SBD`). Amount must be a positive multiple of `10^15` asteem (one millisteem); 0.25% goes to stakers and the rest is paid on Steem. The validators' svm.bank multisig signers pay it with the memo unchanged (≤ 256 bytes, no control characters); unpaid after ~3.5 days it is refunded automatically. The destination can't be `svm.bank`; `"null"` is the provable-burn path. Reverts if the total bridged out would exceed the total bridged in. Equivalent to `MsgBridgeOut`. |
 | `resolveName(string steemAccount)` | Steem account name | `address addr, uint64 registrationId, uint64 linkedAt` | **view** | Resolves an active name link. Returns all-zero values (not a revert) if unset — safe to probe. |
 | `namesOf(address owner)` | address | `string[] steemAccounts` | **view** | Lists Steem account names actively linked to an address. |
 | `awaitingRegistrationIds(address destination)` | address | `uint64[] registrationIds` | **view** | Lists registration ids awaiting confirmation by a destination address. |
@@ -408,8 +408,9 @@ cast call 0x0000000000000000000000000000000000000902 \
 Source: `app/register_sbd.go` (`SBDERC20Address`, `registerSBD`). This is
 **not** a static precompile like the two above — it is registered dynamically
 through the `x/erc20` module's token-pair mechanism
-(`Erc20Keeper.SetToken` + `Erc20Keeper.EnableDynamicPrecompile`), driven both at
-genesis (`InitChainer`) and idempotently by the `v0.0.3` upgrade handler, so it
+(`Erc20Keeper.SetToken` + `Erc20Keeper.EnableDynamicPrecompile`), driven at
+genesis (`InitChainer`; an earlier chain got it from the `v0.0.3` upgrade
+handler), so it
 is **not** gated by the `active_static_precompiles` param that the other two
 precompiles need — a dynamic ERC20 pair is active as soon as it's registered on
 the `erc20` keeper, independent of that list.
@@ -482,32 +483,22 @@ main();
 
 ## Summary of what's verified vs. not
 
-Verified directly from source in this session:
-- The five enabled namespaces on the `docker-compose.yml` deployment (`eth`,
-  `net`, `web3`, `txpool`, `debug`) and the library's un-flagged default
-  (`eth`, `net`, `web3`) — `cmd/steemvmd/cmd/config.go`,
-  `Instructions/app.toml.example`, `docker-compose.yml`,
-  `cosmos/evm@v0.7.1`'s `server/config/config.go`.
+Verified directly from source (written at `cosmos/evm@v0.7.1`; the chain now
+builds the `v0.7.3` patch release):
+- The five enabled namespaces on the Docker deployment (`eth`, `net`, `web3`,
+  `txpool`, `debug`) and the library's un-flagged default (`eth`, `net`,
+  `web3`) — `cmd/steemvmd/cmd/config.go`, `Instructions/app.toml.example`,
+  `docker-entrypoint.sh`, `cosmos/evm`'s `server/config/config.go`.
 - Every method listed per namespace, read from the actual Go method sets in
-  `cosmos/evm@v0.7.1`'s `rpc/namespaces/ethereum/{eth,eth/filters,net,web3,txpool,debug}/api.go`.
+  `cosmos/evm@v0.7.3`'s `rpc/namespaces/ethereum/{eth,eth/filters,net,web3,txpool,debug}/api.go`.
 - Both static precompiles' full ABI and Go dispatch (`ISteemBridge.sol`,
   `abi.json`, `steembridge.go`/`tx.go`/`query.go`; `IOracleData.sol`,
   `abi.json`, `oracledata.go`), their fixed addresses, and their
   registration/read-write classification.
 - The SBD dynamic ERC20's address, registration mechanism, and the fact it's
   independent of `active_static_precompiles` (`app/register_sbd.go`).
-- `Instructions/genesis.json`'s `active_static_precompiles` array now lists all
+- `Instructions/genesis.json`'s `active_static_precompiles` array lists all
   11 addresses this chain activates, matching what `steemvmd init` produces
-  automatically (`cmd/steemvmd/cmd/init_genesis_defaults.go`) — reconfirm
-  against the *live* chain's current param regardless, since it's a
-  governance-settable value that can change post-genesis.
-
-Not independently verified (flagged rather than guessed):
-- Whether the currently *running* chain's on-chain `evm.params` still matches
-  the checked-in `Instructions/genesis.json` byte-for-byte, versus having been
-  changed since by a governance param-change proposal — check with
-  `steemvmd query evm params` against the live node.
-- Whether the deployed node's `app.toml` `ws-address` was hand-edited away from
-  the `127.0.0.1:8546` template default described above.
-- No block explorer is known to exist for this chain; the MetaMask table above
-  leaves that field intentionally blank.
+  automatically (`cmd/steemvmd/cmd/init_genesis_defaults.go`). On 2026-11-09
+  the live mainnet param listed the same 11 — reconfirm with
+  `steemvmd query evm params`, since it's governance-settable.

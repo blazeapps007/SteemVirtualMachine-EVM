@@ -166,6 +166,9 @@ steemvmd query oracledata aggregate-vote <validator>
 - **Every field must exactly match what's on Steem** (and what other validators submit) — a
   mismatched submission is ignored and doesn't count toward the 2/3 threshold.
 - **Each validator can confirm a given `(txid, op-index)` only once.**
+- **Nothing below the Steem anchor.** Any attestation whose `steem-block` is below the bridge param
+  `relayer_start_block` is rejected (`ErrSteemBlockBeforeAnchor`, code 1124) — see
+  `oracle/PROTOCOL.md` §12.
 - **Copy Steem memos verbatim** — the chain derives the destination from the raw memo in
   consensus; don't "fix" or reformat it.
 - **Price-feed reveals must land in the very next vote period** after the matching prevote, or the

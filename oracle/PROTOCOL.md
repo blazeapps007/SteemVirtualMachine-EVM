@@ -76,8 +76,8 @@ All three clients read the same `oracle/.env` (see `oracle/.env.example`).
   batched up to `MaxMsgsPerTx = 50` messages/tx.
 - **Price-feed messages (`MsgAggregateExchangeRatePrevote`/`Vote`) are NOT fee-exempt.** The
   signing account needs a real `asteem` balance and the tx needs an explicit fee. Default
-  `ORACLE_GAS_PRICES` (see `.env.example`): `1000000000asteem`, matching the manual-attestation
-  examples in `Instructions/README.md`.
+  `ORACLE_GAS_PRICES` (see `.env.example`): `1000000000asteem` (1 gwei), the chain's gas floor.
+  Every client defaults to it, so the price feed is on unless an operator sets it empty.
 
 ## 4. Account/sequence lookup and broadcast
 
@@ -411,8 +411,9 @@ the operator. Each gives `(steem_account, tokens)`, with tokens an arbitrary-pre
 6. Sort `account_auths` by name, with `key_auths = []`. Owner, active and posting are identical, and
    `memo_key` is copied unchanged.
 
-Weights sum to exactly 10000. This replaces the guide's float rounding, which drifted the live set
-to 10003 / 7503.
+Weights sum to exactly 10000. This replaces the float rounding of an earlier chain's hand-built
+authority, which drifted to 10003 / 7503. Mainnet's svm.bank authority is maintained by this
+algorithm.
 
 ### 11.3 Snapshot rule (validator-set proposals)
 

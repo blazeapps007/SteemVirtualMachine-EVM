@@ -2,11 +2,15 @@
 
 This is a complete reference of every gRPC `Query`/`Msg` service and every grpc-gateway REST
 endpoint exposed by `steemvmd`, covering both this chain's custom modules and the standard
-Cosmos SDK v0.54.3 / cosmos/evm v0.7.1 / ibc-go v11.0.0 modules it wires up. It was compiled by
+Cosmos SDK v0.54.4 / cosmos/evm v0.7.3 / ibc-go v11.2.0 modules it wires up. It was compiled by
 reading the actual `.proto` sources — this repo's own `proto/steemvm/**` for the custom modules,
 and the vendored dependency proto sources (`google.golang.org` module cache) for everything else
 — not by guessing endpoint shapes. Only modules actually present in `app/app_config.go`'s module
-set are documented; nothing here is invented.
+set are documented; nothing here is invented. (The upstream sections were compiled at the previous
+patch releases, `v0.54.3` / `v0.7.1` / `v11.0.0`; the bumps since are patch-level.)
+
+Mainnet's public endpoints: REST `https://api.steemvmscan.com`, CometBFT RPC
+`https://rpc.steemvmscan.com`. Public gRPC is not offered; run your own node for it.
 
 For the EVM JSON-RPC surface (`eth_*`, `net_*`, `web3_*`) and the two static precompiles
 (steembridge at `0x...0900`, oracledata at `0x...0902`), see the companion EVM/precompile
@@ -100,7 +104,7 @@ display, consensus code never reads it — and a `Withdrawal` that sits `REQUEST
 
 | RPC | REST path | Description |
 |---|---|---|
-| `Params` | `/steemvm/steembridge/v1/params` | Module params (bridge enable flags, confirmation threshold, min/max bridge amount, fee bps, timeouts, etc.). |
+| `Params` | `/steemvm/steembridge/v1/params` | Module params (bridge enable flags, confirmation threshold, min/max bridge amount, fee bps, timeouts, the Steem anchor `relayer_start_block`/`relayer_start_block_id`, etc.). Public: `https://api.steemvmscan.com/steemvm/steembridge/v1/params`. |
 | `GetDeposit` | `/steemvm/steembridge/v1/deposit/{id}` | Single deposit record by internal numeric id. |
 | `ListDeposit` | `/steemvm/steembridge/v1/deposit` | Paginated list of all deposit records. |
 | `GetWithdrawal` | `/steemvm/steembridge/v1/withdrawal/{id}` | Single withdrawal record by internal numeric id. |
@@ -127,7 +131,7 @@ display, consensus code never reads it — and a `Withdrawal` that sits `REQUEST
 |---|---|
 | `UpdateParams` | Gov-authority-only params update. |
 | `AttestDeposit` | A bonded validator's attestation of a Steem gateway deposit (STEEM or SBD); at ≥2/3 bonded power the deposit resolves and mints. Fee-exempt under the custom ante handler (capped per-validator per-block). |
-| `BridgeOut` | Burns `asteem`/`asbd` and writes an immutable `REQUESTED` withdrawal record; no automated Steem-side payout follows from this call alone. |
+| `BridgeOut` | Burns `asteem`/`asbd` and writes an immutable `REQUESTED` withdrawal record. The chain itself sends nothing on Steem: the validators' oracle clients pay it from `svm.bank` through the multisig (`oracle/PROTOCOL.md` §11.4), then attest it with `AttestWithdrawalPayout`. Refused if the destination is `svm.bank`, the memo is over 256 bytes or has control characters, or the asset's total bridged out would exceed its total bridged in. |
 | `AttestWithdrawalPayout` | A bonded validator's attestation that the gateway paid a bridge-out on Steem; at threshold flips the withdrawal to `PROCESSED`. Fee-exempt. A late attestation against an already-`REFUNDED` withdrawal is a benign no-op (emits `withdrawal_payout_attested_after_refund`). |
 | `SubmitNameRegistration` | A bonded validator's attestation that a Steem account sent a qualifying transfer requesting a name link. Fee-exempt. |
 | `ConfirmName` | Signed by the memo-derived destination address to accept a registration that reached the confirmation threshold. Fee-exempt. |
@@ -188,10 +192,10 @@ with the bridge. Proto source: `proto/steemvm/steemvm/v1/{query,tx}.proto`.
 
 ---
 
-## Standard Cosmos SDK v0.54.3 modules
+## Standard Cosmos SDK v0.54.4 modules
 
 Every module below is wired in `app/app_config.go`'s `appconfig.Compose(...)` module list. Proto
-sources read from the vendored `github.com/cosmos/cosmos-sdk@v0.54.3` module cache.
+sources read from the vendored `github.com/cosmos/cosmos-sdk@v0.54.4` module cache.
 
 ### auth — `cosmos.auth.v1beta1`
 
@@ -393,9 +397,9 @@ Wired but inert on this chain — CLAUDE.md notes "no inflation (mint params are
 
 ### upgrade — `cosmos.upgrade.v1beta1`
 
-The dormant `x/upgrade` handler is `UpgradeName = "v0.0.3"` (`app/upgrades.go`); this chain runs
-under cosmovisor so a future gov software-upgrade auto-swaps the staged binary at the target
-height. **Query** (5 methods, all REST GET)
+`app/upgrades.go` registers handlers `v0.0.3` through `v0.0.8`, all dormant on mainnet (launched
+from genesis on v0.0.8). The node runs under cosmovisor so a gov software-upgrade auto-swaps the
+staged binary at the target height. **Query** (5 methods, all REST GET)
 
 | RPC | REST path | Description |
 |---|---|---|
@@ -477,9 +481,9 @@ a direct message.
 
 ---
 
-## cosmos/evm v0.7.1 modules
+## cosmos/evm v0.7.3 modules
 
-Proto sources read from the vendored `github.com/cosmos/evm@v0.7.1` module cache
+Proto sources read from the vendored `github.com/cosmos/evm@v0.7.3` module cache
 (`proto/cosmos/evm/**`). Wired in `app/evm.go`; EVM chain id `81630` (`0x13ede`), evm denom `asteem`
 (18 dec). All three below are also directly reachable through the EVM JSON-RPC surface (`eth_*`
 etc.) documented in the companion EVM reference — the entries here are the Cosmos-side gRPC/REST
@@ -559,7 +563,7 @@ EIP-1559 fee market; genesis `base_fee` matches `srvCfg.MinGasPrices = "10000000
 
 ---
 
-## ibc-go v11.0.0 modules
+## ibc-go v11.2.0 modules
 
 Wired in `app/ibc.go`: IBC core + ICS-20 transfer (wrapped by the erc20 middleware, both v1 and
 v2/"eureka" routers) + interchain-accounts (both controller and host). Light-client modules

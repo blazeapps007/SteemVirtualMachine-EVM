@@ -1,138 +1,119 @@
-# Security posture of the published images
+# Security
 
-Record of the container-image vulnerability pass done for the `v0.0.4-1` rebuild, and of what
-is deliberately left unfixed. Regenerate any of these numbers with:
+Security posture of SteemVM as of release **v0.0.8** (mainnet `SteemVM-Manaslu-81630`, launched
+from genesis on v0.0.8): what the chain enforces, what it trusts, what is known and not yet fixed,
+and how the published images are built.
 
-```sh
-docker scout cves <image> --only-severity critical,high --format only-packages
-```
+**Reporting a vulnerability.** Don't open a public issue. Contact the maintainers privately, for
+example with a GitHub security advisory on this repository.
 
-## What v0.0.4-1 is
+## Dependency set
 
-A **dependency-only security rebuild of v0.0.4**. No application code, no consensus logic, and
-no state-machine dependency changed — so it is *not* a coordinated upgrade, needs no governance
-proposal and no upgrade height. Validators pull it whenever convenient.
+| Component | Version |
+|---|---|
+| Go toolchain | 1.26.9 (`go.mod` toolchain; images build on `golang:1.26.9-trixie`) |
+| Cosmos SDK | v0.54.4 |
+| cosmos/evm | v0.7.3 (includes the upstream fix that makes EVM state commits atomic when precompiles run) |
+| CometBFT | v0.39.4 |
+| ibc-go | v11.2.0 |
+| gRPC | v1.84.0 |
+| cosmovisor | v1.7.3, rebuilt against current `x/crypto`, `x/net` and gRPC (see below) |
 
-| | v0.0.4 | v0.0.4-1 |
-|---|---|---|
-| Go toolchain | 1.26.5 | **1.26.8** |
-| cosmovisor | v1.7.0 (pinned build on go1.25.10) | **v1.7.3** (no toolchain pin) |
-| cosmovisor's x/crypto | 0.29.0 | **0.56.0** |
-| cosmovisor's x/net / grpc | 0.30.0 / 1.68.0 | **0.57.0 / 1.82.1** |
-| steemvmd's x/crypto | 0.53.0 | **0.56.0** |
+## What the chain enforces
 
-Both images report `version 0.0.4` **on purpose** — the string must keep matching the on-chain
-upgrade plan name, and `docker-entrypoint.sh` stages the binary at
-`cosmovisor/upgrades/v$(steemvmd version)/bin/`, which is the path `cosmovisor/current` points at
-post-upgrade. Bumping it to `0.0.5` with no matching on-chain plan would stage the binary
-somewhere cosmovisor never looks and nodes would silently keep running the old one.
+**Validator identity.** Every validator's moniker must be an ACTIVE Steem name link owned by its
+operator, and its `details` must carry the account's owner/active/posting public keys.
+`app/stakinggate` wraps x/staking's `MsgServer`, so the rule holds on every route: direct txs,
+authz, ICA, governance, and the EVM staking precompile `0x…0800`, which is built on the same gated
+server. Only Ethereum txs go to cosmos/evm's ante handler; every Cosmos tx, including one with the
+dynamic-fee extension, runs this chain's own ante chain. `MsgCreateValidator`/`MsgEditValidator`
+also can't be granted or executed through authz. Re-check the staking provider on every SDK bump and
+re-diff `app/ante_steembridge.go` against upstream on every cosmos/evm bump.
 
-**To tell them apart:** `steemvmd version --long` → `go1.26.8` is patched, `go1.26.5` is not.
-(The `commit` ldflag is empty in Docker builds because `.git` is not in the build context.)
+**Bridge attestations.** Deposits, name registrations and withdrawal payouts resolve once
+validators holding at least 2/3 of bonded voting power attest the **same** facts. Attestations are
+tallied per distinct fact-set, so a minority can't fix the facts by attesting first. Attestations
+for Steem blocks below the chain's genesis anchor (`relayer_start_block`) are rejected, so a
+previous chain's history can't be replayed here.
 
-## Result
+**Payouts.** A bridge-out is paid as one Steem transaction: the transfer, carrying the user's own
+memo, and a `custom_json` naming the withdrawal that only `svm.bank`'s active authority can sign.
+Memos mean nothing to the bridge. `MsgAttestWithdrawalPayout` carries the observed recipient, memo,
+amount and asset, and both the chain and the relays compare them with the withdrawal. Unpaid
+withdrawals are refunded automatically after `withdrawal_timeout_blocks` (~3.5 days).
 
-| Image | Before | After |
-|---|---|---|
-| `steemvmd` | 12 Critical / 35 High | **0 Critical / 13 High** |
-| `steemvm-oracle-go` | not previously scanned | **0 Critical / 6 High** |
-| `steemvm-oracle-python` | not previously scanned | **0 Critical / 3 High** |
-| `steemvm-oracle-js` | 2 Critical / 17 High | **0 Critical / 3 High** |
+**No unbacked supply.** Bridge-out is limited per asset to what was bridged in (minted includes the
+genesis allocation, which `launch-genesis.sh` requires to be funded on Steem before the anchor).
+Bridge-outs to the gateway itself, and memos over 256 bytes or with control characters, are
+refused. A gateway-to-itself transfer is never a deposit.
 
-Every Critical is gone fleet-wide. Verified additionally by `go test ./...` (all packages pass)
-and a throwaway devnet boot on the patched binary (init → gentx → collect-gentxs → start,
-8 blocks committed, no panics).
+**Module accounts.** Every module account is blocked in x/bank (v0.0.7). This also keeps cosmos/evm
+from mirroring precompile transfers into module balances.
 
-## Two non-obvious build decisions
+**Gas floor.** The feemarket `min_gas_price` is 1 gwei (`app.EVMGasFloor`), set in genesis and by the
+upgrade handlers, so EVM fees are never zero. It must not go above 1 gwei: all three oracle clients
+pay exactly 1 gwei for price-feed txs, which aren't fee-exempt. Bridge attestations and name
+confirmations are fee-exempt (capped per validator per block).
 
-**cosmovisor is built inside a throwaway module.** `go install pkg@version` deliberately ignores
-local module context, so it always builds against the versions cosmovisor's own `go.mod` pins —
-and v1.7.3 still pins x/crypto 0.32.0, x/net 0.34.0 and grpc 1.70.0, which between them were
-*every remaining Critical in the node image*. The Dockerfile therefore creates a scratch module,
-adds cosmovisor as a tool dependency, upgrades those three, runs `go mod tidy` (required — the
-grpc bump pulls spiffe packages that otherwise lack go.sum entries) and builds from there.
-cosmovisor is only a process supervisor: not part of consensus, never touches app state.
-Collapse this back to a plain `go install` once an upstream release ships current deps.
+**svm.bank signer keys.** The oracle's multisig signer uses only the validator's Steem **active** key.
+It refuses to start if an owner key, posting key or master password is configured, if the active key
+doesn't belong to the validator's verified Steem account, or if it is also an owner key.
 
-**The JS oracle drops npm and runs on trixie.** `node:22-slim` is still Debian 12, whose `perl`
-carried 2 Criticals; `node:22-trixie-slim` is Debian 13. Separately, npm's own vendored
-dependency tree (`tar`, `pacote`, `sigstore`, …) was the single largest source of findings in
-that image despite never executing — the runtime only ever runs `node dist/main.js` — so npm is
-removed from the runtime stage. Together these took it from 2C/17H to 0C/3H.
+## Trust assumptions and known risks
 
-## Known-unfixed, and why
+- **Validators holding 2/3 of bonded power are trusted for the bridge.** Together they can attest
+  deposits that never happened, mint against them and bridge out, and the signers pay because the
+  chain says the withdrawal is valid. On 2026-11-09 (22,266.6 STEEM bonded) that took about 44,533
+  STEEM of new stake. The planned mitigation is client-side: signers check every minted deposit
+  against Steem itself before approving any `svm.bank` transaction.
+- **Governance can lower `bridge_confirmation_threshold`.** Params validation only requires
+  `0 < threshold ≤ 1`. A proposal passed while nobody else votes (quorum 33.4%, about 11,167 STEEM
+  today) could set it low enough for one validator to mint. Validators should watch every
+  parameter-change proposal and vote NoWithVeto on one like this. A chain-side minimum of 2/3 is
+  planned.
+- **`svm.bank` direct control** needs 75% of signer weight, which follows stake.
+- **A very late payout can race the automatic refund** and pay twice. Signers never propose a
+  payout within `ORACLE_MULTISIG_PAYOUT_MARGIN_BLOCKS` (default 14,400) of the refund; an attestation
+  after a refund is a no-op that emits `withdrawal_payout_attested_after_refund`.
+- **Public JSON-RPC exposes `debug_*`.** The entrypoint enables it for explorers. Rate-limit or filter
+  it at the proxy.
 
-**`util-linux` (3 High, all four images).** Debian marks these **not fixed** — there is no
-patched package to move to. Present in every Debian-based image on the registry today. Revisit
-when Debian ships a fix.
+## govulncheck
 
-**`cosmos-sdk` 0.50.11 / `cometbft` 0.38.17 / `go-getter` 1.7.7 (inside cosmovisor).** These are
-cosmovisor's own pins, not upgradable without patching cosmovisor itself, and they are Highs
-rather than Criticals. `go-getter` is the binary-download path, which this deployment disables
-outright via `DAEMON_ALLOW_DOWNLOAD_BINARIES: "false"` in `docker-compose.yml`.
+CI runs `govulncheck` as a separate, non-blocking job. Open findings at v0.0.8:
 
-**`cometbft` 0.39.4 / `btcd` 0.24.2 / `grpc` 1.82.1 (steemvmd's own).** Deliberately deferred.
-cometbft and the cosmos-sdk line are state-machine-relevant: bumping them is a **coordinated,
-state-breaking upgrade** of the shape `Instructions/UPGRADE_v0.0.4.md` records, not a patch
-rebuild. They are tracked for the next coordinated upgrade rather than smuggled into one that
-validators are told they can apply at their own pace.
+| Finding | Status |
+|---|---|
+| `klauspost/compress` GO-2026-6865 | Fixed upstream in v1.20.2; pending a dependency bump |
+| `crypto/x509` GO-2026-6809 | Fixed in Go 1.26.10; pending a toolchain bump |
+| `x/crypto/openpgp` GO-2026-5932 | Newer `x/crypto` pseudo-version available; pending a bump |
+| `pion/dtls` v2 GO-2026-4479 | No fix upstream |
+| `cosmos/evm` GO-2025-3684 | Believed a false positive: v0.7.3 reverts precompile state atomically (`RunNativeAction`), and both custom precompiles use it |
 
-## What Docker Scout's `recommendations` said, and why it was ignored
+Dependency bumps that touch the state machine ship as a coordinated release, not a patch rebuild.
 
-`docker scout recommendations` proposed changing the base image. That is a no-op here:
-`debian:trixie-slim` is already current, and every alternative tag it listed carries an identical
-vulnerability count, with `13`/`latest` being 49 MB against 30 MB. The real exposure was in the
-Go layer, which that subcommand does not summarize — use `docker scout cves` instead.
+## Image build
 
----
+The last full image scan (`docker scout cves <image> --only-severity critical,high`) was done for
+the v0.0.4-1 rebuild: no Critical findings in any of the four images. Re-run it for each release.
 
-# Chain-level fixes in v0.0.5
+**cosmovisor is built inside a throwaway module.** `go install pkg@version` ignores local module
+context, and cosmovisor v1.7.3 still pins `x/crypto` 0.32.0, `x/net` 0.34.0 and gRPC 1.70.0, which
+were every remaining Critical in the node image. The `Dockerfile` creates a scratch module, adds
+cosmovisor as a tool dependency, upgrades those three, runs `go mod tidy` and builds from there.
+cosmovisor is only a process supervisor: not part of consensus, never touches app state, and its
+binary-download path is disabled (`DAEMON_ALLOW_DOWNLOAD_BINARIES=false`). Collapse this back to a
+plain `go install` once an upstream release ships current dependencies.
 
-## Validator identity gate: three bypass routes
+**The JS oracle drops npm and runs on trixie.** `node:22-trixie-slim` is Debian 13, and npm's own
+vendored dependency tree, the largest source of findings, is removed from the runtime stage (the
+runtime only runs `node dist/main.js`).
 
-Every validator must own an ACTIVE Steem name matching its moniker and publish its Steem public
-keys in `details`. That rule lived only in `steembridgeValidatorGateDecorator`
-(`app/ante_steembridge.go`), which sees a Cosmos tx's **top-level** messages and nothing else.
-Three routes reached x/staking without passing it:
+**Known unfixed in images:** `util-linux` Highs that Debian marks not fixed, present in every
+Debian-based image; and cosmovisor's own pins of `cosmos-sdk` 0.50 / `cometbft` 0.38 / `go-getter`,
+which can't be upgraded without patching cosmovisor (Highs, not Criticals; `go-getter` is the
+disabled download path).
 
-| Route | Why the gate missed it | Fix | Needs a halt? |
-|---|---|---|---|
-| EVM staking precompile `0x…0800` | EVM txs use cosmos/evm's own ante handler; the precompile calls x/staking's msg server directly | Switched off by governance proposal 3 until v0.0.5. v0.0.5 registers it wrapped in the same identity check (`app/staking_identity_precompile.go`) and its upgrade handler switches it back on; `delegate`/`undelegate`/`redelegate`/queries are untouched | Off: no. Gated: yes (execution change) |
-| authz | `MsgExec{MsgCreateValidator}` is a top-level `MsgExec` | `MsgCreateValidator`/`MsgEditValidator` added to the authz limiter, which also rejects `MsgGrant` for them and recurses into nested `MsgExec` | Yes (ante change) |
-| ICA host | The host executes packet messages through the router, never the ante handler; `allow_messages` is `["*"]` | `icaIdentityRouter` (`app/ica_identity_router.go`) runs the gate's own two keeper checks on create/edit; ICA stays fully on | Yes (execution change) |
-
-Gov-executed messages are not a route: `MsgCreateValidator` must be signed by the operator, which
-the gov module account cannot be.
-
-**Not exploited on the live chain.** All 12 validators were checked on 2026-09-24: each owns its
-moniker's Steem name and carries valid keys. The authz route was proven exploitable on a devnet
-running the live v0.0.4-1 binary: a grant plus `MsgExec` created a validator with no identity at
-all, while the same attempt after the v0.0.5 upgrade — including one reusing a grant made before
-it — is rejected.
-
-The EVM route was proven the same way: on the v0.0.4-1 binary a plain EVM account created a
-validator with no identity through `0x…0800`. After the v0.0.5 upgrade, real EVM transactions
-confirm an anonymous `createValidator` is mined and rejected with the gate's own error. Renaming a
-validator to an unregistered moniker is likewise rejected. `delegate`, and an edit that leaves the
-identity untouched, still succeed.
-
-**The staking precompile must only ever be active in its wrapped form.** `app/evm.go` refuses to
-start if a cosmos/evm bump changes the precompile's type so it can no longer be wrapped. On any
-future cosmos/evm upgrade, re-check that `stakingIdentityPrecompile.Run` still matches upstream's
-`Run` (`RunNativeAction` around `Execute`). See `app.StakingPrecompileAddress`.
-
-## EVM gas floor: 1 gwei
-
-Before this, EVM transactions paid **zero** fees, so the 25% fee burn burned nothing (live
-`baseFeePerGas` and `eth_gasPrice` were both `0x0`). The feemarket `min_gas_price` floor was 0,
-and with unlimited block gas (`max_gas -1`) the EIP-1559 target is unreachable, so the base fee
-fell 12.5% every block until it hit that floor. The nodes' `app.toml` 1 gwei minimum did not
-help: cosmos/evm skips it for EVM txs once London is active.
-
-The floor is now 1 gwei (`app.EVMGasFloor`), set in three places so it cannot silently regress:
-the governance vote (live chain), the v0.0.5 upgrade handler (idempotent, never lowers a higher
-value), and fresh-chain genesis defaults.
-
-**It must not exceed 1 gwei**: all three oracle clients pay exactly 1 gwei for price-feed txs
-(which are not fee-exempt). A higher floor rejects them and gets validators slashed for missed
-duty. Bridge attestations and name confirmations are fee-exempt and unaffected.
+**Version string.** `steemvmd version` comes from the Makefile's `VERSION` and must match the
+on-chain upgrade plan name: `docker-entrypoint.sh` stages the binary at
+`cosmovisor/upgrades/v$(steemvmd version)/bin/`.

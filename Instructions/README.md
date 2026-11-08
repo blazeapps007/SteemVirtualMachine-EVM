@@ -5,9 +5,11 @@ This guide takes you from nothing to a running, staked validator using the
 config from the templates in this directory (`app.toml.example`,
 `config.toml.example`) and copies in `client.toml`/`genesis.json` on every start.
 
-> **New node?** This is a freshly-launched chain — a new node simply replays
-> from the `genesis.json` in this directory (`docker compose up` handles it). No
-> state-sync step is required.
+> **New node?** Mainnet (`SteemVM-Manaslu-81630`) was launched from genesis on
+> release v0.0.8, so one binary replays every block: a new node can replay from
+> the `genesis.json` in this directory (`docker compose up` handles it), or
+> state-sync from a recent snapshot (what `new-validator.sh` does once the chain
+> is old enough).
 
 > **Read this first — validators must have a Steem identity.** SteemVM does not
 > let anonymous validators join. To create a validator you must prove you own a
@@ -38,7 +40,7 @@ raw TCP port for p2p.
 4. Paste:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.6/install.sh | sudo bash
+   curl -fsSL https://raw.githubusercontent.com/blazeapps007/SteemVirtualMachine-EVM/release/v0.0.8/install.sh | sudo bash
    ```
 
 5. Enter your **Steem username** and your **Steem active private key** (shown
@@ -51,7 +53,9 @@ The installer ([`install.sh`](../install.sh)) installs Docker, git and jq,
 opens p2p port 26656 if `ufw` is on, clones this repository to `/opt/steemvm`,
 and runs `new-validator.sh` with your answers (CoinGecko prices, state-sync
 from `https://rpc.steemvmscan.com`). The setup then registers your name,
-waits for your stake to arrive, creates the validator and starts the oracle.
+asks to send the 414 STEEM stake transfer from your account, waits for it to
+arrive, creates the validator with 400 STEEM staked, and starts the oracle with
+its svm.bank signer on.
 If it stops part-way (a registration or funding timeout), finish with
 `cd /opt/steemvm && ./reset.sh --rejoin-only`.
 
@@ -70,9 +74,10 @@ under Docker at all.
   your key, sends the 0.001 STEEM name registration itself (signed with your
   Steem **active** key, which it asks for once — shown as you paste it,
   checked against your account — and saves to `oracle/.env` for the oracle's
-  svm.bank signer), confirms the name with retries, waits for your stake to be
-  bridged in, builds `validator.json`, creates the validator, and wires up the oracle
-  client. Still requires Docker. Run it from the repository root:
+  svm.bank signer), confirms the name with retries, sends the stake transfer
+  (414 STEEM by default, after you confirm) and waits for it to be bridged in,
+  builds `validator.json`, creates the validator with 400 STEEM, and wires up
+  the oracle client. Still requires Docker. Run it from the repository root:
 
   ```sh
   ./new-validator.sh
@@ -80,21 +85,22 @@ under Docker at all.
 
   See the script's own header comment for flags (`--cleanup`,
   `--cleanup-full`, `--fix-config`) and env vars you can override
-  (`STAKE_AMOUNT`, `ORACLE_PROFILE`, etc.). If anything about your setup is
+  (`STAKE_AMOUNT`, `BRIDGE_STEEM`, `ORACLE_PROFILE`, etc.). If anything about your setup is
   non-standard, or you'd rather understand/control each step yourself, use the
   manual path below instead — it's exactly what the script automates.
-- **Already a validator on the previous chain (`steemvm`)? Run `./reset.sh`**
-  from the repository root (or `./update.sh`, which hands over to it when the
-  release moves to a new chain). It keeps your keys, address and
-  `oracle/.env`, moves the node to `SteemVM-Manaslu-81630` (its genesis, checked against
-  the network's; chain-id `SteemVM-Manaslu-81630`; EVM chain-id `81630`; state-sync from
+- **Already ran a node on an earlier SteemVM chain (e.g. a testnet)? Run
+  `./reset.sh`** from the repository root (or `./update.sh`, which hands over to
+  it when the release moves to a new chain). It keeps your keys, address and
+  `oracle/.env`, moves the node to `SteemVM-Manaslu-81630` (its genesis, checked
+  against the network's; EVM chain-id `81630`; state-sync from
   `https://rpc.steemvmscan.com`), then rejoins as a validator: it asks for your
   Steem **active** key once (unless `oracle/.env` already has it), sends the
   0.001 STEEM name registration, confirms the name, waits until your address
-  holds the stake (bridge it in; `STAKE_AMOUNT`, default 400
-  STEEM, from a 414 STEEM transfer — it keeps 1 STEEM liquid for fees), creates
-  the validator and restarts your oracle on its latest image.
-  `./reset.sh --rejoin-only` resumes after a funding timeout.
+  holds the stake (bridge it in yourself: a 414 STEEM transfer covers the
+  default `STAKE_AMOUNT` of 400 STEEM plus the 0.25% fee), creates the validator
+  — always leaving at least 1 STEEM liquid for fees — and restarts your oracle
+  on its published image. `./reset.sh --rejoin-only` resumes after a funding
+  timeout.
 - **Manual Docker Compose** — steps 1–10 below, one command at a time. Use
   this if the script doesn't fit your setup, or you want to understand what
   each step actually does before trusting it to automation.
@@ -113,7 +119,7 @@ under Docker at all.
 | 6 | Confirm the name is yours → link goes ACTIVE |
 | 7 | Bridge in STEEM for the self-stake |
 | 8–9 | Build `validator.json` and create the validator |
-| 10+ | Attest Steem transfers as a bonded validator |
+| 10 | Run an oracle client: attestations, price feed, svm.bank signer |
 
 > **Placeholders**: anything in `<angle brackets>` below is a value you must
 > substitute — replace the brackets too. Pasting `<your-address>` literally
@@ -166,12 +172,14 @@ docker compose up -d
 docker compose logs -f
 ```
 
-The first start builds the `steemvmd` image (a real, cached Docker image
-build — see the repo-root `Dockerfile` — so this only happens once, not on
-every restart) unless you've already pulled a pre-built one
-(`docker compose pull steemvm`). Once the image is ready the node replays from
-genesis and follows the chain via normal block sync. On a young chain this is
-quick. The bridge oracle (section 10) starts alongside the node automatically.
+The first start pulls the published `steemblazer/steemvmd:v0.0.8` image (if it
+can't be pulled, compose builds it once from the repo-root `Dockerfile`). Once
+the image is ready the node replays from genesis and follows the chain via
+normal block sync. On a young chain this is quick. The node's home — keys,
+config and chain data — is your host's `~/.steemvm` (override with
+`STEEMVM_HOME`), bind-mounted into the container. The oracle client is a
+separate service you start later with a Compose profile (section 10); it does
+not start with `docker compose up -d`.
 
 ## 3. Wait for block sync
 
@@ -221,8 +229,9 @@ docker exec steemvm-node /root/go/bin/steemvmd keys show blazed007 -a --keyring-
 > `secp256k1` type: those accounts cannot sign EVM transactions and their
 > mnemonic derives a different address in MetaMask.
 
-> The `test` keyring stores keys unencrypted inside the `steemvm-home` docker
-> volume. Fine for a testnet; do not use it for anything holding real value.
+> The `test` keyring stores keys unencrypted in the node home
+> (`~/.steemvm/keyring-test` on the host). Back up the mnemonic, keep the host
+> locked down, and keep only what the validator needs on this key.
 
 ## 5. Link your Steem account (send 0.001 STEEM)
 
@@ -254,7 +263,7 @@ trip people up:
 
 Validators' relayers watch Steem's last irreversible block and attest your
 transfer automatically — usually within a minute or two. Once validators
-holding more than 2/3 of bonded stake have attested it, the registration
+holding at least 2/3 of bonded stake have attested it, the registration
 moves to `AWAITING_CONFIRMATION`. Watch for it:
 
 ```sh
@@ -309,13 +318,15 @@ supersedes the old link.)
 
 ## 7. Bridge in your stake
 
-**There is no pre-mint and no faucet: every coin on the chain was bridged in from
-Steem.** Before creating a validator, send STEEM from your Steem account to
-`svm.bank` with the `steem...` address from step 4 as the memo, exactly, and wait
-until it arrives. You need enough to cover the self-stake (the `amount` in step
-8), a little extra for gas, and the bridge's 0.25% fee. `new-validator.sh` does
-this for you: by default it asks to send 414 STEEM and stakes 400, leaving about
-13 STEEM liquid. You can stake more later (see "Add more stake later" in step 9).
+**There is no inflation and no faucet: every coin on the chain was bridged in
+from Steem** (the genesis validator's allocation too, backed by a transfer to
+`svm.bank` before launch). Before creating a validator, send STEEM from your
+Steem account to `svm.bank` with memo `svm-deposit <your steem1... address>`
+(the bare address works too) and wait until it arrives. You need enough to
+cover the self-stake (the `amount` in step 8), a little extra for gas, and the
+bridge's 0.25% fee. `new-validator.sh` does this for you: by default it asks to
+send 414 STEEM, which arrives as 412.965 STEEM; it stakes 400 and leaves 12.965
+liquid. You can stake more later (see "Add more stake later" in step 9).
 Check your balance with:
 
 ```sh
@@ -451,22 +462,36 @@ docker exec -it steemvm-node /root/go/bin/steemvmd query staking validator "$VAL
 > Delegating does **not** re-check your Steem identity: the validator gate only
 > runs on `create-validator` / `edit-validator`, so you can top up freely.
 
-## 10. Attesting Steem transfers (bridge-in & name service)
+## 10. Validator duties: the oracle client
 
-Once you are a **bonded validator**, you participate in the bridge by
-attesting to STEEM transfers sent to the gateway account on the Steem
-blockchain — including other people's `svm-register` transfers like the one
-you sent in step 5. When validators representing more than 2/3 of bonded stake
-have submitted **identical** facts, the chain acts on them.
+Once you are a **bonded validator**, you have three duties, all run by one
+oracle client container:
+
+1. **Bridge attestations** — attest transfers sent to the gateway account on
+   Steem (deposits, and other people's `svm-register` transfers like the one you
+   sent in step 5), and the gateway's payouts for bridge-outs. When validators
+   holding at least 2/3 of bonded voting power have submitted **identical**
+   facts, the chain acts on them.
+2. **Price feed** — commit-reveal votes on STEEM/USD, SBD/USD, STEEM/SBD and
+   Steem's own feed price, once per vote period (600 blocks, about an hour).
+3. **svm.bank signer** — approve and execute `svm.bank` multisig transactions
+   on Steem: paying bridge-outs, and keeping `svm.bank`'s signer weights equal
+   to each validator's share of bonded stake. It uses your Steem **active** key
+   only.
+
+Missing price votes or bridge attestations counts against you in the oracle
+module's slashing window, so keep the client running.
 
 **Memo formats users send to the gateway on Steem:**
 
 | Memo | Meaning |
 |---|---|
-| `svm-deposit <address>` (or just `<address>`) | Bridge deposit — mints asteem to the address |
+| `svm-deposit <address>` (or just `<address>`) | Bridge deposit — mints `asteem` (STEEM) or `asbd` (SBD) to the address, minus the 0.25% fee |
 | `svm-register <address>` (≥ 0.001 STEEM) | Name registration — links the sender's Steem account to the address (the address must then confirm) |
 
-`<address>` is either a `steem1...` or a `0x...` address.
+`<address>` is either a `steem1...` or a `0x...` address. SBD transfers are
+always deposits. A transfer whose memo has no valid address is recorded as
+UNCLAIMABLE rather than minted to a guess.
 
 ### The bridge oracle (recommended)
 
@@ -505,10 +530,24 @@ step 4). The oracle just needs that key exported into its own environment.
    ```sh
    ORACLE_PRIVATE_KEY=<paste the hex from step 1>   # a leading 0x is fine too
    ORACLE_STEEM_RPC=https://api.steemit.com          # already the default
+
+   # Price feed: CoinMarketCap (needs a key) or CoinGecko (key optional)
+   ORACLE_PRICE_SOURCE=coingecko
+
+   # svm.bank signer
+   ORACLE_MULTISIG_ENABLED=true
+   ORACLE_STEEM_ACTIVE_WIF=<your Steem ACTIVE private key>
+   ORACLE_STEEM_RPCS=https://api.steemit.com,https://api.justyy.com
    ```
 
    > Prefer not to export a raw key? Set `ORACLE_MNEMONIC="word1 … word24"` (the
    > mnemonic from step 4) instead of `ORACLE_PRIVATE_KEY`.
+
+   **Only your Steem active key belongs here.** Never put your owner key,
+   posting key or master password in `oracle/.env`: the client refuses to start
+   if it finds one, and also if the active key doesn't belong to your validator's
+   Steem account (its moniker) or is also an owner key. `new-validator.sh` and
+   `reset.sh` write all of this for you.
 
 3. **Start (or restart) the stack**, bringing up ONE oracle client alongside
    the node (never more than one at a time against the same key):
@@ -518,14 +557,26 @@ step 4). The oracle just needs that key exported into its own environment.
    ```
 
 The oracle reaches your node at `http://steemvm:26657` over the compose network,
-polls Steem's **last irreversible block** every minute, scans transfers to
-the gateway account, and broadcasts the matching deposit / name-registration
-attestations automatically (fee-exempt for bonded validators). Its scan cursor
-persists in the `oracle-data` volume; it idles harmlessly while your key is not
-a bonded validator, and catches up automatically after downtime. Set
-`ORACLE_GAS_PRICES` in `oracle/.env` to also activate its price feed —
-`ORACLE_PRICE_SOURCE` picks CoinMarketCap (default, needs `ORACLE_CMC_API_KEY`) or CoinGecko
-(`ORACLE_COINGECKO_API_KEY` is fully optional) — see [`oracle/PROTOCOL.md`](../oracle/PROTOCOL.md).
+polls Steem's **last irreversible block** every minute, scans transfers to and
+from the gateway account, and broadcasts the matching deposit, payout and
+name-registration attestations automatically (fee-exempt for bonded
+validators). Its scan cursor and signer state persist in the `oracle-data`
+volume; it broadcasts nothing while your validator is jailed or not bonded,
+and catches up automatically after downtime. It also checks that its Steem RPC
+agrees with the chain's Steem anchor block before attesting anything.
+
+The price feed is on by default and pays 1 gwei gas
+(`ORACLE_GAS_PRICES=1000000000asteem`), so the validator account needs a small
+liquid `asteem` balance. `ORACLE_PRICE_SOURCE` picks CoinMarketCap (`cmc`, the
+client default, needs `ORACLE_CMC_API_KEY`) or CoinGecko (`coingecko`,
+`ORACLE_COINGECKO_API_KEY` optional; the one-click installer uses this) — see
+[`oracle/PROTOCOL.md`](../oracle/PROTOCOL.md).
+
+The svm.bank signer publishes its votes in your Steem account's
+`posting_json_metadata` and needs a little Steem RC to do so. Its rules are in
+[`oracle/PROTOCOL.md`](../oracle/PROTOCOL.md) §11, and the background in
+[`oracle/multisigguide.md`](../oracle/multisigguide.md). To watch it without
+signing anything, set `ORACLE_MULTISIG_DRY_RUN=true` first.
 
 Follow it:
 
@@ -582,6 +633,9 @@ Rules that matter:
   deposit is ignored (with an on-chain mismatch event) and does not count
   toward the threshold.
 - **Each validator can confirm a given `(txid, op-index)` only once.**
+- **Nothing before the chain's Steem anchor counts.** A `steem-block` below the
+  bridge param `relayer_start_block` (the Steem block mainnet's genesis started
+  from) is rejected.
 - **Copy the memo verbatim — do not "fix" or convert it.** The chain itself
   derives the destination from the raw memo in consensus. An unparseable memo
   makes the deposit UNCLAIMABLE rather than minting to a guess.
@@ -617,7 +671,8 @@ The full interface is [`precompiles/steembridge/ISteemBridge.sol`](../precompile
   gas.)
 - `bridgeOut(string destinationSteemAccount, uint256 amountAsteem, string memo)` —
   burn asteem from your account and queue a withdrawal to Steem. The amount
-  must be a positive multiple of 10^15 (whole millisteem).
+  must be a positive multiple of 10^15 (whole millisteem). STEEM only; SBD is
+  bridged out with the CLI (below).
 - `resolveName(string steemAccount)` / `namesOf(address)` /
   `awaitingRegistrationIds(address)` — read-only lookups; `resolveName`
   returns `address(0)` for unlinked names instead of reverting, so contracts
@@ -635,9 +690,44 @@ await bridge.confirmName(ids[0]);           // MetaMask pops up, signs, done
 console.log(await bridge.resolveName("blazed007"));
 ```
 
+### How a bridge-out is paid
+
+1. `bridgeOut` (or `steemvmd tx steembridge bridge-out <steem-account>
+   <amount> <memo> <BRIDGE_ASSET_STEEM|BRIDGE_ASSET_SBD>`) burns the coins and
+   creates a `REQUESTED` withdrawal. The 0.25% fee goes to stakers; the rest is
+   what arrives on Steem.
+2. The validators' oracle clients propose, approve and broadcast the payout
+   from `svm.bank` as one Steem transaction: a transfer to your account carrying
+   **your memo unchanged** (so an exchange deposit tag arrives intact), plus a
+   `custom_json` naming the withdrawal. This takes approvals from validators
+   holding 75% of `svm.bank`'s signer weight, usually within minutes.
+3. The validators attest the payout and the withdrawal becomes `PROCESSED`.
+
+If no payout is attested within `withdrawal_timeout_blocks` (about 3.5 days),
+the chain refunds the net amount to the sender automatically. The rules a
+bridge-out must meet:
+
+- the memo is at most 256 bytes with no control characters;
+- the destination can't be `svm.bank` itself (`null` is allowed, as a
+  provable burn);
+- the chain never lets more of an asset be bridged out than was bridged in
+  (`query steembridge bridge-statistics`).
+
+Check a withdrawal with `steemvmd query steembridge get-withdrawal <id>`.
+
 ## 12. Public HTTPS endpoints (nginx reverse proxy + Let's Encrypt)
 
-By default the node publishes its RPC ports in the clear on the host
+The network's own public endpoints, which you can use instead of running one:
+
+| Service | URL |
+|---|---|
+| EVM JSON-RPC (MetaMask: chain ID `81630`, currency `STEEM`) | `https://evm.steemvmscan.com` |
+| CometBFT RPC | `https://rpc.steemvmscan.com` |
+| Cosmos REST | `https://api.steemvmscan.com` |
+| Explorer, Cosmos txs | <https://steemvmscan.com> |
+| Explorer, EVM txs | <https://evmscan.steemvmscan.com> |
+
+The rest of this section is for running your own. By default the node publishes its RPC ports on the host
 (`docker-compose.yml`): EVM JSON-RPC on `8545`/`8546`, CometBFT RPC on `26657`,
 the Cosmos REST API on `1317`. To serve these to the public over HTTPS — so
 MetaMask, dApps, and explorers get a proper `https://`/`wss://` URL — put
@@ -721,11 +811,12 @@ certificates with [certbot](https://certbot.eff.org/).
   > which read `http://<ip>:26657/status` across hosts. Either keep `26657`
   > public on the designated seed nodes, or serve it over TLS via `rpc.<domain>`
   > below and point those scripts' `SEED_RPC` at the `https://` URL.
-- **Drop the `debug` JSON-RPC namespace for a public endpoint.** The compose
-  command starts the node with `--json-rpc.api "eth,net,web3,txpool,debug"`;
-  `debug_*` methods (e.g. `debug_traceTransaction`) are expensive and a DoS
-  vector when open to the world. For a public provider, remove `debug` (and
-  usually `txpool`) from that list.
+- **Consider dropping the `debug` JSON-RPC namespace for a public endpoint.**
+  The container's `docker-entrypoint.sh` starts the node with
+  `--json-rpc.api "eth,net,web3,txpool,debug"`; `debug_*` methods (e.g.
+  `debug_traceTransaction`) are expensive and a DoS vector when open to the
+  world. Explorers need them, so either keep them and rely on nginx rate
+  limiting, or block `debug_*` at the proxy for everyone but your explorer.
 - **Rate limiting** is already applied per client IP in `nginx.conf`
   (`limit_req_zone ... rate=25r/s`); adjust to your capacity.
 - CometBFT RPC (`26657`) has `cors_allowed_origins = ["*"]` and the REST API
@@ -742,6 +833,30 @@ certificates with [certbot](https://certbot.eff.org/).
   `https://rpc.mychain.io/net_info`, etc.
 - **REST / LCD**: `https://api.mychain.io/cosmos/bank/v1beta1/...`.
 
+## 13. Updating to a new release
+
+From the repository root:
+
+```sh
+./update.sh                 # pull the current branch
+./update.sh release/vX.Y.Z  # or switch to a new release branch first
+```
+
+`update.sh` reads the release you check out and does the right thing:
+
+- **A coordinated upgrade is pending** (the release's `docker-compose.yml` has a
+  `stage-vX.Y.Z` service): it stages the new binary into cosmovisor's upgrade
+  slot and moves your oracle to its new image. Nothing restarts; cosmovisor
+  switches binaries by itself at the upgrade height set by the governance
+  proposal. Run it any time before the height.
+- **No upgrade pending**: it resets chain data (keys untouched), refreshes
+  peers, state-syncs and restarts the node and oracle.
+- **The release moves to a new chain**: it hands over to `./reset.sh`.
+
+Releases announce which case applies. Keep `docker-compose.yml`'s image tags
+as shipped: pinning `STEEMVM_IMAGE` or an oracle image in the repo-root `.env`
+overrides every later release (the scripts comment such pins out).
+
 ## Running without Docker
 
 Everything in steps 4–11 above (creating a key, linking your Steem name,
@@ -752,13 +867,14 @@ covers that part.
 ### Build
 
 See the root [`readme.md`](../readme.md#building-from-source) for the exact
-prerequisites (Go 1.25.10+, a C compiler with `CGO_ENABLED=1` — cosmos/evm's
+prerequisites (Go 1.26.5+, a C compiler with `CGO_ENABLED=1` — cosmos/evm's
 secp256k1 bindings are cgo-based, so the binary can't be cross-compiled).
 From the repository root:
 
 ```sh
+git checkout release/v0.0.8
 make install
-steemvmd version
+steemvmd version     # prints 0.0.8
 ```
 
 This installs `steemvmd` to `$GOBIN` (or `$GOPATH/bin` if `GOBIN` is unset) —
@@ -883,35 +999,24 @@ the halt as you can manage.
 - **New node halts during sync with `wrong Block.Header.AppHash` / an app-hash
   mismatch**: your `genesis.json` doesn't match the running network's (or your
   node home has stale state from a different genesis). Make sure
-  `Instructions/genesis.json` is the network's genesis, then wipe the node's
-  chain volume — and *only* that one — and restart:
-  ```sh
-  docker compose down
-  docker volume rm "$(docker volume ls -q | grep 'steemvm-home$')"
-  docker compose up -d
-  ```
-  This replays from genesis, which is fine on a young chain but gets slower as
-  the chain grows — see **Faster resync via state-sync** below for a way to
-  skip most of the replay after a wipe.
-- **Any tx fails with `Cannot encode unregistered concrete type ethsecp256k1.PubKey`**:
-  your binary predates the legacy-amino key registration, so `--gas auto` (which
-  simulates the tx) panics for every Cosmos tx. Rebuild the node
-  (`docker compose up -d --build`). As a one-off workaround you can skip
-  simulation with an explicit limit instead, e.g. `--gas 400000` in place of
-  `--gas auto --gas-adjustment 1.5`.
-- **Node won't start after a genesis change**: chain data in the
-  `steemvm-home` volume no longer matches the new genesis. Reset with
-  `docker compose down -v` (wipes node keys and caches too) and start over.
+  `Instructions/genesis.json` is the network's genesis (sha256 it against a
+  live node's `/genesis`), then run `./reset.sh`: it wipes only the chain data
+  in `~/.steemvm/data`, keeps every key, and state-syncs.
+- **Node won't start after a genesis change**: chain data in `~/.steemvm` no
+  longer matches the new genesis. `./reset.sh` detects the new chain-id and
+  moves the node over with the same keys. Never delete `~/.steemvm` wholesale:
+  it holds your `priv_validator_key.json` and keyring.
 - **`create-validator` fails with insufficient funds**: your balance must
   cover `amount` + gas. Bridge in more (step 7).
-- **Validator jailed**: your node fell out of sync or was offline too long.
-  Get it synced again, then unjail:
+- **Validator jailed**: your node fell out of sync or was offline too long, or
+  your oracle client missed too many price votes or attestations. Get both
+  running again, then unjail:
   `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
 
 **Faster resync via state-sync**
 
-A full replay from genesis (the `docker volume rm` / `docker compose down -v`
-recovery above) gets slower as the chain grows. Once the chain is past its
+`./reset.sh` does all of this for you; the steps below are the manual
+equivalent. A full replay from genesis gets slower as the chain grows. Once the chain is past its
 `snapshot-interval` (`Instructions/app.toml.example` ships
 `snapshot-interval = 1000`, and live peers need to actually be running with
 that set to have snapshots to serve), you can state-sync instead: fetch a
@@ -921,10 +1026,14 @@ this automatically for a brand-new validator (`fetch_statesync_trust` /
 `enable_statesync` in the script); this is the equivalent for an **existing**
 node after a manual wipe.
 
-1. Wipe the node's chain data (same as the app-hash-mismatch recovery above,
-   or `steemvmd comet unsafe-reset-all --home /root/.steemvm --keep-addr-book`
-   run against the stopped container's volume if you want to keep the address
-   book), but do **not** start the node yet.
+1. Stop the node and wipe its chain data (keys are kept), but do **not** start
+   the node yet:
+
+   ```sh
+   docker compose stop steemvm
+   docker compose run --rm --no-deps --entrypoint /root/go/bin/steemvmd steemvm \
+     comet unsafe-reset-all --home /root/.steemvm --keep-addr-book
+   ```
 2. Fetch a trust anchor from a live, synced peer's RPC — a height comfortably
    behind the tip (so a snapshot at/before it reliably exists) and that
    height's block hash:
