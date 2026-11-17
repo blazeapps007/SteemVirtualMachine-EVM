@@ -80,7 +80,7 @@ rejected, cap exhausted, non-bonded signer) falls through to the normal fee path
 | `list-withdrawal` | — | All `Withdrawal` records (paginated). |
 | `requested-withdrawals` | — | Withdrawals still `REQUESTED` (awaiting a Steem-side payout + attestation). |
 | `processed-withdrawals` | — | Withdrawals that reached `PROCESSED`. |
-| `bridge-statistics` | — | `total_minted_asteem`, `total_burned_asteem`, `net_outstanding` (all `asteem`-denominated `math.Int`; SBD is tracked separately in module accounting but this aggregate is STEEM-side). Minted includes the genesis allocation; `bridge-out` is refused once burned + the new amount would exceed minted. |
+| `bridge-statistics` | — | `total_minted_asteem`, `total_burned_asteem`, `net_outstanding` (all `asteem`-denominated `math.Int`; SBD is tracked separately in module accounting but this aggregate is STEEM-side). Minted includes the genesis allocation; `bridge-out` is refused once burned + the new amount would exceed minted. `net_outstanding` is what `svm.bank` owes, not the `asteem` bank supply: supply is lower by every non-bridge burn (slashing, the 25% tx-fee burn), whose STEEM stays in `svm.bank`. |
 | `resolve-name` | `[steem-account]` | The active `NameRecord` (address, registration id, linked-at height) for a Steem username, if any. |
 | `names-by-address` | `[address]` | All active name links owned by an address (paginated). |
 | `name-registration` | `[id]` | A `NameRegistration` record by id. |

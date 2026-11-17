@@ -82,6 +82,18 @@ Both return the same JSON shape (field names match the proto, gogoproto `customt
 }
 ```
 
+`net_outstanding` is not the `asteem` bank supply, and the two drift apart over time:
+
+- **Minted** counts every bridge-in at its gross amount (the 0.25% fee stays on chain as a
+  staking reward), plus the genesis allocation and automatic withdrawal refunds.
+- **Burned** counts only bridge-outs, at their net amount.
+- **Bank supply** also falls with every other burn: slashed stake (downtime, double-sign and
+  x/oracle duty slashes) and the 25% share of ordinary tx fees. Those coins never leave Steem's
+  `svm.bank`, so supply is at most `net_outstanding` and the gateway stays fully backed.
+
+On 2026-11-17 the gap was about 104 STEEM: two x/oracle slashes (4.3 + 98.818 STEEM) and about
+1.1 STEEM of fee burns.
+
 To list a service's full method set without this document, `grpcurl -plaintext localhost:9090
 list steemvm.steembridge.v1.Query` (or any other package/service name below) works against a
 live node because reflection is on.

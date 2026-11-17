@@ -721,6 +721,7 @@ The network's own public endpoints, which you can use instead of running one:
 
 | Service | URL |
 |---|---|
+| Project site (supply, `svm.bank` reserves, solvency) | <https://svmapp.com> |
 | EVM JSON-RPC (MetaMask: chain ID `81630`, currency `STEEM`) | `https://evm.steemvmscan.com` |
 | CometBFT RPC | `https://rpc.steemvmscan.com` |
 | Cosmos REST | `https://api.steemvmscan.com` |

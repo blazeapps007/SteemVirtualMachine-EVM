@@ -46,6 +46,7 @@ providing a full Ethereum execution layer (JSON-RPC, ERC-20, EIP-1559 fee market
 
 | | |
 |---|---|
+| Project site (supply, `svm.bank` reserves, solvency) | <https://svmapp.com> |
 | EVM JSON-RPC | `https://evm.steemvmscan.com` |
 | CometBFT RPC | `https://rpc.steemvmscan.com` |
 | Cosmos REST | `https://api.steemvmscan.com` |
