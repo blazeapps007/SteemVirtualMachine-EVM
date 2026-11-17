@@ -3,7 +3,8 @@
 This guide takes you from nothing to a running, staked validator using the
 `docker-compose.yml` in the repository root. The compose setup seeds the node
 config from the templates in this directory (`app.toml.example`,
-`config.toml.example`) and copies in `client.toml`/`genesis.json` on every start.
+`config.toml.example`) and, the first time it starts on an empty node home,
+copies in `client.toml`/`genesis.json` (an existing home keeps its own copies).
 
 > **New node?** Mainnet (`SteemVM-Manaslu-81630`) was launched from genesis on
 > release v0.0.8, so one binary replays every block: a new node can replay from

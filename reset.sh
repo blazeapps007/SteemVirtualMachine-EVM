@@ -11,7 +11,7 @@
 #   validator keeps its identity: no re-registering, no re-staking.
 #
 #   New chain (this checkout's Instructions/genesis.json has a different
-#   chain-id, e.g. steemvm -> steemvm-2): additionally installs the new
+#   chain-id, e.g. steemvm-2 -> SteemVM-Manaslu-81630): additionally installs the new
 #   genesis (checked against the network's own), sets the new chain-id in
 #   client.toml and the EVM chain-id in app.toml, drops the old chain's peers
 #   and cosmovisor upgrade slots — then REJOINS the new chain as a validator

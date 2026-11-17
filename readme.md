@@ -162,8 +162,8 @@ converge on the same validator-onboarding steps: creating a key, linking and
 confirming your Steem name, bridging in your stake, building `validator.json`,
 staking, and attesting transfers. The `Instructions/` directory also holds
 the canonical node configuration (`app.toml.example`, `config.toml.example`,
-`client.toml`, `genesis.json`) that the Docker setup copies into the node home
-on every start.
+`client.toml`, `genesis.json`) that the Docker setup copies into an empty node
+home on its first start.
 
 The fastest way to get a node running is from the repository root. Compose
 pulls the published `steemblazer/steemvmd:v0.0.8` image (and builds it from

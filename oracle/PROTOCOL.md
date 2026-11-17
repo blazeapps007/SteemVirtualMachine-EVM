@@ -237,7 +237,8 @@ Fixed field values: `validator=<address above>`, `txid="abc123def456abc123def456
 `gateway_account="steemvm-gateway"`, `amount_millisteem=1000000`,
 `memo="svm-deposit steem1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzxaysz"`, `asset=BRIDGE_ASSET_STEEM`.
 `AuthInfo`: single signer, `SIGN_MODE_DIRECT`, `sequence=0`, `fee={amount: [], gas_limit: 600000}`
-(fee-exempt). `SignDoc`: `chain_id="steemvm"`, `account_number=0`.
+(fee-exempt). `SignDoc`: `chain_id="steemvm"` (a fixed test value, not the mainnet chain-id
+`SteemVM-Manaslu-81630`), `account_number=0`.
 
 ```
 body_bytes_hex:      0af4010a282f737465656d766d2e737465656d6272696467652e76312e4d73674174746573744465706f73697412c7010a2c737465656d31306530353235736672663533796832616c6a6d6d33736e396a71356e6a6b376c6a3438726474122761626331323364656634353661626331323364656634353661626331323364656634353637383920cec2f1052a13323032362d30382d31375430303a30303a30303205616c6963653a0f737465656d766d2d6761746577617940c0843d4a3873766d2d6465706f73697420737465656d3171717171717171717171717171717171717171717171717171717171717171717a786179737a

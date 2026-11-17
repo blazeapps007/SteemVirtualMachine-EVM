@@ -21,7 +21,7 @@
 # What it does depends on the checked-out release:
 #
 #   NEW CHAIN (the release's Instructions/genesis.json has a different
-#   chain-id than this node's genesis, e.g. steemvm -> steemvm-2): Docker
+#   chain-id than this node's genesis, e.g. steemvm-2 -> SteemVM-Manaslu-81630): Docker
 #   hands over to ./reset.sh, which moves the node to the new chain with the
 #   same keys and rejoins it as a validator. Bare metal stops with the steps.
 #
