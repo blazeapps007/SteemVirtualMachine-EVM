@@ -11,6 +11,8 @@
 // Configuration is entirely from environment variables:
 //
 //	ORACLE_STEEM_RPC      (required) Steem RPC to scan, e.g. https://api.steemit.com
+//	ORACLE_STEEM_RPCS     more Steem nodes, comma-separated; every Steem read is spread
+//	                      over these plus ORACLE_STEEM_RPC, and a failing node is skipped
 //	ORACLE_NODE_RPC       SteemVM CometBFT RPC to broadcast to  (default http://steemvm:26657)
 //	ORACLE_PRIVATE_KEY    validator key as hex (0x… eth_secp256k1)  ─┐ one of these
 //	ORACLE_MNEMONIC       validator key as a BIP39 mnemonic          ─┘ is required
@@ -60,6 +62,7 @@ import (
 	cosmosevmkeyring "github.com/cosmos/evm/crypto/keyring"
 
 	"steemvm/app"
+	"steemvm/oracle/go/nodepool"
 	"steemvm/oracle/go/relayer"
 )
 
@@ -75,10 +78,11 @@ func main() {
 }
 
 func run(logger log.Logger) error {
-	steemRPC := os.Getenv("ORACLE_STEEM_RPC")
-	if steemRPC == "" {
+	if strings.TrimSpace(os.Getenv("ORACLE_STEEM_RPC")) == "" {
 		return fmt.Errorf("ORACLE_STEEM_RPC is required (the Steem RPC to scan)")
 	}
+	// All Steem nodes: ORACLE_STEEM_RPCS (own node first) plus ORACLE_STEEM_RPC.
+	steemRPC := strings.Join(nodepool.Parse(os.Getenv("ORACLE_STEEM_RPCS"), os.Getenv("ORACLE_STEEM_RPC")), ",")
 	nodeRPC := envOr("ORACLE_NODE_RPC", "http://steemvm:26657")
 	stateDir := envOr("ORACLE_STATE_DIR", "/oracle-data")
 

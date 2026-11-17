@@ -179,7 +179,7 @@ test("env config", () => {
     ORACLE_MULTISIG_INTERVAL: "30s", ORACLE_MULTISIG_DRY_RUN: "1", ORACLE_MULTISIG_MAX_PER_TX_SBD: "500.000",
   }, "https://api.steemit.com", "/d")!;
   assert.deepEqual([cfg.activeWif, cfg.nodes, cfg.intervalMs, cfg.dryRun, cfg.propose, cfg.policy.maxPerTxMilli],
-    ["5Kabc", ["http://a", "http://b"], 30_000, true, true, { SBD: 500000n }]);
+    ["5Kabc", ["http://a", "http://b", "https://api.steemit.com"], 30_000, true, true, { SBD: 500000n }]);
   assert.deepEqual(buildSignerConfig({ ORACLE_MULTISIG_ENABLED: "true" }, "https://x", "/d")!.nodes, ["https://x"]);
   for (const env of [{ ORACLE_MULTISIG_ENABLED: "yes" }, { ORACLE_MULTISIG_ENABLED: "true", ORACLE_MULTISIG_THRESHOLD_PERCENT: "0" },
     { ORACLE_MULTISIG_ENABLED: "true", ORACLE_MULTISIG_MAX_PER_TX_STEEM: "5" }]) {

@@ -355,8 +355,11 @@ STEEM_RPC="${STEEM_RPC:-https://api.steemit.com}"
 # The Steem nodes the oracle will use must answer get_block for this chain's
 # Steem anchor with the anchor's ID (reachable, the API the oracle uses, the
 # right network). A failing STEEM_RPC is swapped for a working public node;
-# the signer's list (STEEM_RPCS) gets two working nodes.
-STEEM_FALLBACKS="https://api.steemit.com https://api.justyy.com https://steemd.steemworld.org https://api.steememory.com https://api.pennsif.net"
+# the oracle's list (STEEM_RPCS) gets every working node.
+# Nodes that also serve account history (the svm.bank signer reads it) come
+# first; the oracle spreads its reads over every node listed and skips a
+# failing one, so a longer list keeps each node under its rate limit.
+STEEM_FALLBACKS="https://api.steemit.com https://api.steemitdev.com https://api.steem.fans https://api.steememory.com https://api.moecki.online https://api.campingclub.me https://api.pennsif.net https://steemapi.boylikegirl.club https://api.justyy.com https://api2.justyy.com https://api3.justyy.com https://steem.senior.workers.dev https://api.symbionts.io https://api.steemyy.com https://steemd.steemworld.org"
 ANCHOR_BLOCK="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block // "0"' 2>/dev/null || echo 0)"
 ANCHOR_ID="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block_id // empty' 2>/dev/null || true)"
 steem_ok() {
@@ -375,7 +378,7 @@ if [ -z "${STEEM_RPCS:-}" ]; then
   STEEM_RPCS="$STEEM_RPC"
   for c in $STEEM_FALLBACKS; do
     [ "$c" = "$STEEM_RPC" ] && continue
-    if [ -z "$ANCHOR_ID" ] || steem_ok "$c"; then STEEM_RPCS="$STEEM_RPC,$c"; break; fi
+    if [ -z "$ANCHOR_ID" ] || steem_ok "$c"; then STEEM_RPCS="$STEEM_RPCS,$c"; fi
   done
 fi
 

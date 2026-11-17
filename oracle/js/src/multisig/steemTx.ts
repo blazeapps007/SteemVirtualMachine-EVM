@@ -9,6 +9,8 @@ import { secp256k1 } from "@noble/curves/secp256k1";
 import { ripemd160 } from "@noble/hashes/legacy";
 import { sha256 } from "@noble/hashes/sha2";
 
+import { NodePool } from "../nodePool";
+
 export const CHAIN_ID = new Uint8Array(32); // Steem mainnet: 32 zero bytes
 
 export class SteemTxError extends Error {}
@@ -41,25 +43,42 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 // JSON-RPC
 // ---------------------------------------------------------------------------
 
-const TRANSIENT = /upstream|circuit breaker|timeout|unavailable|too many requests|bad cast/i;
+// Node-side errors worth trying the next node for. "Bad Cast" and "Internal
+// Error" come from a misbehaving backend behind a load balancer
+// (api.steemit.com) or a node without the API plugin a call needs
+// (api.justyy.com has no account history), not from Steem itself.
+const TRANSIENT = /upstream|circuit breaker|timeout|unavailable|too many requests|bad cast|internal error/i;
+
+/** check returns an error message for an answer that must not be trusted
+ * (the next node is asked), or undefined. */
+export type AnswerCheck = (result: any) => string | undefined;
 
 export interface SteemRpc {
-  call(method: string, params: unknown[]): Promise<any>;
+  call(method: string, params: unknown[], check?: AnswerCheck): Promise<any>;
 }
 
-/** Calls Steem nodes in order, moving to the next only on transport errors. */
+/** Calls Steem nodes, own node first, moving to the next one on transport
+ * errors, HTML/non-JSON replies, node-side errors and answers that fail the
+ * caller's check. A node that fails is benched with a growing cooldown
+ * (nodePool.ts), so a rate-limiting node is left alone instead of being
+ * hammered. Sticky by default (consecutive reads of svm.bank's history come
+ * from one view of the chain); roundRobin spreads bulk reads whose answer is
+ * the same on every node (raw blocks). A chain-level rejection is thrown as
+ * ChainError immediately. */
 export class RPC implements SteemRpc {
   readonly nodes: string[];
-  constructor(nodes: string[], private readonly timeoutMs = 20_000) {
-    this.nodes = nodes.map((n) => n.trim()).filter(Boolean);
+  readonly pool: NodePool;
+  constructor(nodes: string | string[], private readonly timeoutMs = 20_000, roundRobin = false) {
+    this.pool = new NodePool(roundRobin ? "roundRobin" : "sticky", nodes);
+    this.nodes = [...this.pool.nodes];
   }
 
-  async call(method: string, params: unknown[]): Promise<any> {
-    if (this.nodes.length === 0) throw new Error("steemtx: no Steem RPC nodes configured");
+  async call(method: string, params: unknown[], check?: AnswerCheck): Promise<any> {
+    const order = this.pool.order();
+    if (order.length === 0) throw new Error("steemtx: no Steem RPC nodes configured");
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
     let last: unknown;
-    for (const node of this.nodes) {
-      let data: any;
+    for (const node of order) {
       try {
         const resp = await fetch(node, {
           method: "POST",
@@ -67,20 +86,35 @@ export class RPC implements SteemRpc {
           body,
           signal: AbortSignal.timeout(this.timeoutMs),
         });
-        data = await resp.json();
-      } catch (err) {
-        last = err; // transport error or non-JSON reply: try the next node
-        continue;
-      }
-      if (data && data.error != null) {
-        const message = String(data.error?.message ?? data.error);
-        if (TRANSIENT.test(message)) {
-          last = new Error(`${node}: ${message}`);
-          continue;
+        const text = await resp.text();
+        let data: any;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(
+            text.trimStart().startsWith("<")
+              ? `HTML page instead of JSON (HTTP ${resp.status}): the node is rate-limiting, blocking or down`
+              : `invalid response (HTTP ${resp.status})`,
+          );
         }
-        throw new ChainError(message);
+        if (typeof data !== "object" || data === null) throw new Error(`invalid response (HTTP ${resp.status})`);
+        if (data.error != null) {
+          const message = String(data.error?.message ?? data.error);
+          if (!TRANSIENT.test(message)) {
+            this.pool.ok(node); // the node works; the chain said no
+            throw new ChainError(message);
+          }
+          throw new Error(message);
+        }
+        const problem = check?.(data.result);
+        if (problem) throw new Error(problem);
+        this.pool.ok(node);
+        return data.result;
+      } catch (err) {
+        if (err instanceof ChainError) throw err;
+        this.pool.fail(node);
+        last = new Error(`${node}: ${err instanceof Error ? err.message : String(err)}`);
       }
-      return data?.result;
     }
     throw new Error(`steem rpc: every node failed: ${last instanceof Error ? last.message : String(last)}`);
   }

@@ -481,7 +481,10 @@ secret_var() {
   return 1
 }
 # Public Steem nodes to fall back on (all checked against the anchor first).
-STEEM_FALLBACKS="https://api.steemit.com https://api.justyy.com https://steemd.steemworld.org https://api.steememory.com https://api.pennsif.net"
+# Nodes that also serve account history (the svm.bank signer reads it) come
+# first; the oracle spreads its reads over every node listed and skips a
+# failing one, so a longer list keeps each node under its rate limit.
+STEEM_FALLBACKS="https://api.steemit.com https://api.steemitdev.com https://api.steem.fans https://api.steememory.com https://api.moecki.online https://api.campingclub.me https://api.pennsif.net https://steemapi.boylikegirl.club https://api.justyy.com https://api2.justyy.com https://api3.justyy.com https://steem.senior.workers.dev https://api.symbionts.io https://api.steemyy.com https://steemd.steemworld.org"
 ANCHOR_BLOCK="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block // "0"')"
 ANCHOR_ID="$(tr -d '\r' < Instructions/genesis.json | jq -r '.app_state.steembridge.params.relayer_start_block_id // empty')"
 # steem_ok <url>: it answers get_block for this chain's Steem anchor with the
@@ -524,19 +527,17 @@ if [ "$NEW_CHAIN" = "1" ] || [ "$REJOIN_ONLY" = "1" ]; then
     ENV_SETS+=("ORACLE_STEEM_RPC=$STEEM_RPC")
   fi
 
-  # The signer's node list: keep the working entries, top up to two.
+  # The oracle's node list: keep the working entries, add every working fallback.
   u="$(env_get ORACLE_STEEM_RPCS)"
-  n=0
   for c in $(printf '%s' "$u" | tr ',' ' '); do
-    if steem_unverifiable "$c" || steem_ok "$c"; then STEEM_RPCS="${STEEM_RPCS:+$STEEM_RPCS,}$c"; n=$((n + 1)); fi
+    if steem_unverifiable "$c" || steem_ok "$c"; then STEEM_RPCS="${STEEM_RPCS:+$STEEM_RPCS,}$c"; fi
   done
   for c in $STEEM_RPC $STEEM_FALLBACKS; do
-    [ "$n" -ge 2 ] && break
     case ",$STEEM_RPCS," in *",$c,"*) continue ;; esac
-    if steem_ok "$c"; then STEEM_RPCS="${STEEM_RPCS:+$STEEM_RPCS,}$c"; n=$((n + 1)); fi
+    if steem_ok "$c"; then STEEM_RPCS="${STEEM_RPCS:+$STEEM_RPCS,}$c"; fi
   done
   if [ "$STEEM_RPCS" != "$u" ]; then
-    [ -n "$u" ] && ENV_FIXES+=("ORACLE_STEEM_RPCS|ORACLE_STEEM_RPCS=$u (not all of it serves $TARGET_CHAIN's Steem anchor, or fewer than two nodes)")
+    [ -n "$u" ] && ENV_FIXES+=("ORACLE_STEEM_RPCS|ORACLE_STEEM_RPCS=$u (not all of it serves $TARGET_CHAIN's Steem anchor, or not every working node)")
     ENV_SETS+=("ORACLE_STEEM_RPCS=$STEEM_RPCS")
   fi
 

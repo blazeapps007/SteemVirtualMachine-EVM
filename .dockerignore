@@ -10,3 +10,5 @@ validator.json
 validator-address.txt
 validator-mnemonic.txt
 oracle/.env
+oracle/.env.*
+!oracle/.env.example

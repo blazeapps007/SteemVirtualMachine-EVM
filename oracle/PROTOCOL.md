@@ -508,8 +508,13 @@ of request:
 - **Newest window**, with `start = head_block_number`. The node clamps it to the newest entry, and
   because it changes every block a caching node can't serve it stale.
 - **Gap behind it**, paged forward with `start = next_seq + 100`. That history is immutable.
+
+An empty answer is an error, never an empty history: every account's history starts with its
+creation. When no node serves the history, the index is rebuilt from raw blocks instead
+(`multisigguide.md` §4.1). `scanned_block` is the Steem block up to which the index is complete;
+a history sync sets it to `head_block_number − 20`. Go omits it while it is 0.
 ```json
-{ "next_seq": 101, "paid": { "6": "<trx_id>" }, "executed": { "<trx_id>": "2026-10-14T12:00:00" }, "last_owner_change": "2026-10-11T00:44:03" }
+{ "next_seq": 101, "paid": { "6": "<trx_id>" }, "executed": { "<trx_id>": "2026-10-14T12:00:00" }, "last_owner_change": "2026-10-11T00:44:03", "scanned_block": 111398514 }
 ```
 
 **Approval journal** (`svm_bank_approvals.json`). This is write-ahead: it is saved before any
@@ -527,7 +532,7 @@ stopped for over an hour.
 |---|---|
 | `ORACLE_MULTISIG_ENABLED` | `false` |
 | `ORACLE_STEEM_ACTIVE_WIF` | required when enabled |
-| `ORACLE_STEEM_RPCS` | `ORACLE_STEEM_RPC` (comma-separated, own node first) |
+| `ORACLE_STEEM_RPCS` | none: comma-separated extra Steem nodes, own node first. `ORACLE_STEEM_RPC` is appended and duplicates are dropped. The whole oracle uses the list (relay, prices, signer) with failover and cooldown (`multisigguide.md` §4.1). |
 | `ORACLE_MULTISIG_INTERVAL` | `10s` |
 | `ORACLE_MULTISIG_THRESHOLD_PERCENT` | `75` |
 | `ORACLE_MULTISIG_REWEIGHT_TOLERANCE` | `50` |

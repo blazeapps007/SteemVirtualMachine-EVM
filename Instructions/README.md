@@ -531,6 +531,9 @@ step 4). The oracle just needs that key exported into its own environment.
    ```sh
    ORACLE_PRIVATE_KEY=<paste the hex from step 1>   # a leading 0x is fine too
    ORACLE_STEEM_RPC=https://api.steemit.com          # already the default
+   # More Steem nodes: reads are spread over all of them and a failing or
+   # rate-limiting node is skipped, so one IP never hits a public node too hard.
+   ORACLE_STEEM_RPCS=https://api.steemit.com,https://api.steemitdev.com,https://api.steem.fans,https://api.steememory.com,https://api.moecki.online,https://api.campingclub.me,https://api.pennsif.net,https://steemapi.boylikegirl.club,https://api.justyy.com,https://api2.justyy.com,https://api3.justyy.com,https://steem.senior.workers.dev,https://api.symbionts.io,https://api.steemyy.com,https://steemd.steemworld.org
 
    # Price feed: CoinMarketCap (needs a key) or CoinGecko (key optional)
    ORACLE_PRICE_SOURCE=coingecko
@@ -538,7 +541,6 @@ step 4). The oracle just needs that key exported into its own environment.
    # svm.bank signer
    ORACLE_MULTISIG_ENABLED=true
    ORACLE_STEEM_ACTIVE_WIF=<your Steem ACTIVE private key>
-   ORACLE_STEEM_RPCS=https://api.steemit.com,https://api.justyy.com
    ```
 
    > Prefer not to export a raw key? Set `ORACLE_MNEMONIC="word1 … word24"` (the
@@ -972,6 +974,23 @@ crash) — stop the process, replace the binary, restart with the same
 the halt as you can manage.
 
 ## Troubleshooting
+
+**Oracle: Steem RPC errors, bridge transfers not attested**
+
+- **`invalid character '<' looking for beginning of value`, `history: Internal Error`,
+  `Bad Cast`, or `oracle exited … ORACLE_START_BLOCK`**: a Steem node is rate-limiting or
+  blocking your server, or doesn't serve account history. Run, from the checkout:
+
+  ```sh
+  git pull && ./fix-oracle.sh        # --dry-run to only show what it would change
+  ```
+
+  It finds your oracle client (go, python or js), tests every public Steem node
+  from your server, writes the working ones to `ORACLE_STEEM_RPCS` (backing up
+  `oracle/.env` first), pulls the fixed image and restarts only the oracle. The
+  oracle spreads its reads round-robin over every node, skips and benches one
+  that fails, and resumes from its saved cursor, so missed deposits and payouts
+  get attested.
 
 **Identity / validator creation**
 

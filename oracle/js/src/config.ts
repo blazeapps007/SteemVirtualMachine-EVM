@@ -6,6 +6,7 @@
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { HDKey } from "@scure/bip32";
 
+import { parseNodes } from "./nodePool";
 import { EthSecp256k1DirectSigner } from "./signer";
 
 /** BIP44 coin type for this chain's key derivation: 60 (Ethereum) — see
@@ -36,10 +37,12 @@ export interface Config {
  * clear message on any invalid value — callers should let this surface
  * directly, matching the Go client's fail-fast startup. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const steemRpcUrl = (env.ORACLE_STEEM_RPC || "").trim();
-  if (!steemRpcUrl) {
+  if (!(env.ORACLE_STEEM_RPC || "").trim()) {
     throw new Error("ORACLE_STEEM_RPC is required (the Steem RPC to scan)");
   }
+  // All Steem nodes: ORACLE_STEEM_RPCS (own node first) plus ORACLE_STEEM_RPC;
+  // every Steem read is spread over them and a failing node is skipped.
+  const steemRpcUrl = parseNodes(env.ORACLE_STEEM_RPCS, env.ORACLE_STEEM_RPC).join(",");
 
   const nodeRestUrl = envOr(env, "ORACLE_NODE_REST", "http://steemvm:1317");
   const stateDir = envOr(env, "ORACLE_STATE_DIR", "/oracle-data");

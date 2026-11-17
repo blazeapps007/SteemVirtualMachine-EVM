@@ -446,11 +446,9 @@ if [ "$NO_ORACLE" = "0" ]; then
     echo "# svm.bank multisig signer, fully live (oracle/PROTOCOL.md §11)."
     echo "ORACLE_MULTISIG_ENABLED=true"
     printf 'ORACLE_STEEM_ACTIVE_WIF=%s\n' "$ACTIVE_WIF"
-    if [ "$STEEM_RPC" = "https://api.justyy.com" ]; then
-      echo "ORACLE_STEEM_RPCS=$STEEM_RPC,https://api.steemit.com"
-    else
-      echo "ORACLE_STEEM_RPCS=$STEEM_RPC,https://api.justyy.com"
-    fi
+    # The oracle spreads its Steem reads over every node here (duplicates are
+    # dropped) and skips a failing one; history-serving nodes first.
+    echo "ORACLE_STEEM_RPCS=$STEEM_RPC,https://api.steemit.com,https://api.steemitdev.com,https://api.steem.fans,https://api.steememory.com,https://api.moecki.online,https://api.campingclub.me,https://api.pennsif.net,https://steemapi.boylikegirl.club,https://api.justyy.com,https://api2.justyy.com,https://api3.justyy.com,https://steem.senior.workers.dev,https://api.symbionts.io,https://api.steemyy.com,https://steemd.steemworld.org"
   } > oracle/.env
   umask 022
   unset ACTIVE_WIF

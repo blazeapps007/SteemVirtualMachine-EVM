@@ -15,7 +15,8 @@ from typing import Any, Mapping, Optional
 
 from . import steemtx
 from .ballot import Ballot, InvalidMetadata, MalformedBallot, StoredProposal, Vote, encode_metadata, parse_metadata
-from .chain import HistoryIndex, broadcast, get_accounts, get_dynamic_props
+from ..nodepool import parse as parse_nodes
+from .chain import HistoryIndex, block_lookback, broadcast, get_accounts, get_dynamic_props
 from .journal import ApprovalJournal
 from .policy import ABSTAIN, APPROVE, DENY, Config, Policy, SVMState, rank_of
 from .vectors import selftest
@@ -102,6 +103,9 @@ class Signer:
             cfg.rank_delay = 4.0
         self.cfg, self.svm, self.log = cfg, svm, log
         self.rpc = rpc if rpc is not None else steemtx.RPC(cfg.nodes)
+        # Round-robin, for the block-scan history fallback.
+        self.blocks = rpc if rpc is not None else steemtx.RPC(cfg.nodes, round_robin=True)
+        self.from_blocks = False  # history is currently rebuilt from blocks
         self.pub = steemtx.public_key_of(self.key)
         self.me = ""
         self.policy: Optional[Policy] = None
@@ -130,6 +134,38 @@ class Signer:
         self.policy = Policy(self.cfg.policy, self.svm, me, self.journal)
         self.log.info("svm.bank signer ready: validator=%s key=%s dry_run=%s propose=%s execute=%s",
                       me, self.pub, self.cfg.dry_run, self.cfg.propose, self.cfg.execute)
+
+    def _history_from_blocks(self, bank: str, head: int, now: datetime, hist_err: BaseException) -> bool:
+        """The pass's fallback when no node serves svm.bank's account history:
+        advances the index by one block-scan batch and reports whether it
+        covers the head block yet. Until it does, the pass stops without
+        acting, logging progress instead of an error."""
+        assert self.hist is not None
+        try:
+            lookback = block_lookback(self.svm.withdrawal_timeout_blocks())
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"history: {hist_err} (and reading the SVM withdrawal timeout for a block scan: {exc})") from exc
+        if not self.from_blocks:
+            self.from_blocks = True
+            start = self.hist.scanned_block + 1
+            if head > lookback and start < head - lookback:
+                start = head - lookback
+            self.log.info("svm.bank signer: no Steem node serves svm.bank's account history; rebuilding it from "
+                          "blocks from_block=%d head=%d history_err=%s", start, head, hist_err)
+        try:
+            ready = self.hist.scan_blocks(self.blocks, bank, head, lookback, now)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"history: {hist_err}; block scan: {exc}") from exc
+        finally:
+            try:
+                self.hist.save(self.cfg.state_dir)
+            except OSError as exc:
+                self.log.error("svm.bank signer: saving history index: %s", exc)
+        if not ready:
+            self.log.info("svm.bank signer: rebuilding history from blocks, not signing until caught up "
+                          "scanned_block=%d head=%d remaining=%d", self.hist.scanned_block, head,
+                          head - self.hist.scanned_block)
+        return ready
 
     def close(self) -> None:
         if self._lock is not None:
@@ -161,7 +197,15 @@ class Signer:
         props = get_dynamic_props(self.rpc)
         now = steemtx.parse_time(props.time)
         bank_name = self.cfg.policy.bank_account
-        self.hist.sync(self.rpc, bank_name, props.head_block_number, now)
+        try:
+            self.hist.sync(self.rpc, bank_name, props.head_block_number, now)
+        except Exception as exc:  # noqa: BLE001 - no node serves the history: rebuild it from blocks
+            if not self._history_from_blocks(bank_name, props.head_block_number, now, exc):
+                return
+        else:
+            if self.from_blocks:
+                self.from_blocks = False
+                self.log.info("svm.bank signer: account history available again")
         try:
             self.hist.save(self.cfg.state_dir)
         except OSError as exc:
@@ -354,7 +398,8 @@ def build_signer_config(env: Mapping[str, str], steem_rpc: str, state_dir: str) 
     if not env_bool(env, "ORACLE_MULTISIG_ENABLED", False):
         return None
     cfg = SignerConfig(active_wif=env.get("ORACLE_STEEM_ACTIVE_WIF", "").strip(), state_dir=state_dir)
-    cfg.nodes = [n.strip() for n in (env.get("ORACLE_STEEM_RPCS", "").strip() or steem_rpc).split(",") if n.strip()]
+    # steem_rpc is already the full node list (ORACLE_STEEM_RPCS, then ORACLE_STEEM_RPC).
+    cfg.nodes = parse_nodes(env.get("ORACLE_STEEM_RPCS", ""), steem_rpc)
 
     def uint(key: str) -> Optional[int]:
         v = env.get(key, "").strip()

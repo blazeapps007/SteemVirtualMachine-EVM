@@ -11,9 +11,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Callable, Iterable, Optional, Union
 
 import httpx
+
+from .nodepool import ROUND_ROBIN, NodePool
 
 # Bridge asset tags -- mirrors steemvm.steembridge.v1.BridgeAsset (see
 # steemvm_oracle.router, which owns the protobuf-facing enum values; this
@@ -64,36 +66,77 @@ class SteemRpcError(RuntimeError):
 
 
 class SteemClient:
-    def __init__(self, rpc_url: str, timeout: float = 15.0):
-        self.url = rpc_url
+    """Calls are spread round-robin over every configured node (see
+    steemvm_oracle.nodepool): every read here is the same on any synced node,
+    and spreading them keeps one validator IP under each public node's rate
+    limit. A node that errors, returns HTML or lacks the requested block is
+    benched and the call moves on to the next node."""
+
+    def __init__(self, rpc_urls: Union[str, Iterable[str]], timeout: float = 15.0):
+        self.pool = NodePool(ROUND_ROBIN, rpc_urls)
+        self.url = ",".join(self.pool.nodes)
         self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         self._client.close()
 
-    def _call(self, method: str, params: Optional[list] = None) -> Any:
+    def _call(self, method: str, params: Optional[list] = None,
+              check: Optional[Callable[[Any], Optional[str]]] = None) -> Any:
+        """Tries each node in pool order until one answers and the answer
+        passes check (which returns an error message, or None if fine). With
+        several nodes the error names the node; with one it is unchanged."""
         body = {"jsonrpc": "2.0", "method": method, "params": params or [], "id": 1}
-        resp = self._client.post(self.url, json=body)
-        resp.raise_for_status()
-        data = resp.json()
+        order = self.pool.order()
+        if not order:
+            raise SteemRpcError("steem rpc: no Steem RPC nodes configured")
+        last: Optional[Exception] = None
+        for node in order:
+            try:
+                result = self._call_node(node, body)
+                problem = check(result) if check is not None else None
+                if problem:
+                    raise SteemRpcError(problem)
+            except (SteemRpcError, httpx.HTTPError, ValueError) as exc:
+                self.pool.fail(node)
+                last = SteemRpcError(f"{node}: {exc}") if len(order) > 1 else exc
+                continue
+            self.pool.ok(node)
+            return result
+        if len(order) > 1:
+            raise SteemRpcError(f"all {len(order)} Steem nodes failed, last: {last}")
+        raise last  # type: ignore[misc]
+
+    def _call_node(self, node: str, body: dict) -> Any:
+        resp = self._client.post(node, json=body)
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            if resp.text.lstrip().startswith("<"):
+                raise SteemRpcError(f"steem rpc: invalid response: HTML page instead of JSON (HTTP {resp.status_code}): "
+                                    "the node is rate-limiting, blocking or down") from exc
+            raise SteemRpcError(f"steem rpc: invalid response (HTTP {resp.status_code}): {exc}") from exc
+        if not isinstance(data, dict) or (resp.status_code >= 400 and data.get("error") is None):
+            raise SteemRpcError(f"steem rpc: invalid response (HTTP {resp.status_code})")
         if data.get("error") is not None:
             err = data["error"]
-            raise SteemRpcError(f"steem rpc: {err.get('message')} (code {err.get('code')})")
+            message = err.get("message") if isinstance(err, dict) else err
+            code = err.get("code") if isinstance(err, dict) else None
+            raise SteemRpcError(f"steem rpc: {message} (code {code})")
         return data.get("result")
 
     def last_irreversible_block(self) -> int:
-        dgp = self._call("condenser_api.get_dynamic_global_properties")
-        lib = int(dgp.get("last_irreversible_block_num", 0)) if dgp else 0
-        if lib == 0:
-            raise SteemRpcError("steem rpc: zero last irreversible block")
-        return lib
+        def check(dgp: Any) -> Optional[str]:
+            ok = isinstance(dgp, dict) and int(dgp.get("last_irreversible_block_num", 0) or 0) > 0
+            return None if ok else "steem rpc: zero last irreversible block"
+
+        dgp = self._call("condenser_api.get_dynamic_global_properties", check=check)
+        return int(dgp["last_irreversible_block_num"])
 
     def block_id(self, num: int) -> str:
         """The ID of Steem block num (its first 8 hex chars are the block
         number), used to verify the chain's Steem anchor."""
-        block = self._call("condenser_api.get_block", [num])
-        if not block or not block.get("block_id"):
-            raise SteemRpcError(f"steem rpc returned no data for block {num}")
+        block = self._call("condenser_api.get_block", [num], check=lambda b: None if b and b.get("block_id")
+                           else f"steem rpc returned no data for block {num}")
         return str(block["block_id"])
 
     def fetch_blocks(self, from_num: int, to_num: int) -> list[tuple[int, dict]]:
@@ -107,9 +150,13 @@ class SteemClient:
             return []
         blocks: list[tuple[int, dict]] = []
         for num in range(from_num, to_num + 1):
-            block = self._call("condenser_api.get_block", [num])
-            if not block:
-                raise SteemRpcError(f"steem rpc returned no data for irreversible block {num}")
+            # A node that hasn't served the block yet (null) is skipped for the
+            # next one; only when no node has it does the cycle abort.
+            try:
+                block = self._call("condenser_api.get_block", [num], check=lambda b, num=num: None if b else
+                                   f"steem rpc returned no data for irreversible block {num}")
+            except SteemRpcError as exc:
+                raise SteemRpcError(f"fetching steem block {num}: {exc}") from exc
             blocks.append((num, block))
         return blocks
 

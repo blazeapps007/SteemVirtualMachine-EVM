@@ -11,6 +11,30 @@ import * as tx from "./steemTx";
 export const HISTORY_FILE = "svm_bank_history.json";
 const KEEP_EXECUTED_MS = 96 * 3600_000; // proposals live at most an hour
 const ZERO_TX_ID = "0".repeat(40);
+
+// The history is complete up to the node's head; a minute of margin covers a
+// node a few blocks behind (a later block scan re-reads those blocks).
+const HISTORY_HEAD_MARGIN = 20;
+/** The most Steem blocks one scanBlocks call reads, and how many it fetches
+ * at once (spread round-robin over the nodes). */
+export const BLOCK_SCAN_BATCH = 200;
+const BLOCK_SCAN_WORKERS = 4;
+
+/** How far back (in 3s Steem blocks) a fresh index rebuilt from blocks
+ * starts: far enough to see the payout of any withdrawal still awaiting one
+ * (created at most withdrawalTimeout SVM blocks ago, counted at a
+ * conservative 10s each), every executed transaction the index keeps
+ * (KEEP_EXECUTED_MS) and the owner cooldown, plus an hour. */
+export function blockLookback(withdrawalTimeoutSvmBlocks: number): number {
+  const seconds = Math.max(withdrawalTimeoutSvmBlocks * 10, KEEP_EXECUTED_MS / 1000) + 3600;
+  return Math.floor(seconds / 3);
+}
+
+// Every account's history holds at least its creation, so an empty page
+// means the node has no account history (steemd.steemworld.org answers []
+// instead of an error). Trusting it would hide past payouts.
+const noHistory = (page: unknown): string | undefined =>
+  Array.isArray(page) && page.length > 0 ? undefined : "empty account history (node has no account_history API)";
 const U64_MAX = (1n << 64n) - 1n;
 
 export interface Account {
@@ -130,6 +154,8 @@ export class HistoryIndex {
   paid: Record<string, string> = {};
   executed: Record<string, string> = {};
   lastOwnerChange = "";
+  /** Every svm.bank op in Steem blocks <= scannedBlock is applied. */
+  scannedBlock = 0;
 
   static load(stateDir: string): HistoryIndex {
     const h = new HistoryIndex();
@@ -139,7 +165,9 @@ export class HistoryIndex {
       h.paid = { ...(d.paid ?? {}) };
       h.executed = { ...(d.executed ?? {}) };
       h.lastOwnerChange = String(d.last_owner_change ?? "");
+      h.scannedBlock = Number(d.scanned_block ?? 0);
       if (!Number.isSafeInteger(h.nextSeq) || h.nextSeq < 0) return new HistoryIndex();
+      if (!Number.isSafeInteger(h.scannedBlock) || h.scannedBlock < 0) h.scannedBlock = 0;
     } catch {
       return new HistoryIndex(); // absent or corrupt: rebuilt, not trusted
     }
@@ -149,6 +177,7 @@ export class HistoryIndex {
   save(stateDir: string): void {
     atomicWrite(path.join(stateDir, HISTORY_FILE), {
       next_seq: this.nextSeq, paid: this.paid, executed: this.executed, last_owner_change: this.lastOwnerChange,
+      scanned_block: this.scannedBlock,
     });
   }
 
@@ -177,7 +206,7 @@ export class HistoryIndex {
    * start = nextSeq+100, i.e. [nextSeq, nextSeq+100] — immutable history. */
   async sync(rpc: tx.SteemRpc, account: string, headBlock: number, nowMs: number): Promise<void> {
     const call = async (start: number): Promise<Array<[number, any]>> =>
-      (await rpc.call("condenser_api.get_account_history", [account, start, 100])) ?? [];
+      await rpc.call("condenser_api.get_account_history", [account, start, 100], noHistory);
     const newest = await call(Math.max(headBlock, this.nextSeq + 100));
     if (newest.length > 0) {
       const oldest = Math.min(...newest.map(([s]) => Number(s)));
@@ -187,6 +216,67 @@ export class HistoryIndex {
       this.applyPage(account, newest);
     }
     this.pruneExecuted(nowMs);
+    if (headBlock > HISTORY_HEAD_MARGIN) this.scannedBlock = Math.max(this.scannedBlock, headBlock - HISTORY_HEAD_MARGIN);
+  }
+
+  /** The fallback for when no node serves svm.bank's account history
+   * (multisigguide.md §4.1): reads raw blocks from scannedBlock+1 (or from
+   * headBlock-lookback when the index is fresh or older than that), at most
+   * BLOCK_SCAN_BATCH per call, and applies every operation that names
+   * account — the same entries get_account_history would list. Returns
+   * whether the index now covers headBlock; until it does, the signer must
+   * not act on the index. */
+  async scanBlocks(rpc: tx.SteemRpc, account: string, headBlock: number, lookback: number, nowMs: number): Promise<boolean> {
+    let start = this.scannedBlock + 1;
+    if (headBlock > lookback && start < headBlock - lookback) start = headBlock - lookback;
+    if (start > headBlock) return true;
+    const end = Math.min(headBlock, start + BLOCK_SCAN_BATCH - 1);
+    const nums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    let nextIdx = 0;
+    const fetchOne = (num: number) =>
+      rpc.call("condenser_api.get_block", [num], (b) => (b ? undefined : `node has no block ${num}`));
+    // BLOCK_SCAN_WORKERS fetches in flight at once; results are applied in order.
+    const settled: Array<{ ok: boolean; value: any }> = new Array(nums.length);
+    await Promise.all(Array.from({ length: Math.min(BLOCK_SCAN_WORKERS, nums.length) }, async () => {
+      while (nextIdx < nums.length) {
+        const i = nextIdx++;
+        try {
+          settled[i] = { ok: true, value: await fetchOne(nums[i]) };
+        } catch (err) {
+          settled[i] = { ok: false, value: err };
+        }
+      }
+    }));
+    let error: unknown;
+    for (let i = 0; i < nums.length; i++) {
+      if (!settled[i].ok) {
+        error = settled[i].value; // a gap stops the scan; the rest is fetched next time
+        break;
+      }
+      this.applyBlock(account, settled[i].value);
+      this.scannedBlock = nums[i];
+    }
+    this.pruneExecuted(nowMs);
+    if (error !== undefined && this.scannedBlock < start) throw error;
+    return this.scannedBlock >= headBlock;
+  }
+
+  /** Applies every operation in block whose body names account (a quoted
+   * "svm.bank" anywhere: transfer from/to, custom_json auths,
+   * account_update). A false match is harmless: apply only records payout
+   * links signed by account and owner changes of account. */
+  applyBlock(account: string, block: any): void {
+    const needle = JSON.stringify(account);
+    const ids: string[] = Array.isArray(block?.transaction_ids) ? block.transaction_ids : [];
+    const txs: any[] = Array.isArray(block?.transactions) ? block.transactions : [];
+    txs.forEach((t, i) => {
+      const trx = String(t?.transaction_id || ids[i] || "");
+      for (const op of Array.isArray(t?.operations) ? t.operations : []) {
+        if (Array.isArray(op) && op.length === 2 && JSON.stringify(op[1]).includes(needle)) {
+          this.apply(account, { trx_id: trx, timestamp: block.timestamp ?? "", op });
+        }
+      }
+    });
   }
 
   apply(account: string, e: any): void {

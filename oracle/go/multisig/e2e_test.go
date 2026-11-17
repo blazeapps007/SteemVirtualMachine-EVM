@@ -38,6 +38,9 @@ type fakeSteem struct {
 func newFakeSteem(t *testing.T) *fakeSteem {
 	n := &fakeSteem{t: t, head: 100000, now: testNow, accounts: map[string]*Account{}, history: map[string][]historyEntry{},
 		seen: map[string]bool{}, lastOwner: map[string]time.Time{}}
+	// Like every Steem account, svm.bank's history starts with its creation.
+	n.history[testBank] = []historyEntry{histEntry("0000000000000000000000000000000000000001", "2026-01-01T00:00:00",
+		"account_create", map[string]any{"creator": "steemit", "new_account_name": testBank})}
 	n.srv = httptest.NewServer(http.HandlerFunc(n.serve))
 	t.Cleanup(n.srv.Close)
 	return n

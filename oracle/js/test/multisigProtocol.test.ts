@@ -204,7 +204,7 @@ test("history apply and sync paging", async () => {
   node.addHistory(BANK, "own", ts(NOW), "account_update", { account: BANK, owner: bankAuthority().toJSON() });
   const h = new HistoryIndex();
   await h.sync(node, BANK, 110000000, NOW);
-  assert.equal(h.nextSeq, 252);
+  assert.equal(h.nextSeq, 253); // + svm.bank's creation at seq 0
   assert.equal(Object.keys(h.paid).length, 250);
   assert.equal(h.paid["249"], "trx249");
   assert.ok(!h.isPaid(999n));
@@ -212,11 +212,13 @@ test("history apply and sync paging", async () => {
   node.addHistory(BANK, "trx250", ts(NOW), "custom_json", linkBody(250));
   node.starts = [];
   await h.sync(node, BANK, 110000001, NOW);
-  assert.equal(h.nextSeq as number, 253);
+  assert.equal(h.nextSeq as number, 254);
   assert.ok(h.isPaid(250n));
   // Steady state: one request, keyed by the head block (no stale cached window).
   assert.deepEqual(node.starts, [110000001]);
+  // An empty answer means the node has no account history (a real account's
+  // history always holds its creation): an error, never "nothing paid".
   const empty = new HistoryIndex();
-  await empty.sync(node, "nobody", 110000001, NOW);
+  await assert.rejects(empty.sync(node, "nobody", 110000001, NOW), /empty account history/);
   assert.equal(empty.nextSeq, 0);
 });

@@ -5,6 +5,7 @@
 
 import { BridgeAsset } from "./proto/steemvm/steembridge/v1/asset";
 import { parseLegacyDec, formatLegacyDec, toLegacyDecString } from "./decimalFmt";
+import { NodePool } from "./nodePool";
 
 /** One Steem transfer operation addressed to the gateway account, carrying
  * exactly the raw facts a validator attests on-chain. All fields must be
@@ -63,27 +64,73 @@ export interface NumberedBlock {
   block: SteemBlock;
 }
 
+/** Steem condenser_api client. Calls are spread round-robin over every
+ * configured node (see nodePool.ts): every read here is the same on any
+ * synced node, and spreading them keeps one validator IP under each public
+ * node's rate limit. A node that errors, returns HTML or lacks the requested
+ * block is benched and the call moves on to the next node. */
 export class SteemClient {
-  private readonly url: string;
+  readonly pool: NodePool;
   private nextId = 1;
 
-  constructor(rpcUrl: string) {
-    this.url = rpcUrl;
+  /** rpcUrls: one URL, a comma-separated list, or an array. */
+  constructor(rpcUrls: string | string[]) {
+    this.pool = new NodePool("roundRobin", rpcUrls);
   }
 
-  private async call<T>(method: string, params: unknown[]): Promise<T> {
+  get url(): string {
+    return this.pool.nodes.join(",");
+  }
+
+  /** Tries each node in pool order until one answers and the answer passes
+   * check (which returns an error message, or undefined if fine). With
+   * several nodes the error names the node; with one it is unchanged. */
+  private async call<T>(method: string, params: unknown[], check?: (result: T) => string | undefined): Promise<T> {
+    const order = this.pool.order();
+    if (order.length === 0) throw new Error("steem rpc: no Steem RPC nodes configured");
+    let last: Error | undefined;
+    for (const node of order) {
+      try {
+        const result = await this.callNode<T>(node, method, params);
+        const problem = check?.(result);
+        if (problem) throw new Error(problem);
+        this.pool.ok(node);
+        return result;
+      } catch (err) {
+        this.pool.fail(node);
+        const e = err instanceof Error ? err : new Error(String(err));
+        last = order.length > 1 ? new Error(`${node}: ${e.message}`) : e;
+      }
+    }
+    if (order.length > 1) throw new Error(`all ${order.length} Steem nodes failed, last: ${last?.message}`);
+    throw last as Error;
+  }
+
+  private async callNode<T>(node: string, method: string, params: unknown[]): Promise<T> {
     const id = this.nextId++;
-    const resp = await fetch(this.url, {
+    const resp = await fetch(node, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", method, params, id }),
+      signal: AbortSignal.timeout(15_000),
     });
-    if (!resp.ok) {
-      throw new Error(`steem rpc ${method}: HTTP ${resp.status}`);
+    const text = await resp.text();
+    let body: { result?: T; error?: { code: number; message: string } };
+    try {
+      body = JSON.parse(text);
+    } catch {
+      if (text.trimStart().startsWith("<")) {
+        throw new Error(
+          `steem rpc ${method}: HTML page instead of JSON (HTTP ${resp.status}): the node is rate-limiting, blocking or down`,
+        );
+      }
+      throw new Error(`steem rpc ${method}: invalid response (HTTP ${resp.status})`);
     }
-    const body = (await resp.json()) as { result?: T; error?: { code: number; message: string } };
-    if (body.error) {
+    if (body?.error) {
       throw new Error(`steem rpc ${method}: ${body.error.message} (code ${body.error.code})`);
+    }
+    if (!resp.ok || typeof body !== "object" || body === null) {
+      throw new Error(`steem rpc ${method}: HTTP ${resp.status}`);
     }
     return body.result as T;
   }
@@ -92,24 +139,21 @@ export class SteemClient {
    * irreversible blocks, so attested facts can never be undone by a Steem
    * fork. */
   async lastIrreversibleBlock(): Promise<number> {
-    const dgp = await this.call<{ last_irreversible_block_num: number }>(
+    const dgp = await this.call<{ last_irreversible_block_num: number } | null>(
       "condenser_api.get_dynamic_global_properties",
       [],
+      (d) => (d?.last_irreversible_block_num ? undefined : "steem rpc: zero last irreversible block"),
     );
-    if (!dgp.last_irreversible_block_num) {
-      throw new Error("steem rpc: zero last irreversible block");
-    }
-    return dgp.last_irreversible_block_num;
+    return dgp!.last_irreversible_block_num;
   }
 
   /** The ID of Steem block num (its first 8 hex chars are the block number),
    * used to verify the chain's Steem anchor. */
   async blockId(num: number): Promise<string> {
-    const block = await this.call<{ block_id?: string } | null>("condenser_api.get_block", [num]);
-    if (!block || !block.block_id) {
-      throw new Error(`steem rpc returned no data for block ${num}`);
-    }
-    return block.block_id;
+    const block = await this.call<{ block_id?: string } | null>("condenser_api.get_block", [num], (b) =>
+      b?.block_id ? undefined : `steem rpc returned no data for block ${num}`,
+    );
+    return block!.block_id as string;
   }
 
   /** Returns blocks from..to inclusive, fetched sequentially. A null result
@@ -122,11 +166,17 @@ export class SteemClient {
     }
     const blocks: NumberedBlock[] = [];
     for (let num = from; num <= to; num++) {
-      const block = await this.call<SteemBlock | null>("condenser_api.get_block", [num]);
-      if (!block) {
-        throw new Error(`steem rpc returned no data for irreversible block ${num}`);
+      // A node that hasn't served the block yet (null) is skipped for the
+      // next one; only when no node has it does the cycle abort.
+      let block: SteemBlock | null;
+      try {
+        block = await this.call<SteemBlock | null>("condenser_api.get_block", [num], (b) =>
+          b ? undefined : `steem rpc returned no data for irreversible block ${num}`,
+        );
+      } catch (err) {
+        throw new Error(`fetching steem block ${num}: ${(err as Error).message}`);
       }
-      blocks.push({ num, block });
+      blocks.push({ num, block: block! });
     }
     return blocks;
   }

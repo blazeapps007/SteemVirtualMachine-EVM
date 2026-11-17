@@ -190,6 +190,9 @@ class FakeSteem:
         self.transfers: list[steemtx.Transfer] = []
         self.rejected: list[str] = []
         self.starts: list[int] = []  # get_account_history start params, in order
+        # Like every Steem account, svm.bank's history starts with its creation.
+        self.history["svm.bank"] = [{"trx_id": "0" * 39 + "1", "timestamp": "2026-01-01T00:00:00",
+                                     "op": ["account_create", {"creator": "steemit", "new_account_name": "svm.bank"}]}]
 
     def advance(self, blocks: int = 1) -> None:
         self.head += blocks
@@ -198,7 +201,14 @@ class FakeSteem:
     def add_history(self, account: str, trx: str, timestamp: str, op_type: str, body: dict) -> None:
         self.history.setdefault(account, []).append({"trx_id": trx, "timestamp": timestamp, "op": [op_type, body]})
 
-    def call(self, method: str, params: list) -> Any:
+    def call(self, method: str, params: list, check: Any = None) -> Any:
+        result = self._serve(method, params)
+        problem = check(result) if check is not None else None
+        if problem:
+            raise RuntimeError(problem)
+        return result
+
+    def _serve(self, method: str, params: list) -> Any:
         if method == "condenser_api.get_dynamic_global_properties":
             return {"head_block_number": self.head, "head_block_id": f"{self.head:08x}" + "cd" * 16, "time": ts(self.now)}
         if method == "condenser_api.get_accounts":

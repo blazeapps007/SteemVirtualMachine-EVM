@@ -9,7 +9,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { Ballot, encodeMetadata, parseMetadata, type StoredProposal, type Vote } from "./ballot";
-import { broadcast, getAccounts, getDynamicProps, HistoryIndex } from "./chain";
+import { parseNodes } from "../nodePool";
+import { blockLookback, broadcast, getAccounts, getDynamicProps, HistoryIndex } from "./chain";
 import { ApprovalJournal } from "./journal";
 import { defaultPolicyConfig, Policy, rankOf, type Decision, type PolicyConfig, type SVM, type SVMState } from "./policy";
 import * as tx from "./steemTx";
@@ -99,6 +100,10 @@ export class Signer {
   readonly key: Uint8Array;
   readonly pub: string;
   readonly rpc: tx.SteemRpc;
+  /** Round-robin, for the block-scan history fallback. */
+  readonly blocks: tx.SteemRpc;
+  /** History is currently rebuilt from blocks. */
+  fromBlocks = false;
   me = "";
   policy?: Policy;
   hist?: HistoryIndex;
@@ -127,6 +132,7 @@ export class Signer {
     if (cfg.intervalMs <= 0) cfg.intervalMs = 10_000;
     if (cfg.rankDelayMs <= 0) cfg.rankDelayMs = 4_000;
     this.rpc = rpc ?? new tx.RPC(cfg.nodes);
+    this.blocks = rpc ?? new tx.RPC(cfg.nodes, undefined, true);
     this.pub = tx.publicKeyOf(this.key);
   }
 
@@ -185,11 +191,59 @@ export class Signer {
     }
   }
 
+  /** The pass's fallback when no node serves svm.bank's account history:
+   * advances the index by one block-scan batch and reports whether it covers
+   * the head block yet. Until it does, the pass stops without acting,
+   * logging progress instead of an error. */
+  private async historyFromBlocks(bank: string, head: number, nowMs: number, histErr: unknown): Promise<boolean> {
+    const hist = this.hist!;
+    const histMsg = histErr instanceof Error ? histErr.message : String(histErr);
+    let lookback: number;
+    try {
+      lookback = blockLookback(Number(await this.svm.withdrawalTimeoutBlocks()));
+    } catch (err) {
+      throw new Error(`history: ${histMsg} (and reading the SVM withdrawal timeout for a block scan: ${err instanceof Error ? err.message : String(err)})`);
+    }
+    if (!this.fromBlocks) {
+      this.fromBlocks = true;
+      let from = hist.scannedBlock + 1;
+      if (head > lookback && from < head - lookback) from = head - lookback;
+      this.log.info("svm.bank signer: no Steem node serves svm.bank's account history; rebuilding it from blocks",
+        { from_block: from, head, history_err: histMsg });
+    }
+    let ready: boolean;
+    try {
+      ready = await hist.scanBlocks(this.blocks, bank, head, lookback, nowMs);
+    } catch (err) {
+      throw new Error(`history: ${histMsg}; block scan: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      try {
+        hist.save(this.cfg.stateDir);
+      } catch (err) {
+        this.log.error("svm.bank signer: saving history index", { err: String(err) });
+      }
+    }
+    if (!ready) {
+      this.log.info("svm.bank signer: rebuilding history from blocks, not signing until caught up",
+        { scanned_block: hist.scannedBlock, head, remaining: head - hist.scannedBlock });
+    }
+    return ready;
+  }
+
   async pass(): Promise<void> {
     const props = await getDynamicProps(this.rpc);
     const nowMs = tx.parseTime(props.time);
     const bankName = this.cfg.policy.bankAccount;
-    await this.hist!.sync(this.rpc, bankName, props.headBlockNumber, nowMs);
+    try {
+      await this.hist!.sync(this.rpc, bankName, props.headBlockNumber, nowMs);
+      if (this.fromBlocks) {
+        this.fromBlocks = false;
+        this.log.info("svm.bank signer: account history available again", {});
+      }
+    } catch (histErr) {
+      // No node serves the history: rebuild it from blocks.
+      if (!(await this.historyFromBlocks(bankName, props.headBlockNumber, nowMs, histErr))) return;
+    }
     try {
       this.hist!.save(this.cfg.stateDir);
     } catch (err) {
@@ -390,7 +444,8 @@ export function buildSignerConfig(env: NodeJS.ProcessEnv, steemRpc: string, stat
   const cfg = defaultSignerConfig();
   cfg.activeWif = (env.ORACLE_STEEM_ACTIVE_WIF || "").trim();
   cfg.stateDir = stateDir;
-  cfg.nodes = ((env.ORACLE_STEEM_RPCS || "").trim() || steemRpc).split(",").map((n) => n.trim()).filter(Boolean);
+  // steemRpc is already the full node list (ORACLE_STEEM_RPCS, then ORACLE_STEEM_RPC).
+  cfg.nodes = parseNodes(env.ORACLE_STEEM_RPCS, steemRpc);
   const uint = (key: string): number | undefined => {
     const v = (env[key] || "").trim();
     if (!v) return undefined;

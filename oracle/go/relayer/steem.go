@@ -13,6 +13,7 @@ import (
 
 	"cosmossdk.io/math"
 
+	"steemvm/oracle/go/nodepool"
 	steembridgetypes "steemvm/x/oracle/bridge/types"
 )
 
@@ -36,17 +37,28 @@ type Transfer struct {
 // only reads (dynamic global properties + blocks), so a full SDK dependency
 // is deliberately avoided: fewer supply-chain dependencies in a validator
 // binary, and Steem's own timestamp strings are used verbatim.
+//
+// Calls are spread round-robin over every configured node (see
+// oracle/go/nodepool): every read here is the same on any synced node, and
+// spreading them keeps one validator IP under each public node's rate limit.
+// A node that errors, returns HTML or lacks the requested block is benched and
+// the call moves on to the next node.
 type SteemClient struct {
-	url  string
+	pool *nodepool.Pool
 	http *http.Client
 }
 
-func NewSteemClient(rpcURL string) *SteemClient {
+// NewSteemClient returns a client over the given Steem nodes; each argument
+// may be a single URL or a comma-separated list.
+func NewSteemClient(rpcURLs ...string) *SteemClient {
 	return &SteemClient{
-		url:  rpcURL,
+		pool: nodepool.New(nodepool.RoundRobin, rpcURLs...),
 		http: &http.Client{Timeout: 15 * time.Second},
 	}
 }
+
+// Nodes returns the configured Steem nodes.
+func (c *SteemClient) Nodes() []string { return c.pool.Nodes() }
 
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
@@ -67,11 +79,45 @@ type rpcError struct {
 }
 
 func (c *SteemClient) call(method string, params []any, result any) error {
+	return c.callCheck(method, params, result, nil)
+}
+
+// callCheck runs one call, trying each node in pool order until one answers
+// and the answer passes check (nil = any answer). With several nodes the error
+// names the node; with one it is unchanged.
+func (c *SteemClient) callCheck(method string, params []any, result any, check func() error) error {
 	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", Method: method, Params: params, ID: 1})
 	if err != nil {
 		return err
 	}
-	resp, err := c.http.Post(c.url, "application/json", bytes.NewReader(body))
+	order := c.pool.Order()
+	if len(order) == 0 {
+		return fmt.Errorf("steem rpc: no Steem RPC nodes configured")
+	}
+	var lastErr error
+	for _, node := range order {
+		err := c.callNode(node, body, result)
+		if err == nil && check != nil {
+			err = check()
+		}
+		if err == nil {
+			c.pool.OK(node)
+			return nil
+		}
+		c.pool.Fail(node)
+		if len(order) > 1 {
+			err = fmt.Errorf("%s: %w", node, err)
+		}
+		lastErr = err
+	}
+	if len(order) > 1 {
+		return fmt.Errorf("all %d Steem nodes failed, last: %w", len(order), lastErr)
+	}
+	return lastErr
+}
+
+func (c *SteemClient) callNode(node string, body []byte, result any) error {
+	resp, err := c.http.Post(node, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -82,7 +128,10 @@ func (c *SteemClient) call(method string, params []any, result any) error {
 	}
 	var rpcResp rpcResponse
 	if err := json.Unmarshal(raw, &rpcResp); err != nil {
-		return fmt.Errorf("steem rpc: invalid response: %w", err)
+		if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '<' {
+			return fmt.Errorf("steem rpc: invalid response: HTML page instead of JSON (HTTP %d): the node is rate-limiting, blocking or down", resp.StatusCode)
+		}
+		return fmt.Errorf("steem rpc: invalid response (HTTP %d): %w", resp.StatusCode, err)
 	}
 	if rpcResp.Error != nil {
 		return fmt.Errorf("steem rpc: %s (code %d)", rpcResp.Error.Message, rpcResp.Error.Code)
@@ -125,11 +174,14 @@ func (c *SteemClient) LastIrreversibleBlock() (uint64, error) {
 	var dgp struct {
 		LastIrreversibleBlockNum uint64 `json:"last_irreversible_block_num"`
 	}
-	if err := c.call("condenser_api.get_dynamic_global_properties", []any{}, &dgp); err != nil {
+	err := c.callCheck("condenser_api.get_dynamic_global_properties", []any{}, &dgp, func() error {
+		if dgp.LastIrreversibleBlockNum == 0 {
+			return fmt.Errorf("steem rpc: zero last irreversible block")
+		}
+		return nil
+	})
+	if err != nil {
 		return 0, err
-	}
-	if dgp.LastIrreversibleBlockNum == 0 {
-		return 0, fmt.Errorf("steem rpc: zero last irreversible block")
 	}
 	return dgp.LastIrreversibleBlockNum, nil
 }
@@ -140,11 +192,14 @@ func (c *SteemClient) BlockID(num uint64) (string, error) {
 	var block *struct {
 		BlockID string `json:"block_id"`
 	}
-	if err := c.call("condenser_api.get_block", []any{num}, &block); err != nil {
+	err := c.callCheck("condenser_api.get_block", []any{num}, &block, func() error {
+		if block == nil || block.BlockID == "" {
+			return fmt.Errorf("steem rpc returned no data for block %d", num)
+		}
+		return nil
+	})
+	if err != nil {
 		return "", err
-	}
-	if block == nil || block.BlockID == "" {
-		return "", fmt.Errorf("steem rpc returned no data for block %d", num)
 	}
 	return block.BlockID, nil
 }
@@ -161,11 +216,16 @@ func (c *SteemClient) FetchBlocks(from, to uint64) ([]NumberedBlock, error) {
 	blocks := make([]NumberedBlock, 0, to-from+1)
 	for num := from; num <= to; num++ {
 		var block *steemBlock
-		if err := c.call("condenser_api.get_block", []any{num}, &block); err != nil {
+		// A node that hasn't served the block yet (null) is skipped for the
+		// next one; only when no node has it does the cycle abort.
+		err := c.callCheck("condenser_api.get_block", []any{num}, &block, func() error {
+			if block == nil {
+				return fmt.Errorf("steem rpc returned no data for irreversible block %d", num)
+			}
+			return nil
+		})
+		if err != nil {
 			return nil, fmt.Errorf("fetching steem block %d: %w", num, err)
-		}
-		if block == nil {
-			return nil, fmt.Errorf("steem rpc returned no data for irreversible block %d", num)
 		}
 		blocks = append(blocks, NumberedBlock{Num: num, Block: block})
 	}

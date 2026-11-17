@@ -218,14 +218,17 @@ def test_history_apply_and_sync_paging():
     node.add_history(BANK, "own", ts(NOW), "account_update", {"account": BANK, "owner": bank_authority().to_json()})
     h = HistoryIndex()
     h.sync(node, BANK, 110000000, NOW)
-    assert h.next_seq == 252 and len(h.paid) == 250 and h.paid["249"] == "trx249" and not h.is_paid(999)
+    assert h.next_seq == 253 and len(h.paid) == 250 and h.paid["249"] == "trx249" and not h.is_paid(999)
     assert h.last_owner_change == ts(NOW)
     node.add_history(BANK, "trx250", ts(NOW), "custom_json", _link_body(250))
     node.starts = []
     h.sync(node, BANK, 110000001, NOW)
-    assert h.next_seq == 253 and h.is_paid(250)
+    assert h.next_seq == 254 and h.is_paid(250)
     # Steady state: one request, keyed by the head block (no stale cached window).
     assert node.starts == [110000001]
+    # An empty answer means the node has no account history (a real account's
+    # history always holds its creation): an error, never "nothing paid".
     empty = HistoryIndex()
-    empty.sync(node, "nobody", 110000001, NOW)
+    with pytest.raises(Exception, match="empty account history"):
+        empty.sync(node, "nobody", 110000001, NOW)
     assert empty.next_seq == 0

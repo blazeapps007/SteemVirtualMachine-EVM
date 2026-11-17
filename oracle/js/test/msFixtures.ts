@@ -151,6 +151,12 @@ export class FakeSteem implements tx.SteemRpc {
   rejected: string[] = [];
   starts: number[] = []; // get_account_history start params, in order
 
+  constructor() {
+    // Like every Steem account, svm.bank's history starts with its creation.
+    this.addHistory("svm.bank", "0".repeat(39) + "1", "2026-01-01T00:00:00", "account_create",
+      { creator: "steemit", new_account_name: "svm.bank" });
+  }
+
   advance(blocks = 1): void {
     this.head += blocks;
     this.nowMs += 3000 * blocks;
@@ -161,7 +167,14 @@ export class FakeSteem implements tx.SteemRpc {
     this.history.get(account)!.push({ trx_id: trx, timestamp, op: [type, body] });
   }
 
-  async call(method: string, params: any[]): Promise<any> {
+  async call(method: string, params: any[], check?: tx.AnswerCheck): Promise<any> {
+    const result = await this.serve(method, params);
+    const problem = check?.(result);
+    if (problem) throw new Error(problem);
+    return result;
+  }
+
+  private async serve(method: string, params: any[]): Promise<any> {
     switch (method) {
       case "condenser_api.get_dynamic_global_properties":
         return { head_block_number: this.head, head_block_id: this.head.toString(16).padStart(8, "0") + "cd".repeat(16), time: ts(this.nowMs) };

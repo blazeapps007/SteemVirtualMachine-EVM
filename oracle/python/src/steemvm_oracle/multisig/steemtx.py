@@ -15,12 +15,13 @@ import struct
 from calendar import timegm
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import httpx
 from coincurve import PrivateKey, PublicKey
 from coincurve._libsecp256k1 import ffi
 
+from ..nodepool import ROUND_ROBIN, STICKY, NodePool
 from ._ripemd160 import ripemd160
 
 TIME_LAYOUT = "%Y-%m-%dT%H:%M:%S"
@@ -43,7 +44,11 @@ class UnsupportedOperation(SteemTxError):
 # JSON-RPC
 # --------------------------------------------------------------------------
 
-_TRANSIENT = re.compile(r"(?i)upstream|circuit breaker|timeout|unavailable|too many requests|bad cast")
+# Node-side errors worth trying the next node for. "Bad Cast" and "Internal
+# Error" come from a misbehaving backend behind a load balancer
+# (api.steemit.com) or a node without the API plugin a call needs
+# (api.justyy.com has no account history), not from Steem itself.
+_TRANSIENT = re.compile(r"(?i)upstream|circuit breaker|timeout|unavailable|too many requests|bad cast|internal error")
 
 
 class ChainError(RuntimeError):
@@ -52,35 +57,61 @@ class ChainError(RuntimeError):
 
 
 class RPC:
-    """Calls Steem nodes in order, moving to the next only on transport errors
-    (own node first is best)."""
+    """Calls Steem nodes, own node first, moving to the next one on transport
+    errors, HTML/non-JSON replies, node-side errors and answers that fail the
+    caller's check. A node that fails is benched with a growing cooldown
+    (steemvm_oracle.nodepool), so a rate-limiting node is left alone instead of
+    being hammered. Sticky by default (consecutive reads of svm.bank's history
+    come from one view of the chain); round_robin=True spreads bulk reads whose
+    answer is the same on every node (raw blocks)."""
 
-    def __init__(self, nodes: list[str], timeout: float = 20.0):
-        self.nodes = [n.strip() for n in nodes if n and n.strip()]
+    def __init__(self, nodes: Union[str, list[str]], timeout: float = 20.0, round_robin: bool = False):
+        self.pool = NodePool(ROUND_ROBIN if round_robin else STICKY, nodes)
+        self.nodes = list(self.pool.nodes)
         self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         self._client.close()
 
-    def call(self, method: str, params: list) -> Any:
-        if not self.nodes:
+    def call(self, method: str, params: list, check: Optional[Callable[[Any], Optional[str]]] = None) -> Any:
+        """check, if given, returns an error message for an answer that must
+        not be trusted (the next node is asked), or None."""
+        order = self.pool.order()
+        if not order:
             raise RuntimeError("steemtx: no Steem RPC nodes configured")
         body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         last: Optional[BaseException] = None
-        for node in self.nodes:
+        for node in order:
             try:
-                data = self._client.post(node, json=body).json()
-            except Exception as exc:  # noqa: BLE001 - transport or non-JSON reply: try the next node
-                last = exc
+                resp = self._client.post(node, json=body)
+                try:
+                    data = resp.json()
+                except ValueError:
+                    if resp.text.lstrip().startswith("<"):
+                        raise RuntimeError(f"HTML page instead of JSON (HTTP {resp.status_code}): "
+                                           "the node is rate-limiting, blocking or down") from None
+                    raise RuntimeError(f"invalid response (HTTP {resp.status_code})") from None
+                if not isinstance(data, dict):
+                    raise RuntimeError(f"invalid response (HTTP {resp.status_code})")
+                err = data.get("error")
+                if err is not None:
+                    message = str(err.get("message", "")) if isinstance(err, dict) else str(err)
+                    if not _TRANSIENT.search(message):
+                        self.pool.ok(node)  # the node works; the chain said no
+                        raise ChainError(message)
+                    raise RuntimeError(message)
+                result = data.get("result")
+                problem = check(result) if check is not None else None
+                if problem:
+                    raise RuntimeError(problem)
+            except ChainError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - transport, non-JSON or node-side error: next node
+                self.pool.fail(node)
+                last = RuntimeError(f"{node}: {exc}")
                 continue
-            err = data.get("error") if isinstance(data, dict) else None
-            if err is not None:
-                message = str(err.get("message", "")) if isinstance(err, dict) else str(err)
-                if _TRANSIENT.search(message):
-                    last = RuntimeError(f"{node}: {message}")
-                    continue
-                raise ChainError(message)
-            return data.get("result")
+            self.pool.ok(node)
+            return result
         raise RuntimeError(f"steem rpc: every node failed: {last}")
 
 

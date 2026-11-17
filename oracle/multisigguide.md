@@ -380,7 +380,17 @@ Two quirks seen on public nodes:
 - `get_account_history` accepts a **limit of at most 100**.
 - Requesting the newest history with a start of `-1` can return a stale cached answer. Pass the current `head_block_number` as the start instead: the node clamps it to the newest entry, and the request changes every block, so it can't be served from a cache.
 
-Use several nodes, ideally including your own. `https://api.steemit.com` and `https://api.justyy.com` both work as public fallbacks.
+Use several nodes, ideally including your own. `https://api.steemit.com`, `https://api.steememory.com`, `https://api.moecki.online` and `https://api.steemitdev.com` all serve account history. Some public nodes don't, and they fail in different ways: `https://api.justyy.com` answers `get_account_history` with `Internal Error`, and `https://steemd.steemworld.org` answers it with an empty list.
+
+How the clients use the node list (`ORACLE_STEEM_RPCS`, then `ORACLE_STEEM_RPC`):
+
+- **Failover and cooldown.** A node that fails a call is benched, and the call moves on to the next node. A failed call is a transport error, an HTML or non-JSON reply (rate limiting, a block page), a node-side error such as `Internal Error`, `Bad Cast`, `upstream`, `timeout` or `too many requests`, or an answer that fails a check. The bench lasts 30 s and doubles with each consecutive failure, up to 10 min. A success clears it. Benched nodes are still tried last. Any other JSON-RPC error is a rejection by the chain itself and is never retried.
+- **Order.** The signer tries nodes in the configured order, so consecutive history reads come from one view of the chain. Bulk reads that are identical on every node, such as raw blocks, go round-robin, so no single node sees enough traffic from one IP to rate-limit it.
+- **Empty history is an error.** Every account's history starts with its creation, so an empty `get_account_history` answer for svm.bank means the node has no history. It is never read as "nothing paid".
+- **Block-scan fallback.** When no node serves svm.bank's history, rebuild the same index from raw blocks with `condenser_api.get_block`. Apply every operation whose JSON body contains the quoted account name `"svm.bank"`, using the block's `timestamp` and the transaction's ID. Persist `scanned_block`, the highest block whose svm.bank operations are all applied. A successful history sync sets it to `head_block_number − 20`.
+  - Scan from `scanned_block + 1`. A fresh or stale index starts at `head_block_number − lookback` instead. The lookback is `(max(withdrawal_timeout_blocks × 10 s, 96 h) + 1 h) / 3 s`, which covers every payout, executed transaction and owner change the policy can still depend on.
+  - Read at most 200 blocks per pass, 4 at a time, and stop at the first block no node has yet.
+  - Until `scanned_block` reaches the head block, the pass votes, proposes and executes nothing.
 
 ### 4.2 Binary serialization
 
@@ -1407,7 +1417,7 @@ The signer runs inside each validator's oracle client, whichever of Go, Python o
 ```sh
 ORACLE_MULTISIG_ENABLED=true
 ORACLE_STEEM_ACTIVE_WIF=5K…        # your validator account's ACTIVE key: the only Steem secret
-ORACLE_STEEM_RPCS=https://your-own-steem-node.example,https://api.steemit.com,https://api.justyy.com
+ORACLE_STEEM_RPCS=https://your-own-steem-node.example,https://api.steemit.com,https://api.steememory.com,https://api.moecki.online
 # ORACLE_MULTISIG_DRY_RUN=true     # log every decision, publish nothing (start here)
 ```
 

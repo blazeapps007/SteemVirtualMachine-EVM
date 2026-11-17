@@ -32,7 +32,7 @@ The svm.bank multisig signer (opt-in; runs in its own thread beside the relay):
 
     ORACLE_MULTISIG_ENABLED              "true" to run the signer (default false)
     ORACLE_STEEM_ACTIVE_WIF              the validator's Steem ACTIVE key -- the only Steem secret
-    ORACLE_STEEM_RPCS                    comma-separated Steem nodes, own node first (default ORACLE_STEEM_RPC)
+    ORACLE_STEEM_RPCS                    comma-separated Steem nodes, own node first (ORACLE_STEEM_RPC is added last)
     ORACLE_MULTISIG_INTERVAL             pass interval (default 10s)
     ORACLE_MULTISIG_THRESHOLD_PERCENT    svm.bank threshold, percent of 10000 (default 75)
     ORACLE_MULTISIG_REWEIGHT_TOLERANCE   weight points before a reweight is proposed (default 50)
@@ -57,6 +57,7 @@ from .config import Config, parse_duration_seconds
 from .keys import Keypair, from_mnemonic, from_private_key_hex
 from .multisig.signer import Signer, SignerConfigError, build_signer_config
 from .multisig.svm import RestSVM
+from .nodepool import parse as parse_nodes
 from .pricefeeder import CompositePriceSource
 from .pricesources.cmc import CMCClient
 from .pricesources.coingecko import CoinGeckoClient
@@ -76,6 +77,9 @@ def build_config(env: dict) -> tuple[str, str, str, Config]:
     steem_rpc = _env(env, "ORACLE_STEEM_RPC")
     if not steem_rpc:
         raise SystemExit("ORACLE_STEEM_RPC is required (the Steem RPC to scan)")
+    # All Steem nodes: ORACLE_STEEM_RPCS (own node first) plus ORACLE_STEEM_RPC;
+    # every Steem read is spread over them and a failing node is skipped.
+    steem_rpc = ",".join(parse_nodes(env.get("ORACLE_STEEM_RPCS", ""), steem_rpc))
     node_rest = _env(env, "ORACLE_NODE_REST", "http://steemvm:1317")
     state_dir = _env(env, "ORACLE_STATE_DIR", "/oracle-data")
 

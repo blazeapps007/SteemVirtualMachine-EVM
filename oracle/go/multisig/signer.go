@@ -56,6 +56,8 @@ type Signer struct {
 	cfg        SignerConfig
 	log        Logger
 	rpc        *steemtx.RPC
+	blocks     *steemtx.RPC // round-robin, for the block-scan history fallback
+	fromBlocks bool         // history is currently rebuilt from blocks
 	key        *secp256k1.PrivateKey
 	pub        string
 	svm        SVM
@@ -97,7 +99,7 @@ func NewSigner(cfg SignerConfig, svm SVM, log Logger) (*Signer, error) {
 		cfg.RankDelay = 4 * time.Second
 	}
 	return &Signer{
-		cfg: cfg, log: log, rpc: steemtx.NewRPC(cfg.Nodes...), key: key,
+		cfg: cfg, log: log, rpc: steemtx.NewRPC(cfg.Nodes...), blocks: steemtx.NewRoundRobinRPC(cfg.Nodes...), key: key,
 		pub: steemtx.EncodePublicKey(key.PubKey()), svm: svm,
 		firstSeen: map[string]time.Time{}, readySince: map[string]time.Time{}, logged: map[string]Decision{},
 	}, nil
@@ -193,7 +195,13 @@ func (s *Signer) Pass(ctx context.Context) error {
 	}
 	bank := s.cfg.Policy.BankAccount
 	if err := s.hist.Sync(ctx, s.rpc, bank, props.HeadBlockNumber, now); err != nil {
-		return fmt.Errorf("history: %w", err)
+		ready, ferr := s.historyFromBlocks(ctx, bank, props.HeadBlockNumber, now, err)
+		if ferr != nil || !ready {
+			return ferr
+		}
+	} else if s.fromBlocks {
+		s.fromBlocks = false
+		s.log.Info("svm.bank signer: account history available again")
 	}
 	if err := s.hist.Save(s.cfg.StateDir); err != nil {
 		s.log.Error("svm.bank signer: saving history index", "err", err)
@@ -464,4 +472,37 @@ func (s *Signer) pruneLocal(view *View, now time.Time) {
 		s.firstSeen = map[string]time.Time{}
 	}
 	s.journal.Prune(now)
+}
+
+// historyFromBlocks is the pass's fallback when no node serves svm.bank's
+// account history (histErr): it advances the index by one block-scan batch
+// and reports whether the index covers the head block yet. Until it does, the
+// pass stops without acting, logging progress instead of an error.
+func (s *Signer) historyFromBlocks(ctx context.Context, bank string, head uint32, now time.Time, histErr error) (bool, error) {
+	timeout, err := s.svm.WithdrawalTimeoutBlocks(ctx)
+	if err != nil {
+		return false, fmt.Errorf("history: %v (and reading the SVM withdrawal timeout for a block scan: %w)", histErr, err)
+	}
+	lookback := BlockLookback(timeout)
+	if !s.fromBlocks {
+		s.fromBlocks = true
+		from := s.hist.ScannedBlock + 1
+		if head > lookback && from < head-lookback {
+			from = head - lookback
+		}
+		s.log.Info("svm.bank signer: no Steem node serves svm.bank's account history; rebuilding it from blocks",
+			"from_block", from, "head", head, "history_err", histErr.Error())
+	}
+	ready, err := s.hist.ScanBlocks(ctx, s.blocks, bank, head, lookback, now)
+	if serr := s.hist.Save(s.cfg.StateDir); serr != nil {
+		s.log.Error("svm.bank signer: saving history index", "err", serr)
+	}
+	if err != nil {
+		return false, fmt.Errorf("history: %v; block scan: %w", histErr, err)
+	}
+	if !ready {
+		s.log.Info("svm.bank signer: rebuilding history from blocks, not signing until caught up",
+			"scanned_block", s.hist.ScannedBlock, "head", head, "remaining", head-s.hist.ScannedBlock)
+	}
+	return ready, nil
 }

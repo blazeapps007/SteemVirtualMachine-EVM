@@ -12,6 +12,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"steemvm/oracle/go/multisig"
+	"steemvm/oracle/go/nodepool"
 	"steemvm/oracle/go/relayer"
 	"steemvm/oracle/go/steemtx"
 )
@@ -25,7 +26,7 @@ import (
 //
 //	ORACLE_MULTISIG_ENABLED              "true" to run the signer (default false)
 //	ORACLE_STEEM_ACTIVE_WIF              the validator's Steem ACTIVE key — the only Steem secret
-//	ORACLE_STEEM_RPCS                    comma-separated Steem nodes, own node first (default ORACLE_STEEM_RPC)
+//	ORACLE_STEEM_RPCS                    comma-separated Steem nodes, own node first (ORACLE_STEEM_RPC is added last)
 //	ORACLE_MULTISIG_INTERVAL             pass interval (default 10s)
 //	ORACLE_MULTISIG_THRESHOLD_PERCENT    svm.bank threshold, percent of 10000 (default 75)
 //	ORACLE_MULTISIG_REWEIGHT_TOLERANCE   weight points before a reweight is proposed (default 50)
@@ -44,11 +45,9 @@ func startMultisig(ctx context.Context, logger log.Logger, clientCtx client.Cont
 		ActiveWIF: strings.TrimSpace(os.Getenv("ORACLE_STEEM_ACTIVE_WIF")),
 		StateDir:  stateDir,
 	}
-	for _, n := range strings.Split(envOr("ORACLE_STEEM_RPCS", steemRPC), ",") {
-		if n = strings.TrimSpace(n); n != "" {
-			cfg.Nodes = append(cfg.Nodes, n)
-		}
-	}
+	// steemRPC is already the full node list (ORACLE_STEEM_RPCS, then
+	// ORACLE_STEEM_RPC): the signer tries it in that order and fails over.
+	cfg.Nodes = nodepool.Parse(steemRPC)
 	if d, ok, err := envDuration("ORACLE_MULTISIG_INTERVAL"); err != nil {
 		return err
 	} else if ok {

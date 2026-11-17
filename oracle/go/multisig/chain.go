@@ -1,14 +1,17 @@
 package multisig
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"steemvm/oracle/go/steemtx"
@@ -119,11 +122,17 @@ func PayoutOf(tx steemtx.Transaction, bank string) (steemtx.Transfer, uint64, bo
 // history: which withdrawals were already paid, which transaction IDs were
 // executed, and when the owner authority last changed. It is a cache of public
 // chain data — deleting the file just triggers a full rescan.
+//
+// It is filled from get_account_history when a node serves it, and otherwise
+// rebuilt from raw blocks (ScanBlocks). ScannedBlock records how far it is
+// known complete: every svm.bank operation in a Steem block at or below it
+// has been applied.
 type HistoryIndex struct {
 	NextSeq         uint64            `json:"next_seq"`
 	Paid            map[string]string `json:"paid"`     // withdrawal id -> payout trx_id
 	Executed        map[string]string `json:"executed"` // trx_id -> timestamp (recent only)
 	LastOwnerChange string            `json:"last_owner_change"`
+	ScannedBlock    uint32            `json:"scanned_block,omitempty"`
 }
 
 const historyFile = "svm_bank_history.json"
@@ -190,7 +199,17 @@ type historyItem struct {
 // start >= limit and clamps a start beyond the newest entry to the newest.
 func historyPage(ctx context.Context, rpc *steemtx.RPC, account string, start uint64) ([]historyItem, error) {
 	var page [][2]json.RawMessage
-	if err := rpc.Call(ctx, "condenser_api.get_account_history", []any{account, start, 100}, &page); err != nil {
+	// Every account's history holds at least its creation, so an empty page
+	// means the node has no account history (e.g. steemd.steemworld.org
+	// answers [] instead of an error). Trusting it would hide past payouts, so
+	// ask the next node.
+	err := rpc.CallCheck(ctx, "condenser_api.get_account_history", []any{account, start, 100}, &page, func() error {
+		if len(page) == 0 {
+			return errors.New("empty account history (node has no account_history API)")
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	out := make([]historyItem, 0, len(page))
@@ -251,7 +270,125 @@ func (h *HistoryIndex) Sync(ctx context.Context, rpc *steemtx.RPC, account strin
 		h.applyPage(account, newest)
 	}
 	h.pruneExecuted(now)
+	// The history is complete up to the node's head; leave a minute of margin
+	// for a node a few blocks behind, so a later block scan re-reads (and
+	// idempotently re-applies) those blocks rather than skipping them.
+	if headBlock > historyHeadMargin {
+		h.ScannedBlock = max(h.ScannedBlock, headBlock-historyHeadMargin)
+	}
 	return nil
+}
+
+const historyHeadMargin = 20
+
+// BlockScanBatch is the most Steem blocks one ScanBlocks call reads, and
+// blockScanWorkers how many it fetches at once (spread round-robin over the
+// nodes, so each node sees only a share of them).
+const (
+	BlockScanBatch   = 200
+	blockScanWorkers = 4
+)
+
+// BlockLookback is how far back (in Steem blocks, 3s each) a fresh index
+// rebuilt from blocks starts: far enough to see the payout of any withdrawal
+// still awaiting one (created at most withdrawalTimeout SVM blocks ago, counted
+// at a conservative 10s per SVM block), every executed transaction the index
+// keeps (keepExecuted) and the owner cooldown, plus an hour.
+func BlockLookback(withdrawalTimeoutSVMBlocks uint64) uint32 {
+	d := max(time.Duration(withdrawalTimeoutSVMBlocks)*10*time.Second, keepExecuted) + time.Hour
+	return uint32(d / (3 * time.Second))
+}
+
+// ScanBlocks is the fallback for when no node serves svm.bank's account
+// history (multisigguide.md §4.1): it reads raw blocks from ScannedBlock+1
+// (or from headBlock-lookback when the index is fresh or older than that),
+// at most BlockScanBatch per call, and applies every operation that names
+// account — the same entries get_account_history would list. It reports
+// whether the index now covers headBlock; until it does, the signer must not
+// act on the index.
+func (h *HistoryIndex) ScanBlocks(ctx context.Context, rpc *steemtx.RPC, account string, headBlock, lookback uint32, now time.Time) (bool, error) {
+	from := h.ScannedBlock + 1
+	if headBlock > lookback && from < headBlock-lookback {
+		from = headBlock - lookback
+	}
+	if from > headBlock {
+		return true, nil
+	}
+	to := min(headBlock, from+BlockScanBatch-1)
+	blocks, err := fetchBlockRange(ctx, rpc, from, to)
+	for i, b := range blocks {
+		h.applyBlock(account, b)
+		h.ScannedBlock = from + uint32(i)
+	}
+	h.pruneExecuted(now)
+	if err != nil && len(blocks) == 0 {
+		return false, err
+	}
+	return h.ScannedBlock >= headBlock, nil
+}
+
+type rawBlock struct {
+	Timestamp      string   `json:"timestamp"`
+	TransactionIDs []string `json:"transaction_ids"`
+	Transactions   []struct {
+		TransactionID string               `json:"transaction_id"`
+		Operations    [][2]json.RawMessage `json:"operations"`
+	} `json:"transactions"`
+}
+
+// fetchBlockRange fetches blocks from..to concurrently and returns the
+// contiguous prefix that arrived (a gap stops it; the rest is fetched next
+// time), with the first error if the prefix is short.
+func fetchBlockRange(ctx context.Context, rpc *steemtx.RPC, from, to uint32) ([]*rawBlock, error) {
+	n := int(to - from + 1)
+	blocks := make([]*rawBlock, n)
+	errs := make([]error, n)
+	sem := make(chan struct{}, blockScanWorkers)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			num := from + uint32(i)
+			var b *rawBlock
+			errs[i] = rpc.CallCheck(ctx, "condenser_api.get_block", []any{num}, &b, func() error {
+				if b == nil {
+					return fmt.Errorf("node has no block %d", num)
+				}
+				return nil
+			})
+			blocks[i] = b
+		}(i)
+	}
+	wg.Wait()
+	for i := range blocks {
+		if errs[i] != nil {
+			return blocks[:i], errs[i]
+		}
+	}
+	return blocks, nil
+}
+
+// applyBlock applies every operation in b whose body names account (a quoted
+// "svm.bank" anywhere: transfer from/to, custom_json auths, account_update).
+// A false match is harmless: apply only records payout links signed by
+// account and owner changes of account, and an extra trx_id in Executed never
+// matches a proposal that wasn't executed.
+func (h *HistoryIndex) applyBlock(account string, b *rawBlock) {
+	needle := []byte(strconv.Quote(account))
+	for i, tx := range b.Transactions {
+		id := tx.TransactionID
+		if id == "" && i < len(b.TransactionIDs) {
+			id = b.TransactionIDs[i]
+		}
+		for _, op := range tx.Operations {
+			if bytes.Contains(op[1], needle) {
+				h.apply(account, historyEntry{TrxID: id, Timestamp: b.Timestamp, Op: op})
+			}
+		}
+	}
 }
 
 func (h *HistoryIndex) apply(account string, e historyEntry) {
