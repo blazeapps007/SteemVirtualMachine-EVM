@@ -250,6 +250,7 @@ Never hand-edit `*.pb.go` — regenerate instead.
 | `install.sh`, `new-validator.sh` | One-command and interactive validator setup |
 | `reset.sh`, `update.sh`, `update_peers.sh` | Resync, update and peer-refresh helpers for running nodes |
 | `fix-oracle.sh` | Points the oracle at every working Steem node, pulls the fixed image and restarts it |
+| `unjail.sh` | Restarts node + oracle, fixes the oracle, then unjails the validator safely |
 | `launch-genesis.sh` | Creates a new chain's genesis anchored to Steem (chain launches only) |
 
 CI runs vet and unit tests (`go-unit.yml`, with a separate non-blocking

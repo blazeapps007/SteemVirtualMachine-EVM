@@ -991,6 +991,18 @@ the halt as you can manage.
   oracle spreads its reads round-robin over every node, skips and benches one
   that fails, and resumes from its saved cursor, so missed deposits and payouts
   get attested.
+- **Validator jailed with `oracle_slash` / `bridge_duty_floor` or `price_duty_floor`**:
+  the oracle missed every bridge event (or every price period) in an x/oracle
+  slash window (14,400 blocks). Fix the oracle and unjail in one go:
+
+  ```sh
+  git pull && ./unjail.sh
+  ```
+
+  It restarts the node and waits for it to sync, runs `fix-oracle.sh` (and stops
+  if the oracle is not healthy), finds your validator from the node's consensus
+  key and your key in the keyring, checks the fee is spendable, waits if the
+  slash window is about to close, and sends and confirms the unjail.
 
 **Identity / validator creation**
 
