@@ -30,6 +30,10 @@ Instructions/config.toml
 .env
 # fix-oracle.sh backups of oracle/.env (they hold the same keys).
 .env.bak.*
+# unjail.sh runtime files (cron log, attempt state, lock)
+unjail.log
+.unjail-state
+.unjail.lock
 
 # AI assistant / tooling artifacts
 .claude/

@@ -993,16 +993,46 @@ the halt as you can manage.
   get attested.
 - **Validator jailed with `oracle_slash` / `bridge_duty_floor` or `price_duty_floor`**:
   the oracle missed every bridge event (or every price period) in an x/oracle
-  slash window (14,400 blocks). Fix the oracle and unjail in one go:
+  slash window (14,400 blocks). Fix the oracle and unjail in one go, and let
+  cron keep it that way:
 
   ```sh
-  git pull && ./unjail.sh
+  git pull
+  ./unjail.sh --check          # why it is jailed, and when an unjail can succeed
+  ./unjail.sh                  # fix + unjail now if possible
+  ./unjail.sh --install-cron   # every 10 min: unjail as soon as possible, keep the oracle caught up
   ```
 
-  It restarts the node and waits for it to sync, runs `fix-oracle.sh` (and stops
-  if the oracle is not healthy), finds your validator from the node's consensus
-  key and your key in the keyring, checks the fee is spendable, waits if the
-  slash window is about to close, and sends and confirms the unjail.
+  It reads the jail type from the chain and only sends an unjail that can
+  succeed, so no fee is wasted:
+
+  | Jail type | What it does |
+  |---|---|
+  | x/oracle (`bridge_duty_floor`, `price_duty_floor`, `below_min_valid`) | No lock time: unjails now, after the checks below |
+  | Downtime (missed blocks) | Waits until `jailed_until` (10 min after the jail); the cron unjails then |
+  | Self-delegation below `min_self_delegation` | Stops: delegate more first |
+  | Tombstoned (double-sign) | Stops: permanent, no unjail is possible. Create a new validator with a new consensus key |
+
+  Before unjailing it checks four things:
+
+  - **Node:** synced and committing blocks. A node that has just restarted
+    answers "validator still jailed" until its next block. If yours still does,
+    the script sends the unjail through `https://rpc.steemvmscan.com`.
+  - **Oracle:** healthy, configured and signing for this validator. The script
+    runs `fix-oracle.sh` and requires the validator key and the price API key in
+    `oracle/.env`.
+  - **Oracle scan cursor:** near the Steem head. A jailed validator's oracle
+    stops scanning, so after an unjail it would resume hours or days behind,
+    attest no new bridge event in time, and be jailed again at the next window.
+    The script moves the cursor up to the head and restarts the oracle. It never
+    moves past a bridge event that is still waiting for attestations.
+  - **Slash window and fee:** the x/oracle slash window must not be about to
+    close, and the fee must be spendable. The unjail costs about 0.0002 STEEM.
+
+  While the validator is bonded, the cron also catches up an oracle that falls
+  more than an hour behind Steem, before that turns into a jail. Its log is
+  `unjail.log`; remove the cron with `./unjail.sh --remove-cron`. The cron can
+  sign only with the `test` keyring that `new-validator.sh` sets up.
 
 **Identity / validator creation**
 
@@ -1042,8 +1072,9 @@ the halt as you can manage.
 - **`create-validator` fails with insufficient funds**: your balance must
   cover `amount` + gas. Bridge in more (step 7).
 - **Validator jailed**: your node fell out of sync or was offline too long, or
-  your oracle client missed too many price votes or attestations. Get both
-  running again, then unjail:
+  your oracle client missed too many price votes or attestations. Run
+  `./unjail.sh --check` to see which and when it can be unjailed, then
+  `./unjail.sh` (see the x/oracle entry above). The manual command is:
   `docker exec -it steemvm-node /root/go/bin/steemvmd tx slashing unjail --from blazed007 --keyring-backend test --home /root/.steemvm --chain-id SteemVM-Manaslu-81630 --gas auto --gas-adjustment 1.5 --gas-prices 1000000000asteem -y`
 
 **Faster resync via state-sync**
