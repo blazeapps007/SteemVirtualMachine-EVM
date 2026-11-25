@@ -993,7 +993,7 @@ the halt as you can manage.
   get attested.
 - **Validator jailed with `oracle_slash` / `bridge_duty_floor` or `price_duty_floor`**:
   the oracle missed every bridge event (or every price period) in an x/oracle
-  slash window (14,400 blocks). Fix the oracle and unjail in one go, and let
+  slash window (100,800 blocks, ~7 days). Fix the oracle and unjail in one go, and let
   cron keep it that way:
 
   ```sh
